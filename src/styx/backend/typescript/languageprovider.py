@@ -1,6 +1,10 @@
 import pathlib
 import re
+import typing
 
+from styx.backend import CompiledFile
+from styx.backend.generic.documentation import docs_to_docstring
+from styx.backend.generic.gen.interface import compile_interface
 from styx.backend.generic.gen.lookup import LookupParam
 from styx.backend.generic.languageprovider import (
     TYPE_PYLITERAL,
@@ -11,9 +15,9 @@ from styx.backend.generic.languageprovider import (
     LanguageProvider,
     LanguageSymbolProvider,
     LanguageTypeProvider,
-    MStr,
+    MStr, LanguageCompileProvider,
 )
-from styx.backend.generic.linebuffer import LineBuffer, blank_after, blank_before, comment, expand, indent
+from styx.backend.generic.linebuffer import LineBuffer, blank_after, blank_before, comment, expand, indent, collapse
 from styx.backend.generic.model import GenericArg, GenericFunc, GenericModule, GenericStructure
 from styx.backend.generic.scope import Scope
 from styx.backend.generic.string_case import pascal_case, screaming_snake_case, snake_case
@@ -174,9 +178,11 @@ class TypeScriptLanguageIrProvider(LanguageIrProvider):
     def build_params_and_execute(
         self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct], execution_symbol: ExprType
     ) -> LineBuffer:
-        args = [lookup.expr_param_symbol_alias[elem.base.id_] for elem in struct.body.iter_params()]
+        param_list = list(struct.body.iter_params())
+        param_list.sort(key=lambda a: a.default_value is not None)
+        args = [lookup.expr_param_symbol_alias[elem.base.id_] for elem in param_list]
         return [
-            f"const params = {lookup.expr_func_build_params[struct.base.id_]}({{ {', '.join([a + ': ' + a for a in args])} }})",
+            f"const params = {lookup.expr_func_build_params[struct.base.id_]}({', '.join([a for a in args])})",
             self.return_statement(f"{lookup.expr_func_execute[struct.base.id_]}(params, {execution_symbol})"),
         ]
 
@@ -384,9 +390,8 @@ class TypeScriptLanguageExprProvider(LanguageExprProvider):
 class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
     def wrapper_module_imports(self) -> LineBuffer:
         return [
-            "import * as path from 'path';",
             "import { Runner, Execution, Metadata, InputPathType, OutputPathType } from './types';",
-            "import { getGlobalRunner } from './runner';",
+            "import { getGlobalRunner } from './globalState';",
         ]
 
     def struct_collect_outputs(self, struct: ir.Param[ir.Param.Struct], struct_symbol: str) -> str:
@@ -405,7 +410,7 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
         return "runner"
 
     def runner_declare(self, runner_symbol: str) -> LineBuffer:
-        return [f"const {runner_symbol} = {runner_symbol} || getGlobalRunner();"]
+        return [f"{runner_symbol} = {runner_symbol} || getGlobalRunner();"]
 
     def symbol_execution(self) -> str:
         return "execution"
@@ -429,7 +434,7 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
     ) -> LineBuffer:
         so = "" if stdout_output_symbol is None else f", handleStdout: s => ret.{stdout_output_symbol}.push(s)"
         se = "" if stderr_output_symbol is None else f", handleStderr: s => ret.{stderr_output_symbol}.push(s)"
-        return [f"await {execution_symbol}.run({cargs_symbol}{so}{se});"]
+        return [f"{execution_symbol}.run({cargs_symbol}{so}{se});"]
 
     def generate_arg_declaration(self, arg: GenericArg) -> str:
         type_annotation = f": {arg.type}" if arg.type is not None else ""
@@ -668,7 +673,7 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
             _type = lookup.expr_param_type[p.base.id_]
             if p.nullable:
                 _type = f"{_type} | undefined"
-            param_items.append((self.expr_str(p.base.name), _type))
+            param_items.append((self.expr_str(p.base.name) + ("?" if p.nullable else ""), _type))
 
         dict_symbol = lookup.expr_params_dict_type[struct.base.id_]
 
@@ -685,12 +690,59 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
         return f"({name}[{self.expr_str(param.base.name)}] ?? null)"
 
 
+class _PackageData(typing.NamedTuple):
+    package: ir.Package
+    package_symbol: str
+    scope: Scope
+    module: GenericModule
+
+
+class TypeScriptLanguageCompileProvider(LanguageCompileProvider):
+
+    def compile(self, interfaces: typing.Iterable[ir.Interface]) -> typing.Generator[CompiledFile, typing.Any, None]:
+        packages: dict[str, _PackageData] = {}
+        global_scope = self.language_scope()
+
+        for interface in interfaces:
+            if interface.package.name not in packages:
+                packages[interface.package.name] = _PackageData(
+                    package=interface.package,
+                    package_symbol=global_scope.add_or_dodge(self.symbol_var_case_from(interface.package.name)),
+                    scope=Scope(parent=global_scope),
+                    module=GenericModule(
+                        docstr=docs_to_docstring(interface.package.docs),
+                    ),
+                )
+            package_data = packages[interface.package.name]
+
+            # interface_module_symbol = global_scope.add_or_dodge(python_snakify(interface.command.param.name))
+            interface_module_symbol = self.symbol_var_case_from(interface.command.base.name)
+
+            interface_module: GenericModule = GenericModule()
+            compile_interface(
+                lang=self, interface=interface, package_scope=package_data.scope, interface_module=interface_module
+            )
+            #package_data.module.imports.append(f"from .{interface_module_symbol} import *")
+            yield CompiledFile(
+                path=pathlib.Path(package_data.package_symbol) / (interface_module_symbol + ".ts"),
+                content=collapse(self.generate_module(interface_module))
+            )
+
+        #for package_data in packages.values():
+        #    package_data.module.imports.sort()
+        #    yield CompiledFile(
+        #        path=pathlib.Path(package_data.package_symbol) / "__init__.py",
+        #        content=collapse(self.generate_module(package_data.module))
+        #    )
+
+
 class TypeScriptLanguageProvider(
     TypeScriptLanguageTypeProvider,
     TypeScriptLanguageIrProvider,
     TypeScriptLanguageExprProvider,
     TypeScriptLanguageSymbolProvider,
     TypeScriptLanguageHighLevelProvider,
+    TypeScriptLanguageCompileProvider,
     LanguageProvider,
 ):
     pass

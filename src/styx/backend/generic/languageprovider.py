@@ -1,9 +1,11 @@
+import dataclasses
 import pathlib
 import typing
 from abc import abstractmethod
 from typing import Mapping, Protocol, Sequence, TypeAlias
 
 import styx.ir.core as ir
+from styx.backend import CompiledFile
 
 if typing.TYPE_CHECKING:
     from styx.backend.generic.gen.lookup import LookupParam
@@ -565,6 +567,24 @@ class LanguageStyxDefsProvider(Protocol):
         return "^0.5.0"
 
 
+
+class LanguageCompileProvider(Protocol):
+
+    @abstractmethod
+    def compile(
+            self, interfaces: typing.Iterable[ir.Interface]
+    ) -> typing.Generator[CompiledFile, typing.Any, None]:
+        """For a stream of IR interfaces return a stream of language "modules"/files and their module paths.
+
+        Args:
+            interfaces: Stream of IR interfaces.
+
+        Returns:
+            Stream of compiled files.
+        """
+        ...
+
+
 class LanguageProvider(
     LanguageTypeProvider,
     LanguageSymbolProvider,
@@ -572,6 +592,7 @@ class LanguageProvider(
     LanguageExprProvider,
     LanguageHighLevelProvider,
     LanguageStyxDefsProvider,
+    LanguageCompileProvider,
     Protocol,
 ):
     pass

@@ -1,6 +1,10 @@
 import pathlib
 import re
+import typing
 
+from styx.backend.common import CompiledFile
+from styx.backend.generic.documentation import docs_to_docstring
+from styx.backend.generic.gen.interface import compile_interface
 from styx.backend.generic.gen.lookup import LookupParam
 from styx.backend.generic.languageprovider import (
     TYPE_PYLITERAL,
@@ -11,9 +15,9 @@ from styx.backend.generic.languageprovider import (
     LanguageProvider,
     LanguageSymbolProvider,
     LanguageTypeProvider,
-    MStr,
+    MStr, LanguageCompileProvider,
 )
-from styx.backend.generic.linebuffer import LineBuffer, blank_after, blank_before, comment, expand, indent
+from styx.backend.generic.linebuffer import LineBuffer, blank_after, blank_before, comment, expand, indent, collapse
 from styx.backend.generic.model import GenericArg, GenericFunc, GenericModule, GenericStructure
 from styx.backend.generic.scope import Scope
 from styx.backend.generic.string_case import pascal_case, screaming_snake_case
@@ -706,12 +710,59 @@ class RLanguageHighLevelProvider(LanguageHighLevelProvider):
         return f"{name}[[{self.expr_str(param.base.name)}]] %||% NULL"
 
 
+class _PackageData(typing.NamedTuple):
+    package: ir.Package
+    package_symbol: str
+    scope: Scope
+    module: GenericModule
+
+
+class RLanguageCompileProvider(LanguageCompileProvider):
+
+    def compile(self, interfaces: typing.Iterable[ir.Interface]) -> typing.Generator[CompiledFile, typing.Any, None]:
+        packages: dict[str, _PackageData] = {}
+        global_scope = self.language_scope()
+
+        for interface in interfaces:
+            if interface.package.name not in packages:
+                packages[interface.package.name] = _PackageData(
+                    package=interface.package,
+                    package_symbol=global_scope.add_or_dodge(self.symbol_var_case_from(interface.package.name)),
+                    scope=Scope(parent=global_scope),
+                    module=GenericModule(
+                        docstr=docs_to_docstring(interface.package.docs),
+                    ),
+                )
+            package_data = packages[interface.package.name]
+
+            # interface_module_symbol = global_scope.add_or_dodge(python_snakify(interface.command.param.name))
+            interface_module_symbol = self.symbol_var_case_from(interface.command.base.name)
+
+            interface_module: GenericModule = GenericModule()
+            compile_interface(
+                lang=self, interface=interface, package_scope=package_data.scope, interface_module=interface_module
+            )
+            #package_data.module.imports.append(f"from .{interface_module_symbol} import *")
+            yield CompiledFile(
+                path=pathlib.Path(package_data.package_symbol) / (interface_module_symbol + ".ts"),
+                content=collapse(self.generate_module(interface_module))
+            )
+
+        #for package_data in packages.values():
+        #    package_data.module.imports.sort()
+        #    yield CompiledFile(
+        #        path=pathlib.Path(package_data.package_symbol) / "__init__.py",
+        #        content=collapse(self.generate_module(package_data.module))
+        #    )
+
+
 class RLanguageProvider(
     RLanguageTypeProvider,
     RLanguageIrProvider,
     RLanguageExprProvider,
     RLanguageSymbolProvider,
     RLanguageHighLevelProvider,
+    RLanguageCompileProvider,
     LanguageProvider,
 ):
     pass

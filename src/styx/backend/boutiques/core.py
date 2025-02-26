@@ -1,8 +1,11 @@
 """Boutiques backend for converting Styx IR to Boutiques descriptors."""
-
+import json
+import pathlib
+import typing
 from typing import Optional, Union
 
 import styx.ir.core as ir
+from styx.backend.common import CompiledFile
 
 
 class BoutiquesConversionError(Exception):
@@ -306,3 +309,11 @@ def to_boutiques(interface: ir.Interface) -> dict:
 
     except Exception as e:
         raise BoutiquesConversionError(f"Failed to convert interface to Boutiques: {str(e)}")
+
+
+def compile_boutiques_json(interfaces: typing.Iterable[ir.Interface]) -> typing.Generator[CompiledFile, typing.Any, None]:
+    for interface in interfaces:
+        yield CompiledFile(
+            path=pathlib.Path(interface.uid + ".json"),
+            content=json.dumps(to_boutiques(interface), indent=2),
+        )
