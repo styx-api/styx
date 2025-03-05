@@ -150,6 +150,7 @@ class TypeScriptLanguageSymbolProvider(LanguageSymbolProvider):
             "type",
             "from",
             "of",
+            "arguments",  # Declarations with the name "arguments" cannot be used with the "esm" output format due to strict mode
         }
 
         for keyword in keywords:
@@ -158,10 +159,11 @@ class TypeScriptLanguageSymbolProvider(LanguageSymbolProvider):
         return scope
 
     def symbol_from(self, name: str) -> str:
-        """Convert a name to a valid TypeScript symbol."""
-        name = re.sub(r"[^a-zA-Z0-9_$]", "_", name)
-        if re.match(r"^[0-9]", name):
-            name = f"_${name}"
+        alt_prefix: str = "v_"
+        name = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+        # Prefix if name starts with a digit or underscore
+        if re.match(r"^[0-9_]", name):
+            name = f"{alt_prefix}{name}"
         return name
 
     def symbol_constant_case_from(self, name: str) -> str:
@@ -390,8 +392,7 @@ class TypeScriptLanguageExprProvider(LanguageExprProvider):
 class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
     def wrapper_module_imports(self) -> LineBuffer:
         return [
-            "import { Runner, Execution, Metadata, InputPathType, OutputPathType } from './types';",
-            "import { getGlobalRunner } from './globalState';",
+            "import { Runner, Execution, Metadata, InputPathType, OutputPathType, getGlobalRunner } from 'styxdefs';",
         ]
 
     def struct_collect_outputs(self, struct: ir.Param[ir.Param.Struct], struct_symbol: str) -> str:
@@ -432,8 +433,8 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
         stdout_output_symbol: str | None,
         stderr_output_symbol: str | None,
     ) -> LineBuffer:
-        so = "" if stdout_output_symbol is None else f", handleStdout: s => ret.{stdout_output_symbol}.push(s)"
-        se = "" if stderr_output_symbol is None else f", handleStderr: s => ret.{stderr_output_symbol}.push(s)"
+        so = ", undefined" if stdout_output_symbol is None else f", s => ret.{stdout_output_symbol}.push(s)"
+        se = "" if stderr_output_symbol is None else f", s => ret.{stderr_output_symbol}.push(s)"
         return [f"{execution_symbol}.run({cargs_symbol}{so}{se});"]
 
     def generate_arg_declaration(self, arg: GenericArg) -> str:
@@ -722,18 +723,18 @@ class TypeScriptLanguageCompileProvider(LanguageCompileProvider):
             compile_interface(
                 lang=self, interface=interface, package_scope=package_data.scope, interface_module=interface_module
             )
-            #package_data.module.imports.append(f"from .{interface_module_symbol} import *")
+            package_data.module.imports.append(f"export * from './{package_data.package_symbol}/{interface_module_symbol}'")
             yield CompiledFile(
                 path=pathlib.Path(package_data.package_symbol) / (interface_module_symbol + ".ts"),
                 content=collapse(self.generate_module(interface_module))
             )
 
-        #for package_data in packages.values():
-        #    package_data.module.imports.sort()
-        #    yield CompiledFile(
-        #        path=pathlib.Path(package_data.package_symbol) / "__init__.py",
-        #        content=collapse(self.generate_module(package_data.module))
-        #    )
+        for package_data in packages.values():
+            package_data.module.imports.sort()
+            yield CompiledFile(
+                path=pathlib.Path(f"{package_data.package_symbol}.ts"),
+                content=collapse(self.generate_module(package_data.module))
+            )
 
 
 class TypeScriptLanguageProvider(

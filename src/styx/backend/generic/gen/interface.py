@@ -579,6 +579,7 @@ def compile_interface(
     function_scope.add_or_die("execution")
     function_scope.add_or_die("cargs")
     function_scope.add_or_die("ret")
+    function_scope.add_or_die("params")
 
     # Lookup tables
     lookup = LookupParam(

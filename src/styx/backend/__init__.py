@@ -1,4 +1,4 @@
-"""Styx Python backend."""
+"""Styx backends."""
 import typing
 
 from styx.backend.boutiques.core import to_boutiques, compile_boutiques_json
@@ -30,11 +30,6 @@ _BACKENDS = [
         id_="r",
         name="R",
         description="R (WIP)"
-    ),
-    BackendDescriptor(
-        id_="typescript",
-        name="TypeScript",
-        description="TypeScript (WIP)"
     ),
     BackendDescriptor(
         id_="typescript",
