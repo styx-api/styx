@@ -17,18 +17,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
+
+    - name: Setup uv
+      uses: astral-sh/setup-uv@v5
       with:
-        python-version-file: pyproject.toml
-    - name: Install dependencies
-      run: |
-        python -m pip install poetry
-        poetry install --with docs
+        enable-cache: true
+        pyproject-file: pyproject.toml
+
     - name: Build docs
       run: |
         APP_MODULE_NAME=$(ls src -U | head -1)  # Get the first module name in the src directory
-        poetry run pdoc src/"$APP_MODULE_NAME" -o docs_build -t docs/pdoc-theme --docformat google
+        uv run --frozen --extra docs pdoc src/"$APP_MODULE_NAME" -o docs_build -t docs/pdoc-theme --docformat google
         touch docs_build/.nojekyll
+        
     - uses: JamesIves/github-pages-deploy-action@v4
       with:
         folder: docs_build

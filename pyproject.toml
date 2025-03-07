@@ -7,9 +7,6 @@ requires-python = "~=3.11"
 readme = "README.md"
 license = "LGPL-2.1"
 
-[project.optional-dependencies]
-docs = []
-
 [project.scripts]
 styx = "styx.main:main"
 
