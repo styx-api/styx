@@ -1,3 +1,6 @@
+import pathlib
+import typing
+
 from styxdefs import Execution, InputPathType, Metadata, OutputPathType, Runner
 
 
@@ -10,11 +13,24 @@ class DummyRunner(Runner, Execution):
         self.last_metadata = metadata
         return self
 
-    def input_file(self, host_file: InputPathType) -> str:
+    def params(self, params: dict) -> dict:
+        return params
+
+    def input_file(
+        self,
+        host_file: InputPathType,
+        resolve_parent: bool = False,
+        mutable: bool = False,
+    ) -> str:
         return str(host_file)
 
     def output_file(self, local_file: str, optional: bool = False) -> OutputPathType:
-        return local_file
+        return pathlib.Path(local_file)
 
-    def run(self, cargs: list[str]) -> None:
+    def run(
+            self,
+            cargs: list[str],
+            handle_stdout: typing.Callable[[str], None] | None = None,
+            handle_stderr: typing.Callable[[str], None] | None = None,
+    ) -> None:
         self.last_cargs = cargs
