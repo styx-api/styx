@@ -1,4 +1,5 @@
 """Styx backends."""
+
 import typing
 
 from styx.backend.boutiques.core import to_boutiques, compile_boutiques_json
@@ -21,26 +22,10 @@ class BackendDescriptor(typing.NamedTuple):
 
 
 _BACKENDS = [
-    BackendDescriptor(
-        id_="python",
-        name="Python",
-        description="Python (>=3.10)"
-    ),
-    BackendDescriptor(
-        id_="r",
-        name="R",
-        description="R (WIP)"
-    ),
-    BackendDescriptor(
-        id_="typescript",
-        name="TypeScript",
-        description="TypeScript (WIP)"
-    ),
-    BackendDescriptor(
-        id_="boutiques",
-        name="Boutiques",
-        description="Boutiques (WIP)"
-    ),
+    BackendDescriptor(id_="python", name="Python", description="Python (>=3.10)"),
+    BackendDescriptor(id_="r", name="R", description="R (WIP)"),
+    BackendDescriptor(id_="typescript", name="TypeScript", description="TypeScript (WIP)"),
+    BackendDescriptor(id_="boutiques", name="Boutiques", description="Boutiques (WIP)"),
 ]
 
 

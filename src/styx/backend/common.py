@@ -16,4 +16,4 @@ class CompiledFile(typing.NamedTuple):
             file.write(self.content)
 
     def __repr__(self):
-        return f"{'=' * 80}\nFile: {self.path.as_posix()}\n{'-'*80}\n{self.content}\n{'=' * 80}"
+        return f"{'=' * 80}\nFile: {self.path.as_posix()}\n{'-' * 80}\n{self.content}\n{'=' * 80}"

@@ -6,4 +6,3 @@ from styx.ir.core import Interface
 from styx.backend.python.languageprovider import PythonLanguageProvider
 from styx.backend.r.languageprovider import RLanguageProvider
 from styx.backend.typescript.languageprovider import TypeScriptLanguageProvider
-

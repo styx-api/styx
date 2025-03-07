@@ -24,15 +24,6 @@ docs = ["pdoc>=15.0.0,<16"]
 [tool.uv]
 default-groups = ["dev", "docs"]
 
-[tool.hatch.build.targets.sdist]
-include = ["src/styx"]
-
-[tool.hatch.build.targets.wheel]
-include = ["src/styx"]
-
-[tool.hatch.build.targets.wheel.sources]
-"src/styx" = "styx"
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

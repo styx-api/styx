@@ -15,7 +15,8 @@ from styx.backend.generic.languageprovider import (
     LanguageProvider,
     LanguageSymbolProvider,
     LanguageTypeProvider,
-    MStr, LanguageCompileProvider,
+    MStr,
+    LanguageCompileProvider,
 )
 from styx.backend.generic.linebuffer import LineBuffer, blank_after, blank_before, comment, expand, indent, collapse
 from styx.backend.generic.model import GenericArg, GenericFunc, GenericModule, GenericStructure
@@ -699,7 +700,6 @@ class _PackageData(typing.NamedTuple):
 
 
 class TypeScriptLanguageCompileProvider(LanguageCompileProvider):
-
     def compile(self, interfaces: typing.Iterable[ir.Interface]) -> typing.Generator[CompiledFile, typing.Any, None]:
         packages: dict[str, _PackageData] = {}
         global_scope = self.language_scope()
@@ -723,17 +723,19 @@ class TypeScriptLanguageCompileProvider(LanguageCompileProvider):
             compile_interface(
                 lang=self, interface=interface, package_scope=package_data.scope, interface_module=interface_module
             )
-            package_data.module.imports.append(f"export * from './{package_data.package_symbol}/{interface_module_symbol}'")
+            package_data.module.imports.append(
+                f"export * from './{package_data.package_symbol}/{interface_module_symbol}'"
+            )
             yield CompiledFile(
                 path=pathlib.Path(package_data.package_symbol) / (interface_module_symbol + ".ts"),
-                content=collapse(self.generate_module(interface_module))
+                content=collapse(self.generate_module(interface_module)),
             )
 
         for package_data in packages.values():
             package_data.module.imports.sort()
             yield CompiledFile(
                 path=pathlib.Path(f"{package_data.package_symbol}.ts"),
-                content=collapse(self.generate_module(package_data.module))
+                content=collapse(self.generate_module(package_data.module)),
             )
 
 

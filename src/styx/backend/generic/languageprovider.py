@@ -567,13 +567,9 @@ class LanguageStyxDefsProvider(Protocol):
         return "^0.5.0"
 
 
-
 class LanguageCompileProvider(Protocol):
-
     @abstractmethod
-    def compile(
-            self, interfaces: typing.Iterable[ir.Interface]
-    ) -> typing.Generator[CompiledFile, typing.Any, None]:
+    def compile(self, interfaces: typing.Iterable[ir.Interface]) -> typing.Generator[CompiledFile, typing.Any, None]:
         """For a stream of IR interfaces return a stream of language "modules"/files and their module paths.
 
         Args:

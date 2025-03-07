@@ -28,9 +28,9 @@ class DummyRunner(Runner, Execution):
         return pathlib.Path(local_file)
 
     def run(
-            self,
-            cargs: list[str],
-            handle_stdout: typing.Callable[[str], None] | None = None,
-            handle_stderr: typing.Callable[[str], None] | None = None,
+        self,
+        cargs: list[str],
+        handle_stdout: typing.Callable[[str], None] | None = None,
+        handle_stderr: typing.Callable[[str], None] | None = None,
     ) -> None:
         self.last_cargs = cargs

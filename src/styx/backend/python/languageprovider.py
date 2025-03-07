@@ -14,10 +14,20 @@ from styx.backend.generic.languageprovider import (
     LanguageProvider,
     LanguageSymbolProvider,
     LanguageTypeProvider,
-    MStr, LanguageCompileProvider, CompiledFile,
+    MStr,
+    LanguageCompileProvider,
+    CompiledFile,
 )
-from styx.backend.generic.linebuffer import LineBuffer, blank_after, blank_before, comment, concat, expand, indent, \
-    collapse
+from styx.backend.generic.linebuffer import (
+    LineBuffer,
+    blank_after,
+    blank_before,
+    comment,
+    concat,
+    expand,
+    indent,
+    collapse,
+)
 from styx.backend.generic.model import GenericArg, GenericFunc, GenericModule, GenericStructure
 from styx.backend.generic.scope import Scope
 from styx.backend.generic.string_case import pascal_case, screaming_snake_case, snake_case
@@ -674,7 +684,6 @@ class _PackageData(typing.NamedTuple):
 
 
 class PythonLanguageCompileProvider(LanguageCompileProvider):
-
     def compile(self, interfaces: typing.Iterable[ir.Interface]) -> typing.Generator[CompiledFile, typing.Any, None]:
         packages: dict[str, _PackageData] = {}
         global_scope = self.language_scope()
@@ -701,14 +710,14 @@ class PythonLanguageCompileProvider(LanguageCompileProvider):
             package_data.module.imports.append(f"from .{interface_module_symbol} import *")
             yield CompiledFile(
                 path=pathlib.Path(package_data.package_symbol) / (interface_module_symbol + ".py"),
-                content=collapse(self.generate_module(interface_module))
+                content=collapse(self.generate_module(interface_module)),
             )
 
         for package_data in packages.values():
             package_data.module.imports.sort()
             yield CompiledFile(
                 path=pathlib.Path(package_data.package_symbol) / "__init__.py",
-                content=collapse(self.generate_module(package_data.module))
+                content=collapse(self.generate_module(package_data.module)),
             )
 
 
