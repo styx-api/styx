@@ -1,46 +1,54 @@
-[tool.poetry]
-name = "styxcompiler"
+[project]
+name = "styx"
 version = "0.1.1"
 description = "Boutiques code generator"
-authors = ["Florian Rupprecht <floruppr@gmail.com>"]
-license = "LGPL-2.1"
+authors = [{ name = "Florian Rupprecht", email = "floruppr@gmail.com" }]
+requires-python = "~=3.11"
 readme = "README.md"
-packages = [{include = "styx", from = "src"}]
+license = "LGPL-2.1"
 
-[tool.poetry.dependencies]
-python = "^3.11"
+[project.optional-dependencies]
+docs = []
 
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.2.2"
-mypy = "^1.10.1"
-pre-commit = "^4.0.1"
-pytest-cov = "^6.0.0"
-ruff = "^0.8.0"
-styxdefs = "^0.5.0"  # for old tests. Remove once tests are migrated
-
-[tool.poetry.group.docs.dependencies]
-pdoc = "^15.0.0"
-
-[tool.poetry.extras]
-docs = ["pdoc"]
-
-[tool.poetry.scripts]
+[project.scripts]
 styx = "styx.main:main"
 
-[tool.pytest.ini_options]
-pythonpath = [
-  "src"
+[dependency-groups]
+dev = [
+  "pytest>=8.2.2,<9",
+  "mypy>=1.10.1,<2",
+  "pre-commit>=4.0.1,<5",
+  "pytest-cov>=6.0.0,<7",
+  "ruff>=0.8.0,<0.9",
+  "styxdefs>=0.5.0,<0.6",
 ]
+docs = ["pdoc>=15.0.0,<16"]
+
+[tool.uv]
+default-groups = ["dev", "docs"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/styx"]
+
+[tool.hatch.build.targets.wheel]
+include = ["src/styx"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src/styx" = "styx"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
 
 [tool.mypy]
 ignore_missing_imports = true
 
 [tool.ruff]
 preview = true
-extend-exclude = [
-  "examples",
-  "src/styx/boutiques/model.py"
-]
+extend-exclude = ["examples", "src/styx/boutiques/model.py"]
 line-length = 120
 indent-width = 4
 src = ["src"]
@@ -49,11 +57,11 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["ANN", "D", "E", "F", "I"]
 ignore = [
-  "D100",  # Missing docstring in public module.
-  "D101",  # Missing docstring in public class.
-  "D102",  # Missing docstring in public method.
-  "D103",  # Missing docstring in public function.
-  "D107"  # Missing docstring in __init__.
+  "D100", # Missing docstring in public module.
+  "D101", # Missing docstring in public class.
+  "D102", # Missing docstring in public method.
+  "D103", # Missing docstring in public function.
+  "D107", # Missing docstring in __init__.
 ]
 fixable = ["ALL"]
 unfixable = []
@@ -63,7 +71,3 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = []
-
-[build-system]
-requires = ["poetry-core>=1.2.0"]
-build-backend = "poetry.core.masonry.api"
