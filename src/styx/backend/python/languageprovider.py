@@ -7,7 +7,9 @@ from styx.backend.generic.gen.interface import compile_interface
 from styx.backend.generic.gen.lookup import LookupParam
 from styx.backend.generic.languageprovider import (
     TYPE_PYLITERAL,
+    CompiledFile,
     ExprType,
+    LanguageCompileProvider,
     LanguageExprProvider,
     LanguageHighLevelProvider,
     LanguageIrProvider,
@@ -15,18 +17,16 @@ from styx.backend.generic.languageprovider import (
     LanguageSymbolProvider,
     LanguageTypeProvider,
     MStr,
-    LanguageCompileProvider,
-    CompiledFile,
 )
 from styx.backend.generic.linebuffer import (
     LineBuffer,
     blank_after,
     blank_before,
+    collapse,
     comment,
     concat,
     expand,
     indent,
-    collapse,
 )
 from styx.backend.generic.model import GenericArg, GenericFunc, GenericModule, GenericStructure
 from styx.backend.generic.scope import Scope

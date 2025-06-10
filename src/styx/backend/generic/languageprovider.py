@@ -1,4 +1,3 @@
-import dataclasses
 import pathlib
 import typing
 from abc import abstractmethod

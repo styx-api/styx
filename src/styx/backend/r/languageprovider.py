@@ -9,6 +9,7 @@ from styx.backend.generic.gen.lookup import LookupParam
 from styx.backend.generic.languageprovider import (
     TYPE_PYLITERAL,
     ExprType,
+    LanguageCompileProvider,
     LanguageExprProvider,
     LanguageHighLevelProvider,
     LanguageIrProvider,
@@ -16,9 +17,8 @@ from styx.backend.generic.languageprovider import (
     LanguageSymbolProvider,
     LanguageTypeProvider,
     MStr,
-    LanguageCompileProvider,
 )
-from styx.backend.generic.linebuffer import LineBuffer, blank_after, blank_before, comment, expand, indent, collapse
+from styx.backend.generic.linebuffer import LineBuffer, blank_after, blank_before, collapse, comment, expand, indent
 from styx.backend.generic.model import GenericArg, GenericFunc, GenericModule, GenericStructure
 from styx.backend.generic.scope import Scope
 from styx.backend.generic.string_case import pascal_case, screaming_snake_case
@@ -495,10 +495,16 @@ class RLanguageHighLevelProvider(LanguageHighLevelProvider):
         if func.docstring_body or func.args or func.return_descr:
             buf.extend([
                 "#' @title",
-                f"#' {func.docstring_body}" if func.docstring_body else "#' Function documentation",
+                f"#' {'\n'.join(["#' " + l for l in linebreak_paragraph(func.docstring_body)])}"
+                if func.docstring_body
+                else "#' Function documentation",
                 "#'",
                 "#' @param",
-                *[f"#' {arg.name} {arg.docstring}" for arg in func.args if arg.name != "self"],
+                *[
+                    f"#' {arg.name} {'\n'.join(["#' " + l for l in linebreak_paragraph(arg.docstring)])}"
+                    for arg in func.args
+                    if arg.name != "self"
+                ],
                 "#'",
                 *([f"#' @return {func.return_descr}"] if func.return_descr else []),
             ])
@@ -744,7 +750,7 @@ class RLanguageCompileProvider(LanguageCompileProvider):
             )
             # package_data.module.imports.append(f"from .{interface_module_symbol} import *")
             yield CompiledFile(
-                path=pathlib.Path(package_data.package_symbol) / (interface_module_symbol + ".ts"),
+                path=pathlib.Path(package_data.package_symbol) / (interface_module_symbol + ".R"),
                 content=collapse(self.generate_module(interface_module)),
             )
 

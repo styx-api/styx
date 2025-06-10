@@ -9,6 +9,7 @@ from styx.backend.generic.gen.lookup import LookupParam
 from styx.backend.generic.languageprovider import (
     TYPE_PYLITERAL,
     ExprType,
+    LanguageCompileProvider,
     LanguageExprProvider,
     LanguageHighLevelProvider,
     LanguageIrProvider,
@@ -16,9 +17,8 @@ from styx.backend.generic.languageprovider import (
     LanguageSymbolProvider,
     LanguageTypeProvider,
     MStr,
-    LanguageCompileProvider,
 )
-from styx.backend.generic.linebuffer import LineBuffer, blank_after, blank_before, comment, expand, indent, collapse
+from styx.backend.generic.linebuffer import LineBuffer, blank_after, blank_before, collapse, comment, expand, indent
 from styx.backend.generic.model import GenericArg, GenericFunc, GenericModule, GenericStructure
 from styx.backend.generic.scope import Scope
 from styx.backend.generic.string_case import pascal_case, screaming_snake_case, snake_case

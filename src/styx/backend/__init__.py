@@ -2,14 +2,21 @@
 
 import typing
 
-from styx.backend.boutiques.core import to_boutiques, compile_boutiques_json
-from styx.backend.common import CompiledFile
 import styx.ir.core as ir
+from styx.backend.boutiques.core import compile_boutiques_json
+from styx.backend.boutiques.core import to_boutiques as to_boutiques
+from styx.backend.common import CompiledFile
 from styx.backend.python.languageprovider import PythonLanguageProvider
 from styx.backend.r.languageprovider import RLanguageProvider
 from styx.backend.typescript.languageprovider import TypeScriptLanguageProvider
 
-BACKEND_ID_TYPE = typing.Literal["python", "r", "typescript", "boutiques"]
+
+BACKEND_ID_TYPE = typing.Literal[
+    "python",
+    "r",
+    "typescript",
+    "boutiques",
+]
 
 
 class BackendDescriptor(typing.NamedTuple):
