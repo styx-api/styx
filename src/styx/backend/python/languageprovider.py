@@ -651,7 +651,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
 
     def param_dict_type_declare(self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct]) -> LineBuffer:
         param_items: list[tuple[str, str]] = [
-            (self.expr_str("__STYX_TYPE__"), self.type_literal_union([struct.body.name]))
+            (self.expr_str("__STYXTYPE__"), self.type_literal_union([struct.body.name]))
         ]
         for p in struct.body.iter_params():
             _type = lookup.expr_param_type[p.base.id_]

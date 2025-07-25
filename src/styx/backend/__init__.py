@@ -1,5 +1,5 @@
 """Styx backends."""
-
+import pathlib
 import typing
 
 import styx.ir.core as ir
@@ -16,6 +16,7 @@ BACKEND_ID_TYPE = typing.Literal[
     "r",
     "typescript",
     "boutiques",
+    "ir",
 ]
 
 
@@ -33,6 +34,7 @@ _BACKENDS = [
     BackendDescriptor(id_="r", name="R", description="R (WIP)"),
     BackendDescriptor(id_="typescript", name="TypeScript", description="TypeScript (WIP)"),
     BackendDescriptor(id_="boutiques", name="Boutiques", description="Boutiques (WIP)"),
+    BackendDescriptor(id_="ir", name="Styx IR Dump", description="Styx IR Dump"),
 ]
 
 
@@ -55,6 +57,15 @@ def compile_language(
     """
     if lang == "boutiques":
         yield from compile_boutiques_json(interfaces)
+        return
+    if lang == "ir":
+        import styx.ir.serialize
+        yield from (
+            CompiledFile(
+                path=pathlib.Path(interface.package.name) / (interface.command.base.name + ".json"),
+                content=styx.ir.serialize.to_json(interface, 2)
+            ) for interface in interfaces
+        )
         return
     if lang == "python":
         lp = PythonLanguageProvider
