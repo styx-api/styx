@@ -45,7 +45,7 @@ jobs:
       with:
         enable-cache: true
         pyproject-file: pyproject.toml
-        
+
     - name: Ruff format
       run: uv run ruff format --check
 

@@ -1,5 +1,4 @@
-"""Serialize Styx IR to and from JSON.
-"""
+"""Serialize Styx IR to and from JSON."""
 
 import dataclasses
 import json
