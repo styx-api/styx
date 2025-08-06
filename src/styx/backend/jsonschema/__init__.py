@@ -121,7 +121,7 @@ def to_schema_json(
 
     ret = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$id": "https://example.com/schema.json",  # todo
+        # "$id": "https://example.com/schema.json",  # todo ?
     }
 
     if struct.base.docs.title:
@@ -139,8 +139,15 @@ def compile_schema_json(
     interfaces: typing.Iterable[ir.Interface],
 ) -> typing.Generator[CompiledFile, typing.Any, None]:
     ts_lang = TypeScriptLanguageProvider()
+    interface_paths = []
     for interface in interfaces:
+        interface_path = pathlib.Path(interface.uid + ".json")
+        interface_paths.append(interface_path)
         yield CompiledFile(
-            path=pathlib.Path(interface.uid + ".json"),
+            path=interface_path,
             content=json.dumps(to_schema_json(interface, ts_lang), indent=2),
         )
+    yield CompiledFile(
+        path=pathlib.Path("schema.json"),
+        content=json.dumps({"oneOf": [({"$ref": str(x)}) for x in interface_paths]}, indent=2),
+    )
