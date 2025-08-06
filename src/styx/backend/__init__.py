@@ -7,6 +7,7 @@ import styx.ir.core as ir
 from styx.backend.boutiques.core import compile_boutiques_json
 from styx.backend.boutiques.core import to_boutiques as to_boutiques
 from styx.backend.common import CompiledFile
+from styx.backend.jsonschema import compile_schema_json
 from styx.backend.python.languageprovider import PythonLanguageProvider
 from styx.backend.r.languageprovider import RLanguageProvider
 from styx.backend.typescript.languageprovider import TypeScriptLanguageProvider
@@ -17,6 +18,7 @@ BACKEND_ID_TYPE = typing.Literal[
     "typescript",
     "boutiques",
     "ir",
+    "jsonschema",
 ]
 
 
@@ -35,10 +37,11 @@ _BACKENDS = [
     BackendDescriptor(id_="typescript", name="TypeScript", description="TypeScript (WIP)"),
     BackendDescriptor(id_="boutiques", name="Boutiques", description="Boutiques (WIP)"),
     BackendDescriptor(id_="ir", name="Styx IR Dump", description="Styx IR Dump"),
+    BackendDescriptor(id_="jsonschema", name="JSON Schema", description="JSON Schema of inputs"),
 ]
 
 
-def get_backends():
+def get_backends() -> list[BackendDescriptor]:
     return _BACKENDS
 
 
@@ -68,6 +71,9 @@ def compile_language(
             )
             for interface in interfaces
         )
+        return
+    elif lang == "jsonschema":
+        yield from compile_schema_json(interfaces)
         return
     if lang == "python":
         lp = PythonLanguageProvider
