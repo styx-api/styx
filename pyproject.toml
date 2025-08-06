@@ -8,7 +8,7 @@ readme = "README.md"
 license = "LGPL-2.1"
 
 [project.scripts]
-styx = "styx.main:main"
+styx = "styx.cli:main"
 
 [dependency-groups]
 dev = [
