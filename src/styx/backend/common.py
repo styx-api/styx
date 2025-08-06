@@ -8,12 +8,13 @@ class CompiledFile(typing.NamedTuple):
     content: str
     """File contents"""
 
-    def write(self, parent: pathlib.Path | str = "."):
-        """Write file. Creates parent directories as necessary"""
+    def write(self, parent: pathlib.Path | str = ".") -> None:
+        """Write file. Creates parent directories as necessary."""
         p = parent / self.path
         p.parent.mkdir(parents=True, exist_ok=True)
         with p.open("w", encoding="utf8") as file:
             file.write(self.content)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
+        """Human-readable representation."""
         return f"{'=' * 80}\nFile: {self.path.as_posix()}\n{'-' * 80}\n{self.content}\n{'=' * 80}"

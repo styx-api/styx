@@ -67,19 +67,19 @@ class RLanguageTypeProvider(LanguageTypeProvider):
 
     def type_literal_union(self, obj: list[TYPE_PYLITERAL]) -> str:
         """Convert an object to a language literal union type.
-        Note: R doesn't have native union types, so we'll handle this differently
+        Note: R doesn't have native union types, so we'll handle this differently.
         """
         return f"Union[{', '.join(map(self.expr_literal, obj))}]"
 
     def type_list(self, type_element: str) -> str:
         """Convert a type symbol to a type of list of that type.
-        In R, vectors/lists are homogeneous by default
+        In R, vectors/lists are homogeneous by default.
         """
         return f"vector[{type_element}]"
 
     def type_optional(self, type_element: str) -> str:
         """Convert a type symbol to an optional of that type.
-        In R, NULL is used for optional values
+        In R, NULL is used for optional values.
         """
         return f"nullable[{type_element}]"
 
@@ -88,7 +88,7 @@ class RLanguageTypeProvider(LanguageTypeProvider):
         return f"Union[{', '.join(type_elements)}]"
 
     def type_string_list(self) -> str:
-        """R's character vector type"""
+        """R's character vector type."""
         return "character"
 
 

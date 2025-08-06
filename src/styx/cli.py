@@ -81,7 +81,7 @@ Examples:
     return parser
 
 
-def list_backends():
+def list_backends() -> None:
     """Display available backends."""
     backends = get_backends()
 
@@ -171,7 +171,7 @@ def compile_and_output(
     dry_run: bool = False,
     force: bool = False,
     verbose: bool = False,
-):
+) -> None:
     """Compile IR interface to target backends and write files or print to stdout."""
     # If no output directory, print to stdout
     print_to_stdout = output_dir_user is None
@@ -226,7 +226,7 @@ def compile_and_output(
             continue
 
 
-def main():
+def main() -> int:
     """Main CLI entry point."""
     parser = setup_parser()
     args = parser.parse_args()
@@ -302,7 +302,7 @@ def main():
     return 0
 
 
-def cli():
+def cli() -> None:
     """CLI entry point for package installation."""
     sys.exit(main())
 
