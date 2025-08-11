@@ -264,7 +264,7 @@ def main() -> int:
             json_data = load_boutiques_file(input_file, args.verbose)
 
             # Determine package name
-            package_name = args.package_name or input_file.stem
+            package_name = args.package_name or "unknown"
 
             # Create IR interface
             ir_interface = create_ir_interface(

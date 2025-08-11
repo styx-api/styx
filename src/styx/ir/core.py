@@ -558,3 +558,25 @@ class Interface:
 
     stderr_as_string_output: StdOutErrAsStringOutput | None = None
     """Collect stderr as string output."""
+
+    def get_global_name_lookup(self) -> dict[IdType, str]:
+        """Generate global name lookup table.
+
+        Struct.Body.Id -> {package name}.{command name}.{sub-command name}...
+        """
+
+        ret: dict[IdType, str] = {}
+
+        def _rec(node: Param[Param.Struct], path: list[Param[Param.Struct]]):
+            yield node, path
+            for child in node.body.iter_params():
+                if isinstance(child.body, Param.Struct):
+                    yield from _rec(child, path + [child])
+                elif isinstance(child.body, Param.StructUnion):
+                    for e in child.body.alts:
+                        yield from _rec(e, path + [e])
+
+        for node, path in _rec(self.command, [self.command]):
+            global_name = ".".join([self.package.name] + [e.base.name for e in path])
+            ret[node.base.id_] = global_name
+        return ret

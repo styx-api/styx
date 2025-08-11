@@ -274,7 +274,7 @@ class RLanguageIrProvider(LanguageIrProvider):
                         extra_args += ", mutable=TRUE"
                     return MStr(f"execution$input.file({symbol}{extra_args})", False)
                 if isinstance(param.body, (ir.Param.Struct, ir.Param.StructUnion)):
-                    return MStr(f'dyn.cargs({symbol}$"__STYXTYPE__")({symbol}, execution)', True)
+                    return MStr(f'dyn.cargs({symbol}$"@type")({symbol}, execution)', True)
                 assert False
 
             # Handle lists/vectors
@@ -293,9 +293,7 @@ class RLanguageIrProvider(LanguageIrProvider):
                         extra_args += ", mutable=TRUE"
                     return MStr(f"sapply({symbol}, function(f) execution$input.file(f{extra_args}))", True)
                 if isinstance(param.body, (ir.Param.Struct, ir.Param.StructUnion)):
-                    return MStr(
-                        f'unlist(lapply({symbol}, function(s) dyn.cargs(s$"__STYXTYPE__")(s, execution)))', True
-                    )
+                    return MStr(f'unlist(lapply({symbol}, function(s) dyn.cargs(s$"@type")(s, execution)))', True)
                 assert False
 
             # Handle joined lists
@@ -315,7 +313,7 @@ class RLanguageIrProvider(LanguageIrProvider):
                 return MStr(f"{sep_join}(sapply({symbol}, function(f) execution$input.file(f{extra_args})))", False)
             if isinstance(param.body, (ir.Param.Struct, ir.Param.StructUnion)):
                 return MStr(
-                    f'{sep_join}(unlist(lapply({symbol}, function(s) dyn.cargs(s$"__STYXTYPE__")(s, execution))))',
+                    f'{sep_join}(unlist(lapply({symbol}, function(s) dyn.cargs(s$"@type")(s, execution))))',
                     False,
                 )
             assert False
@@ -435,11 +433,11 @@ class RLanguageHighLevelProvider(LanguageHighLevelProvider):
             if struct.nullable:
                 opt = f" if (!is.null({struct_symbol})) else NULL"
             return (
-                f'lapply({struct_symbol}, function(i) if (!is.null(dyn.outputs(i[["__STYXTYPE__"]]))) '
-                f'dyn.outputs(i[["__STYXTYPE__"]])(i, execution) else NULL){opt}'
+                f'lapply({struct_symbol}, function(i) if (!is.null(dyn.outputs(i[["@type"]]))) '
+                f'dyn.outputs(i[["@type"]])(i, execution) else NULL){opt}'
             )
 
-        o = f'dyn.outputs({struct_symbol}[["__STYXTYPE__"]])({struct_symbol}, execution)'
+        o = f'dyn.outputs({struct_symbol}[["@type"]])({struct_symbol}, execution)'
         if struct.nullable:
             o = f"if (!is.null({struct_symbol})) {o} else NULL"
         return o
@@ -540,7 +538,7 @@ class RLanguageHighLevelProvider(LanguageHighLevelProvider):
             "  structure(",
             "    list(",
             *indent([f"{f.name} = {f.name}," for f in structure.fields]),
-            f'    __STYXTYPE__ = "{structure.name}"',
+            f'    @type = "{structure.name}"',
             "    ),",
             f'    class = "{structure.name}"',
             "  )",
@@ -612,11 +610,11 @@ class RLanguageHighLevelProvider(LanguageHighLevelProvider):
         return [f"{cargs_symbol} <- append({cargs_symbol}, list({mstr.expr}))"]
 
     def param_dict_create(
-        self, name: str, param: ir.Param, items: list[tuple[ir.Param, ExprType]] | None = None
+        self, lookup: LookupParam, name: str, param: ir.Param, items: list[tuple[ir.Param, ExprType]] | None = None
     ) -> LineBuffer:
         return [
             f"{name} <- list(",
-            *indent([f'"__STYXTYPE__" = {self.expr_str(param.body.name)}']),
+            *indent([f'"@type" = {self.expr_str(lookup.expr_struct_global_name[param.base.id_])}']),
             *indent([f"{self.expr_str(key.base.name)} = {value}" for key, value in (items or [])]),
             ")",
         ]
@@ -626,7 +624,7 @@ class RLanguageHighLevelProvider(LanguageHighLevelProvider):
 
     def dyn_declare(self, lookup: LookupParam, root_struct: ir.Param[ir.Param.Struct]) -> list[GenericFunc]:
         items = [
-            (self.expr_str(s.body.name), lookup.expr_func_build_cargs[s.base.id_])
+            (self.expr_str(lookup.expr_struct_global_name[s.base.id_]), lookup.expr_func_build_cargs[s.base.id_])
             for s in root_struct.iter_structs_recursively(False)
         ]
         func_get_build_cargs = GenericFunc(
@@ -644,7 +642,7 @@ class RLanguageHighLevelProvider(LanguageHighLevelProvider):
         )
 
         items = [
-            (self.expr_str(s.body.name), lookup.expr_func_build_outputs[s.base.id_])
+            (self.expr_str(lookup.expr_struct_global_name[s.base.id_]), lookup.expr_func_build_outputs[s.base.id_])
             for s in root_struct.iter_structs_recursively(False)
             if struct_has_outputs(s)
         ]
@@ -665,7 +663,7 @@ class RLanguageHighLevelProvider(LanguageHighLevelProvider):
         return [func_get_build_cargs, func_get_build_outputs]
 
     def param_dict_type_declare(self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct]) -> LineBuffer:
-        param_items = [(self.expr_str("__STYXTYPE__"), struct.body.name)]
+        param_items = [(self.expr_str("@type"), lookup.expr_struct_global_name[struct.base.id_])]
         for p in struct.body.iter_params():
             param_items.append((self.expr_str(p.base.name), lookup.expr_param_type[p.base.id_]))
 

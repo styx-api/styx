@@ -202,7 +202,7 @@ class PythonLanguageIrProvider(LanguageIrProvider):
                         extra_args += ", mutable=True"
                     return MStr(f"execution.input_file({symbol}{extra_args})", False)
                 if isinstance(param.body, (ir.Param.Struct, ir.Param.StructUnion)):
-                    return MStr(f'dyn_cargs({symbol}["__STYXTYPE__"])({symbol}, execution)', True)
+                    return MStr(f'dyn_cargs({symbol}["@type"])({symbol}, execution)', True)
                 assert False
 
             if param.list_.join is None:
@@ -221,7 +221,7 @@ class PythonLanguageIrProvider(LanguageIrProvider):
                     return MStr(f"[execution.input_file(f{extra_args}) for f in {symbol}]", True)
                 if isinstance(param.body, (ir.Param.Struct, ir.Param.StructUnion)):
                     return MStr(
-                        f'[a for c in [dyn_cargs(s["__STYXTYPE__"])(s, execution) for s in {symbol}] for a in c]', True
+                        f'[a for c in [dyn_cargs(s["@type"])(s, execution) for s in {symbol}] for a in c]', True
                     )
                 assert False
 
@@ -242,8 +242,7 @@ class PythonLanguageIrProvider(LanguageIrProvider):
                 return MStr(f"{sep_join}([execution.input_file(f{extra_args}) for f in {symbol}])", False)
             if isinstance(param.body, (ir.Param.Struct, ir.Param.StructUnion)):
                 return MStr(
-                    f'{sep_join}([a for c in [dyn_cargs(s["__STYXTYPE__"])(s, execution) '
-                    f"for s in {symbol}] for a in c])",
+                    f'{sep_join}([a for c in [dyn_cargs(s["@type"])(s, execution) for s in {symbol}] for a in c])',
                     False,
                 )
             assert False
@@ -362,11 +361,11 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
             if struct.nullable:
                 opt = f" if {struct_symbol} else None"
             return (
-                f'[dyn_outputs(i["__STYXTYPE__"])(i, execution) '
-                f'if dyn_outputs(i["__STYXTYPE__"]) else None for i in {struct_symbol}]{opt}'
+                f'[dyn_outputs(i["@type"])(i, execution) '
+                f'if dyn_outputs(i["@type"]) else None for i in {struct_symbol}]{opt}'
             )
 
-        o = f'dyn_outputs({struct_symbol}["__STYXTYPE__"])({struct_symbol}, execution)'
+        o = f'dyn_outputs({struct_symbol}["@type"])({struct_symbol}, execution)'
         if struct.nullable:
             o = f"{o} if {struct_symbol} else None"
         return o
@@ -591,11 +590,15 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
         return f"{execution_symbol}.output_file({file_expr})"
 
     def param_dict_create(
-        self, name: str, param: ir.Param[ir.Param.Struct], items: list[tuple[ir.Param, ExprType]] | None = None
+        self,
+        lookup: LookupParam,
+        name: str,
+        param: ir.Param[ir.Param.Struct],
+        items: list[tuple[ir.Param, ExprType]] | None = None,
     ) -> LineBuffer:
         return [
             f"{name} = {{",
-            *indent([f'"__STYXTYPE__": {self.expr_str(param.body.name)},']),
+            *indent([f'"@type": {self.expr_str(lookup.expr_struct_global_name[param.base.id_])},']),
             *indent([f"{self.expr_str(key.base.name)}: {value}," for key, value in items]),
             "}",
         ]
@@ -605,7 +608,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
 
     def dyn_declare(self, lookup: LookupParam, root_struct: ir.Param[ir.Param.Struct]) -> list[GenericFunc]:
         items = [
-            (self.expr_str(s.body.name), lookup.expr_func_build_cargs[s.base.id_])
+            (self.expr_str(lookup.expr_struct_global_name[s.base.id_]), lookup.expr_func_build_cargs[s.base.id_])
             for s in root_struct.iter_structs_recursively(False)
         ]
         func_get_build_cargs = GenericFunc(
@@ -625,7 +628,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
 
         # Build outputs function lookup
         items = [
-            (self.expr_str(s.body.name), lookup.expr_func_build_outputs[s.base.id_])
+            (self.expr_str(lookup.expr_struct_global_name[s.base.id_]), lookup.expr_func_build_outputs[s.base.id_])
             for s in root_struct.iter_structs_recursively(False)
             if struct_has_outputs(s)
         ]
@@ -651,7 +654,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
 
     def param_dict_type_declare(self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct]) -> LineBuffer:
         param_items: list[tuple[str, str]] = [
-            (self.expr_str("__STYXTYPE__"), self.type_literal_union([struct.body.name]))
+            (self.expr_str("@type"), self.type_literal_union([lookup.expr_struct_global_name[struct.base.id_]]))
         ]
         for p in struct.body.iter_params():
             _type = lookup.expr_param_type[p.base.id_]

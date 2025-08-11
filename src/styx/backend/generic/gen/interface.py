@@ -36,7 +36,7 @@ def _compile_build_params(
     params_symbol = "params"
 
     param_items = [(p, lookup.expr_param_symbol_alias[p.base.id_]) for p in param.body.iter_params() if not p.nullable]
-    func.body.extend(lang.param_dict_create(params_symbol, param, param_items))
+    func.body.extend(lang.param_dict_create(lookup, params_symbol, param, param_items))
 
     for p in param.body.iter_params():
         if not p.nullable:
@@ -542,16 +542,19 @@ def _compile_struct(
 
     f = _compile_build_cargs(lang, struct, lookup)
     interface_module.funcs_and_classes.append(f)
+    interface_module.exports.append(f.name)
 
     if root_struct or struct_has_outputs(struct):
         f = _compile_func_build_outputs(lang, struct, lookup, stdout_as_string_output, stderr_as_string_output)
         interface_module.funcs_and_classes.append(f)
+        interface_module.exports.append(f.name)
 
     if root_struct:
         f = _compile_func_execute(
             lang, struct, lookup, metadata_symbol, stdout_as_string_output, stderr_as_string_output
         )
         interface_module.funcs_and_classes.append(f)
+        interface_module.exports.append(f.name)
 
 
 def compile_interface(

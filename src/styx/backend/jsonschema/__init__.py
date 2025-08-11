@@ -11,6 +11,7 @@ from styx.backend.typescript.languageprovider import TypeScriptLanguageProvider
 
 def _param_to_schema_json(
     param: ir.Param,
+    global_name_lookup: dict[ir.IdType, str],
 ) -> dict:
     def _val() -> dict:
         if isinstance(param.body, ir.Param.String):
@@ -44,14 +45,14 @@ def _param_to_schema_json(
                 "type": "string",
             }
         if isinstance(param.body, ir.Param.Struct):  # , ir.Param.StructUnion)):
-            v = _struct_to_schema_json(param)
-            v["properties"]["__STYXTYPE__"] = {"const": param.body.name}
+            v = _struct_to_schema_json(param, global_name_lookup)
+            v["properties"]["@type"] = {"const": param.body.name}
             return v
         if isinstance(param.body, ir.Param.StructUnion):
             alternatives = []
             for struct in param.body.alts:
-                struct_json = _param_to_schema_json(struct)
-                struct_json["properties"]["__STYXTYPE__"] = {"const": struct.body.name}
+                struct_json = _param_to_schema_json(struct, global_name_lookup)
+                struct_json["properties"]["@type"] = {"const": struct.body.name}
                 alternatives.append(struct_json)
             return {"anyOf": alternatives}
         assert False
@@ -86,11 +87,12 @@ def _param_to_schema_json(
 
 def _struct_to_schema_json(
     struct: ir.Param[ir.Param.Struct],
+    global_name_lookup: dict[ir.IdType, str],
 ) -> dict:
     ret: dict = {
         "type": "object",
         "properties": {
-            "__STYXTYPE__": {"const": struct.body.name},
+            "@type": {"const": global_name_lookup[struct.base.id_]},
         },
         "additionalProperties": False,
     }
@@ -105,7 +107,7 @@ def _struct_to_schema_json(
     for param in struct.body.iter_params():
         if not (param.nullable or param.default_value is not None):
             required_properties.append(param.base.name)
-        ret["properties"][param.base.name] = _param_to_schema_json(param)
+        ret["properties"][param.base.name] = _param_to_schema_json(param, global_name_lookup)
 
     if required_properties:
         ret["required"] = required_properties
@@ -115,7 +117,7 @@ def _struct_to_schema_json(
 
 def to_schema_json(
     interface: ir.Interface,
-    ts_lang: TypeScriptLanguageProvider,
+    global_name_lookup: dict[ir.IdType, str],
 ) -> dict:
     struct = interface.command
 
@@ -130,7 +132,7 @@ def to_schema_json(
     if struct.base.docs.description:
         ret["description"] = struct.base.docs.description
 
-    ret.update(_struct_to_schema_json(struct))
+    ret.update(_struct_to_schema_json(struct, global_name_lookup))
 
     return ret
 
@@ -138,14 +140,14 @@ def to_schema_json(
 def compile_schema_json(
     interfaces: typing.Iterable[ir.Interface],
 ) -> typing.Generator[CompiledFile, typing.Any, None]:
-    ts_lang = TypeScriptLanguageProvider()
     interface_paths = []
     for interface in interfaces:
+        global_name_lookup = interface.get_global_name_lookup()
         interface_path = pathlib.Path(interface.uid + ".json")
         interface_paths.append(interface_path)
         yield CompiledFile(
             path=interface_path,
-            content=json.dumps(to_schema_json(interface, ts_lang), indent=2),
+            content=json.dumps(to_schema_json(interface, global_name_lookup), indent=2),
         )
     yield CompiledFile(
         path=pathlib.Path("schema.json"),

@@ -30,6 +30,10 @@ from styx.backend.generic.utils import (
 from styx.ir import core as ir
 
 
+def _block_comment(lines: LineBuffer) -> LineBuffer:
+    return ["/**", *[f" * {line}" if line else " *" for line in lines], " */"] if lines else []
+
+
 class TypeScriptLanguageTypeProvider(LanguageTypeProvider):
     def type_str(self) -> str:
         """String type."""
@@ -245,7 +249,7 @@ class TypeScriptLanguageIrProvider(LanguageIrProvider):
                         extra_args += ", { mutable: true }"
                     return MStr(f"execution.inputFile({symbol}{extra_args})", False)
                 if isinstance(param.body, (ir.Param.Struct, ir.Param.StructUnion)):
-                    return MStr(f"dynCargs({symbol}.__STYXTYPE__)({symbol}, execution)", True)
+                    return MStr(f'dynCargs({symbol}["@type"])({symbol}, execution)', True)
                 assert False
 
             if param.list_.join is None:
@@ -263,7 +267,7 @@ class TypeScriptLanguageIrProvider(LanguageIrProvider):
                         extra_args += ", { mutable: true }"
                     return MStr(f"{symbol}.map(f => execution.inputFile(f{extra_args}))", True)
                 if isinstance(param.body, (ir.Param.Struct, ir.Param.StructUnion)):
-                    return MStr(f"{symbol}.map(s => dynCargs(s.__STYXTYPE__)(s, execution)).flat()", True)
+                    return MStr(f'{symbol}.map(s => dynCargs(s["@type"])(s, execution)).flat()', True)
                 assert False
 
             # param.list_.join is not None
@@ -283,7 +287,7 @@ class TypeScriptLanguageIrProvider(LanguageIrProvider):
                 return MStr(f"{symbol}.map(f => execution.inputFile(f{extra_args})).join({sep_join})", False)
             if isinstance(param.body, (ir.Param.Struct, ir.Param.StructUnion)):
                 return MStr(
-                    f"{symbol}.map(s => dynCargs(s.__STYXTYPE__)(s, execution)).flat().join({sep_join})",
+                    f'{symbol}.map(s => dynCargs(s["@type"])(s, execution)).flat().join({sep_join})',
                     False,
                 )
             assert False
@@ -398,12 +402,12 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
 
     def struct_collect_outputs(self, struct: ir.Param[ir.Param.Struct], struct_symbol: str) -> str:
         if struct.list_:
-            o = f"{struct_symbol}.map(i => dynOutputs(i.__STYXTYPE__)?.(i, execution) ?? null)"
+            o = f'{struct_symbol}.map(i => dynOutputs(i["@type"])?.(i, execution) ?? null)'
             if struct.nullable:
                 o = f"({o} ?? null)"
             return o
 
-        o = f"dynOutputs({struct_symbol}.__STYXTYPE__)?.({struct_symbol}, execution)"
+        o = f'dynOutputs({struct_symbol}["@type"])?.({struct_symbol}, execution)'
         if struct.nullable:
             o = f"({o} ?? null)"
         return o
@@ -450,6 +454,22 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
         # Sort arguments so default arguments come last
         func.args.sort(key=lambda a: a.default is not None)
 
+        # Add JSDoc comment
+        if func.docstring_body or func.args or func.return_descr:
+            buf.extend(
+                _block_comment([
+                    *(func.docstring_body.split("\n") if func.docstring_body else []),
+                    *([""] if func.docstring_body and (func.args or func.return_descr) else []),
+                    *([
+                        f"@param {arg.name} {arg.docstring}"
+                        for arg in func.args
+                        if arg.name != "self" and arg.docstring
+                    ]),
+                    *([""] if func.args and func.return_descr else []),
+                    f"@returns {func.return_descr}" if func.return_descr else "",
+                ])
+            )
+
         # Function signature with return type
         return_type = f": {func.return_type}" if func.return_type else ""
         buf.append(f"function {func.name}(")
@@ -458,24 +478,6 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
         for arg in func.args:
             buf.extend(indent([f"{self.generate_arg_declaration(arg)},"]))
         buf.append(f"){return_type} {{")
-
-        # Add JSDoc comment
-        if func.docstring_body or func.args or func.return_descr:
-            buf.extend(
-                indent([
-                    "/**",
-                    *([f" * {line}" for line in func.docstring_body.split("\n")] if func.docstring_body else []),
-                    *([""] if func.docstring_body and (func.args or func.return_descr) else []),
-                    *([
-                        f" * @param {arg.name} {arg.docstring}"
-                        for arg in func.args
-                        if arg.name != "self" and arg.docstring
-                    ]),
-                    *([""] if func.args and func.return_descr else []),
-                    f" * @returns {func.return_descr}" if func.return_descr else "",
-                    " */",
-                ])
-            )
 
         # Add function body
         if func.body:
@@ -489,26 +491,23 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
         # Sort fields so default arguments come last
         structure.fields.sort(key=lambda a: a.default is not None)
 
-        buf = ["/**"]
+        buf = []
         if structure.docstring:
-            buf.extend([f" * {line}" for line in structure.docstring.split("\n")])
-            buf.append(" *")
+            buf.extend(structure.docstring.split("\n"))
+            buf.append("")
 
         buf.extend([
-            " * @interface",
-            " */",
+            "@interface",  # todo is this needed?
+        ])
+        buf = _block_comment(buf)
+
+        buf.extend([
             f"interface {structure.name} {{",
         ])
 
         for field in structure.fields:
             if field.docstring:
-                buf.extend(
-                    indent([
-                        "/**",
-                        f" * {field.docstring}",
-                        " */",
-                    ])
-                )
+                buf.extend(indent(_block_comment([field.docstring])))
             buf.extend(indent([f"{field.name}{'' if field.default is None else '?'}: {field.type};"]))
 
         buf.append("}")
@@ -526,7 +525,7 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
         )
 
         return blank_after([
-            *(["/**", *[f" * {line}" for line in module.docstr.split("\n")], " */"] if module.docstr else []),
+            *(_block_comment(module.docstr.split("\n")) if module.docstr else []),
             *self.expr_line_comment([
                 "This file was auto generated by Styx.",
                 "Do not edit this file directly.",
@@ -600,12 +599,12 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
         return f"{execution_symbol}.outputFile({file_expr})"
 
     def param_dict_create(
-        self, name: str, param: ir.Param, items: list[tuple[ir.Param, ExprType]] | None = None
+        self, lookup, name: str, param: ir.Param, items: list[tuple[ir.Param, ExprType]] | None = None
     ) -> LineBuffer:
         return [
             f"const {name} = {{",
             *indent(
-                [f'"__STYXTYPE__": {self.expr_str(param.body.name)} as const,']
+                [f'"@type": {self.expr_str(lookup.expr_struct_global_name[param.base.id_])} as const,']
                 + [f"{self.expr_str(key.base.name)}: {value}," for key, value in (items or [])]
             ),
             "};",
@@ -616,7 +615,7 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
 
     def dyn_declare(self, lookup: LookupParam, root_struct: ir.Param[ir.Param.Struct]) -> list[GenericFunc]:
         cargs_items = [
-            (self.expr_str(s.body.name), lookup.expr_func_build_cargs[s.base.id_])
+            (self.expr_str(lookup.expr_struct_global_name[s.base.id_]), lookup.expr_func_build_cargs[s.base.id_])
             for s in root_struct.iter_structs_recursively(False)
         ]
 
@@ -641,7 +640,7 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
         )
 
         outputs_items = [
-            (self.expr_str(s.body.name), lookup.expr_func_build_outputs[s.base.id_])
+            (self.expr_str(lookup.expr_struct_global_name[s.base.id_]), lookup.expr_func_build_outputs[s.base.id_])
             for s in root_struct.iter_structs_recursively(False)
             if struct_has_outputs(s)
         ]
@@ -669,7 +668,9 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
         return [func_get_build_cargs, func_get_build_outputs]
 
     def param_dict_type_declare(self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct]) -> LineBuffer:
-        param_items: list[tuple[str, str]] = [('"__STYXTYPE__"', self.type_literal_union([struct.body.name]))]
+        param_items: list[tuple[str, str]] = [
+            ('"@type"', self.type_literal_union([lookup.expr_struct_global_name[struct.base.id_]]))
+        ]
 
         for p in struct.body.iter_params():
             _type = lookup.expr_param_type[p.base.id_]
