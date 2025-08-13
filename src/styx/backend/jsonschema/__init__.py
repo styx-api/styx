@@ -2,11 +2,11 @@
 
 import json
 import pathlib
+import re
 import typing
 
 import styx.ir.core as ir
 from styx.backend.common import CompiledFile
-from styx.backend.typescript.languageprovider import TypeScriptLanguageProvider
 
 
 def _param_to_schema_json(
@@ -41,9 +41,7 @@ def _param_to_schema_json(
                 "type": "boolean",
             }
         if isinstance(param.body, ir.Param.File):
-            return {
-                "type": "string",
-            }
+            return {"type": "string", "x-styx-type": "file"}
         if isinstance(param.body, ir.Param.Struct):  # , ir.Param.StructUnion)):
             v = _struct_to_schema_json(param, global_name_lookup)
             v["properties"]["@type"] = {"const": param.body.name}
@@ -137,13 +135,20 @@ def to_schema_json(
     return ret
 
 
+def _make_filename_safe(filename: str) -> str:
+    """Make a string safe for use as a filename."""
+    safe_filename = re.sub(r'[<>:"/\\|?*]', "_", filename)
+    safe_filename = safe_filename.strip(". ")
+    return safe_filename if safe_filename else "unnamed"
+
+
 def compile_schema_json(
     interfaces: typing.Iterable[ir.Interface],
 ) -> typing.Generator[CompiledFile, typing.Any, None]:
     interface_paths = []
     for interface in interfaces:
         global_name_lookup = interface.get_global_name_lookup()
-        interface_path = pathlib.Path(interface.uid + ".json")
+        interface_path = pathlib.Path(_make_filename_safe(global_name_lookup[interface.command.base.id_]) + ".json")
         interface_paths.append(interface_path)
         yield CompiledFile(
             path=interface_path,
