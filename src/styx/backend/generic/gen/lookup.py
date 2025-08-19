@@ -58,15 +58,6 @@ class LookupParam:
         self.expr_output_field_symbol: dict[ir.IdType, str] = {}
         """Find output field symbol by output ID. Output.id_ -> Language symbol"""
 
-        self.expr_struct_global_name: dict[ir.IdType, str] = interface.get_global_name_lookup()
-        """Find struct global name. 
-        
-        This is the @type.
-        This name should uniquely identify a struct across commands and packages.
-        (i.e. "{package_name}.{command}.{sub-command}"). 
-        IStruct.id_ -> Global name
-        """
-
         self.expr_func_build_params: dict[ir.IdType, str] = {}
         self.expr_func_build_cargs: dict[ir.IdType, str] = {}
         self.expr_func_build_outputs: dict[ir.IdType, str] = {}

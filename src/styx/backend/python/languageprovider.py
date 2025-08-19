@@ -3,7 +3,7 @@ import re
 import typing
 
 from styx.backend.generic.documentation import docs_to_docstring
-from styx.backend.generic.gen.interface import compile_interface
+from styx.backend.generic.gen.interface import compile_interface, EntrypointSymbols
 from styx.backend.generic.gen.lookup import LookupParam
 from styx.backend.generic.languageprovider import (
     TYPE_PYLITERAL,
@@ -136,14 +136,14 @@ class PythonLanguageSymbolProvider(LanguageSymbolProvider):
 
 class PythonLanguageIrProvider(LanguageIrProvider):
     def build_params_and_execute(
-        self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct], execution_symbol: ExprType
+        self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct], runner_symbol: ExprType
     ) -> LineBuffer:
         args = [lookup.expr_param_symbol_alias[elem.base.id_] for elem in struct.body.iter_params()]
         return [
             f"params = {lookup.expr_func_build_params[struct.base.id_]}(",
             *indent([f"{a}={a}," for a in args]),
             ")",
-            self.return_statement(f"{lookup.expr_func_execute[struct.base.id_]}(params, {execution_symbol})"),
+            self.return_statement(f"{lookup.expr_func_execute[struct.base.id_]}(params, {runner_symbol})"),
         ]
 
     def call_build_cargs(
@@ -598,7 +598,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
     ) -> LineBuffer:
         return [
             f"{name} = {{",
-            *indent([f'"@type": {self.expr_str(lookup.expr_struct_global_name[param.base.id_])},']),
+            *indent([f'"@type": {self.expr_str(param.body.global_name)},']),
             *indent([f"{self.expr_str(key.base.name)}: {value}," for key, value in items]),
             "}",
         ]
@@ -608,7 +608,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
 
     def dyn_declare(self, lookup: LookupParam, root_struct: ir.Param[ir.Param.Struct]) -> list[GenericFunc]:
         items = [
-            (self.expr_str(lookup.expr_struct_global_name[s.base.id_]), lookup.expr_func_build_cargs[s.base.id_])
+            (self.expr_str(s.body.global_name), lookup.expr_func_build_cargs[s.base.id_])
             for s in root_struct.iter_structs_recursively(False)
         ]
         func_get_build_cargs = GenericFunc(
@@ -628,7 +628,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
 
         # Build outputs function lookup
         items = [
-            (self.expr_str(lookup.expr_struct_global_name[s.base.id_]), lookup.expr_func_build_outputs[s.base.id_])
+            (self.expr_str(s.body.global_name), lookup.expr_func_build_outputs[s.base.id_])
             for s in root_struct.iter_structs_recursively(False)
             if struct_has_outputs(s)
         ]
@@ -654,7 +654,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
 
     def param_dict_type_declare(self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct]) -> LineBuffer:
         param_items: list[tuple[str, str]] = [
-            (self.expr_str("@type"), self.type_literal_union([lookup.expr_struct_global_name[struct.base.id_]]))
+            (self.expr_str("@type"), self.type_literal_union([struct.body.global_name]))
         ]
         for p in struct.body.iter_params():
             _type = lookup.expr_param_type[p.base.id_]
@@ -684,6 +684,7 @@ class _PackageData(typing.NamedTuple):
     package_symbol: str
     scope: Scope
     module: GenericModule
+    dyn_entrypoints: dict[str, EntrypointSymbols]
 
 
 class PythonLanguageCompileProvider(LanguageCompileProvider):
@@ -700,6 +701,7 @@ class PythonLanguageCompileProvider(LanguageCompileProvider):
                     module=GenericModule(
                         docstr=docs_to_docstring(interface.package.docs),
                     ),
+                    dyn_entrypoints={},
                 )
             package_data = packages[interface.package.name]
 
@@ -707,9 +709,10 @@ class PythonLanguageCompileProvider(LanguageCompileProvider):
             interface_module_symbol = self.symbol_var_case_from(interface.command.base.name)
 
             interface_module: GenericModule = GenericModule()
-            compile_interface(
+            entrypoint_symbols = compile_interface(
                 lang=self, interface=interface, package_scope=package_data.scope, interface_module=interface_module
             )
+            package_data.dyn_entrypoints[interface.command.body.global_name] = entrypoint_symbols
             package_data.module.imports.append(f"from .{interface_module_symbol} import *")
             yield CompiledFile(
                 path=pathlib.Path(package_data.package_symbol) / (interface_module_symbol + ".py"),
@@ -717,6 +720,27 @@ class PythonLanguageCompileProvider(LanguageCompileProvider):
             )
 
         for package_data in packages.values():
+            dyn_execute_dict = {
+                self.expr_str(global_name): entrypoint.fn_execute
+                for global_name, entrypoint in package_data.dyn_entrypoints.items()
+            }
+            fn_pkg_dyn_execute = GenericFunc(
+                name=f"execute",
+                docstring_body="Run a command in this package dynamically from a params object.",
+                args=[
+                    GenericArg(name="params", type="dict", docstring="The parameters."),
+                    GenericArg(name="runner", type="_Runner | None", default="None", docstring="Command runner"),
+                ],
+                body=[
+                    "return {",
+                    *indent([f"{k}: {v}," for k, v in dyn_execute_dict.items()]),
+                    '}[params["@type"]](params, runner)',
+                ],
+            )
+            package_data.module.funcs_and_classes.append(fn_pkg_dyn_execute)
+
+            package_data.module.imports.append("from styxdefs import Runner as _Runner")
+
             package_data.module.imports.sort()
             yield CompiledFile(
                 path=pathlib.Path(package_data.package_symbol) / "__init__.py",

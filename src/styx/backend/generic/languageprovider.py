@@ -539,7 +539,7 @@ class LanguageIrProvider(Protocol):
 
     @abstractmethod
     def build_params_and_execute(
-        self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct], execution_symbol: ExprType
+        self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct], runner_symbol: ExprType
     ) -> LineBuffer: ...
 
     @abstractmethod

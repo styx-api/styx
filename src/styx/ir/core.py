@@ -166,6 +166,14 @@ class Param(Generic[T]):
         name: str | None = None
         """Name of the struct."""
 
+        global_name: str | None = None
+        """Struct global name. 
+        
+        This is the @type.
+        This name should uniquely identify a struct across commands and packages.
+        (i.e. "{package_name}.{command}.{sub-command}").
+        """
+
         groups: list[ConditionalGroup] = dataclasses.field(default_factory=list)
         """List of conditional groups."""
 
@@ -559,15 +567,12 @@ class Interface:
     stderr_as_string_output: StdOutErrAsStringOutput | None = None
     """Collect stderr as string output."""
 
-    def get_global_name_lookup(self) -> dict[IdType, str]:
-        """Generate global name lookup table.
+    def update_global_names(self) -> None:
+        """Generate/update global struct names."""
 
-        Struct.Body.Id -> {package name}.{command name}.{sub-command name}...
-        """
-
-        ret: dict[IdType, str] = {}
-
-        def _rec(node: Param[Param.Struct], path: list[Param[Param.Struct]]):
+        def _rec(
+            node: Param[Param.Struct], path: list[Param[Param.Struct]]
+        ) -> Generator[tuple[Param[Param.Struct], list[Param[Param.Struct]]], None, None]:
             yield node, path
             for child in node.body.iter_params():
                 if isinstance(child.body, Param.Struct):
@@ -578,5 +583,4 @@ class Interface:
 
         for node, path in _rec(self.command, [self.command]):
             global_name = ".".join([self.package.name] + [e.base.name for e in path])
-            ret[node.base.id_] = global_name
-        return ret
+            node.body.global_name = global_name

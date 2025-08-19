@@ -4,7 +4,7 @@ import typing
 
 from styx.backend import CompiledFile
 from styx.backend.generic.documentation import docs_to_docstring
-from styx.backend.generic.gen.interface import compile_interface
+from styx.backend.generic.gen.interface import compile_interface, EntrypointSymbols
 from styx.backend.generic.gen.lookup import LookupParam
 from styx.backend.generic.languageprovider import (
     TYPE_PYLITERAL,
@@ -183,14 +183,14 @@ class TypeScriptLanguageSymbolProvider(LanguageSymbolProvider):
 
 class TypeScriptLanguageIrProvider(LanguageIrProvider):
     def build_params_and_execute(
-        self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct], execution_symbol: ExprType
+        self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct], runner_symbol: ExprType
     ) -> LineBuffer:
         param_list = list(struct.body.iter_params())
         param_list.sort(key=lambda a: a.default_value is not None)
         args = [lookup.expr_param_symbol_alias[elem.base.id_] for elem in param_list]
         return [
             f"const params = {lookup.expr_func_build_params[struct.base.id_]}({', '.join([a for a in args])})",
-            self.return_statement(f"{lookup.expr_func_execute[struct.base.id_]}(params, {execution_symbol})"),
+            self.return_statement(f"{lookup.expr_func_execute[struct.base.id_]}(params, {runner_symbol})"),
         ]
 
     def call_build_cargs(
@@ -599,12 +599,12 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
         return f"{execution_symbol}.outputFile({file_expr})"
 
     def param_dict_create(
-        self, lookup, name: str, param: ir.Param, items: list[tuple[ir.Param, ExprType]] | None = None
+        self, lookup, name: str, param: ir.Param[ir.Param.Struct], items: list[tuple[ir.Param, ExprType]] | None = None
     ) -> LineBuffer:
         return [
             f"const {name} = {{",
             *indent(
-                [f'"@type": {self.expr_str(lookup.expr_struct_global_name[param.base.id_])} as const,']
+                [f'"@type": {self.expr_str(param.body.global_name)} as const,']
                 + [f"{self.expr_str(key.base.name)}: {value}," for key, value in (items or [])]
             ),
             "};",
@@ -615,7 +615,7 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
 
     def dyn_declare(self, lookup: LookupParam, root_struct: ir.Param[ir.Param.Struct]) -> list[GenericFunc]:
         cargs_items = [
-            (self.expr_str(lookup.expr_struct_global_name[s.base.id_]), lookup.expr_func_build_cargs[s.base.id_])
+            (self.expr_str(s.body.global_name), lookup.expr_func_build_cargs[s.base.id_])
             for s in root_struct.iter_structs_recursively(False)
         ]
 
@@ -640,7 +640,7 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
         )
 
         outputs_items = [
-            (self.expr_str(lookup.expr_struct_global_name[s.base.id_]), lookup.expr_func_build_outputs[s.base.id_])
+            (self.expr_str(s.body.global_name), lookup.expr_func_build_outputs[s.base.id_])
             for s in root_struct.iter_structs_recursively(False)
             if struct_has_outputs(s)
         ]
@@ -668,9 +668,7 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
         return [func_get_build_cargs, func_get_build_outputs]
 
     def param_dict_type_declare(self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct]) -> LineBuffer:
-        param_items: list[tuple[str, str]] = [
-            ('"@type"', self.type_literal_union([lookup.expr_struct_global_name[struct.base.id_]]))
-        ]
+        param_items: list[tuple[str, str]] = [('"@type"', self.type_literal_union([struct.body.global_name]))]
 
         for p in struct.body.iter_params():
             _type = lookup.expr_param_type[p.base.id_]
@@ -698,6 +696,7 @@ class _PackageData(typing.NamedTuple):
     package_symbol: str
     scope: Scope
     module: GenericModule
+    dyn_entrypoints: dict[str, EntrypointSymbols]
 
 
 class TypeScriptLanguageCompileProvider(LanguageCompileProvider):
@@ -714,6 +713,7 @@ class TypeScriptLanguageCompileProvider(LanguageCompileProvider):
                     module=GenericModule(
                         docstr=docs_to_docstring(interface.package.docs),
                     ),
+                    dyn_entrypoints={},
                 )
             package_data = packages[interface.package.name]
 
@@ -721,12 +721,34 @@ class TypeScriptLanguageCompileProvider(LanguageCompileProvider):
             interface_module_symbol = self.symbol_var_case_from(interface.command.base.name)
 
             interface_module: GenericModule = GenericModule()
-            compile_interface(
+            entrypoint_symbols = compile_interface(
                 lang=self, interface=interface, package_scope=package_data.scope, interface_module=interface_module
             )
+            package_data.dyn_entrypoints[interface.command.body.global_name] = entrypoint_symbols
             package_data.module.imports.append(
                 f"export * from './{package_data.package_symbol}/{interface_module_symbol}'"
             )
+
+            dyn_execute_dict = {
+                self.expr_str(global_name): entrypoint.fn_execute
+                for global_name, entrypoint in package_data.dyn_entrypoints.items()
+            }
+            fn_pkg_dyn_execute = GenericFunc(
+                name=f"execute",
+                docstring_body="Run a command in this package dynamically from a params object.",
+                args=[
+                    GenericArg(name="params", type="any", docstring="The parameters."),
+                    GenericArg(name="runner", type="Runner | null", default="null", docstring="Command runner"),
+                ],
+                body=[
+                    "return {",
+                    *indent([f"{k}: {v}," for k, v in dyn_execute_dict.items()]),
+                    '}[params["@type"]](params, runner)',
+                ],
+            )
+            package_data.module.funcs_and_classes.append(fn_pkg_dyn_execute)
+            package_data.module.imports.append("import { Runner } from 'styxdefs';")
+
             yield CompiledFile(
                 path=pathlib.Path(package_data.package_symbol) / (interface_module_symbol + ".ts"),
                 content=collapse(self.generate_module(interface_module)),

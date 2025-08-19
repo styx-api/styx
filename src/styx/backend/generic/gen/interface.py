@@ -1,3 +1,5 @@
+from typing import NamedTuple
+
 import styx.ir.core as ir
 from styx.backend.generic.documentation import docs_to_docstring
 from styx.backend.generic.gen.lookup import LookupParam
@@ -401,8 +403,6 @@ def _compile_func_execute(
     stdout_as_string_output: ir.StdOutErrAsStringOutput | None = None,
     stderr_as_string_output: ir.StdOutErrAsStringOutput | None = None,
 ) -> GenericFunc:
-    struct_has_outputs(struct)
-
     outputs_type = lookup.expr_struct_output_type[struct.base.id_]
 
     func = GenericFunc(
@@ -418,15 +418,17 @@ def _compile_func_execute(
                 docstring="The parameters.",
             ),
             GenericArg(
-                name=lang.symbol_execution(),
-                type=lang.type_execution(),
-                default=None,
-                docstring="The execution object.",
+                name="runner",
+                type=lang.type_optional(lang.type_runner()),
+                default=lang.expr_null(),
+                docstring="Command runner",
             ),
         ],
     )
 
     func.body.extend([
+        *lang.runner_declare("runner"),
+        *lang.execution_declare("execution", metadata_symbol),
         # lang.expr_line_comment("todo: validate constraint checks (or after middlewares?)"),
         *lang.execution_process_params("execution", "params"),
         *lang.call_build_cargs(lookup, struct, "params", "execution", "cargs"),
@@ -446,11 +448,11 @@ def _compile_func_execute(
     return func
 
 
+# this is basically _params + _execute
 def _compile_func_wrapper_root(
     lang: LanguageProvider,
     struct: ir.Param[ir.Param.Struct],
     lookup: LookupParam,
-    metadata_symbol: str,
 ) -> GenericFunc:
     outputs_type = lookup.expr_struct_output_type[struct.base.id_]
 
@@ -474,13 +476,7 @@ def _compile_func_wrapper_root(
                 docstring=elem.base.docs.description,
             )
         )
-
-    func.body.extend([
-        *lang.runner_declare("runner"),
-        *lang.execution_declare("execution", metadata_symbol),
-    ])
-
-    func.body.extend(lang.build_params_and_execute(lookup, struct, "execution"))
+    func.body.extend(lang.build_params_and_execute(lookup, struct, "runner"))
 
     pyargs.append(
         GenericArg(
@@ -542,12 +538,12 @@ def _compile_struct(
 
     f = _compile_build_cargs(lang, struct, lookup)
     interface_module.funcs_and_classes.append(f)
-    interface_module.exports.append(f.name)
+    # interface_module.exports.append(f.name)
 
     if root_struct or struct_has_outputs(struct):
         f = _compile_func_build_outputs(lang, struct, lookup, stdout_as_string_output, stderr_as_string_output)
         interface_module.funcs_and_classes.append(f)
-        interface_module.exports.append(f.name)
+        # interface_module.exports.append(f.name)
 
     if root_struct:
         f = _compile_func_execute(
@@ -557,13 +553,20 @@ def _compile_struct(
         interface_module.exports.append(f.name)
 
 
+class EntrypointSymbols(NamedTuple):
+    metadata: str
+    fn_execute: str
+
+
 def compile_interface(
     lang: LanguageProvider,
     interface: ir.Interface,
     package_scope: Scope,
     interface_module: GenericModule,
-) -> None:
+) -> EntrypointSymbols:
     """Entry point to the Python backend."""
+    interface.update_global_names()
+
     interface_module.imports.extend(lang.wrapper_module_imports())
 
     metadata_symbol = generate_static_metadata(
@@ -611,6 +614,10 @@ def compile_interface(
         lang,
         interface.command,
         lookup,
-        metadata_symbol,
     )
     interface_module.funcs_and_classes.append(f)
+
+    return EntrypointSymbols(
+        metadata=metadata_symbol,
+        fn_execute=lookup.expr_func_execute[interface.command.base.id_],
+    )

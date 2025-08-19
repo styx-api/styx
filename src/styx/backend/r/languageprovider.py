@@ -205,13 +205,13 @@ class RLanguageSymbolProvider(LanguageSymbolProvider):
 
 class RLanguageIrProvider(LanguageIrProvider):
     def build_params_and_execute(
-        self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct], execution_symbol: ExprType
+        self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct], runner_symbol: ExprType
     ) -> LineBuffer:
         """Build parameters and execute in R style."""
         args = [lookup.expr_param_symbol_alias[elem.base.id_] for elem in struct.body.iter_params()]
         return [
             f"params <- {lookup.expr_func_build_params[struct.base.id_]}({', '.join([f'{a}={a}' for a in args])})",
-            self.return_statement(f"{lookup.expr_func_execute[struct.base.id_]}(params, {execution_symbol})"),
+            self.return_statement(f"{lookup.expr_func_execute[struct.base.id_]}(params, {runner_symbol})"),
         ]
 
     def call_build_cargs(
