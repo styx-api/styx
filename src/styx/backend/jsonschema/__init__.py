@@ -11,7 +11,6 @@ from styx.backend.common import CompiledFile
 
 def _param_to_schema_json(
     param: ir.Param,
-    global_name_lookup: dict[ir.IdType, str],
 ) -> dict:
     def _val() -> dict:
         if isinstance(param.body, ir.Param.String):
@@ -43,13 +42,13 @@ def _param_to_schema_json(
         if isinstance(param.body, ir.Param.File):
             return {"type": "string", "x-styx-type": "file"}
         if isinstance(param.body, ir.Param.Struct):  # , ir.Param.StructUnion)):
-            v = _struct_to_schema_json(param, global_name_lookup)
+            v = _struct_to_schema_json(param)
             v["properties"]["@type"] = {"const": param.body.name}
             return v
         if isinstance(param.body, ir.Param.StructUnion):
             alternatives = []
             for struct in param.body.alts:
-                struct_json = _param_to_schema_json(struct, global_name_lookup)
+                struct_json = _param_to_schema_json(struct)
                 struct_json["properties"]["@type"] = {"const": struct.body.name}
                 alternatives.append(struct_json)
             return {"anyOf": alternatives}
@@ -85,12 +84,11 @@ def _param_to_schema_json(
 
 def _struct_to_schema_json(
     struct: ir.Param[ir.Param.Struct],
-    global_name_lookup: dict[ir.IdType, str],
 ) -> dict:
     ret: dict = {
         "type": "object",
         "properties": {
-            "@type": {"const": global_name_lookup[struct.base.id_]},
+            "@type": {"const": struct.body.global_name},
         },
         "additionalProperties": False,
     }
@@ -105,7 +103,7 @@ def _struct_to_schema_json(
     for param in struct.body.iter_params():
         if not (param.nullable or param.default_value is not None):
             required_properties.append(param.base.name)
-        ret["properties"][param.base.name] = _param_to_schema_json(param, global_name_lookup)
+        ret["properties"][param.base.name] = _param_to_schema_json(param)
 
     if required_properties:
         ret["required"] = required_properties
@@ -115,7 +113,6 @@ def _struct_to_schema_json(
 
 def to_schema_json(
     interface: ir.Interface,
-    global_name_lookup: dict[ir.IdType, str],
 ) -> dict:
     struct = interface.command
 
@@ -130,7 +127,7 @@ def to_schema_json(
     if struct.base.docs.description:
         ret["description"] = struct.base.docs.description
 
-    ret.update(_struct_to_schema_json(struct, global_name_lookup))
+    ret.update(_struct_to_schema_json(struct))
 
     return ret
 
@@ -147,12 +144,12 @@ def compile_schema_json(
 ) -> typing.Generator[CompiledFile, typing.Any, None]:
     interface_paths = []
     for interface in interfaces:
-        global_name_lookup = interface.get_global_name_lookup()
-        interface_path = pathlib.Path(_make_filename_safe(global_name_lookup[interface.command.base.id_]) + ".json")
+        interface.update_global_names()
+        interface_path = pathlib.Path(_make_filename_safe(interface.command.body.global_name) + ".json")
         interface_paths.append(interface_path)
         yield CompiledFile(
             path=interface_path,
-            content=json.dumps(to_schema_json(interface, global_name_lookup), indent=2),
+            content=json.dumps(to_schema_json(interface), indent=2),
         )
     yield CompiledFile(
         path=pathlib.Path("schema.json"),
