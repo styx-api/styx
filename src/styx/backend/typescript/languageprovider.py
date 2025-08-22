@@ -728,7 +728,16 @@ class TypeScriptLanguageCompileProvider(LanguageCompileProvider):
             package_data.module.imports.append(
                 f"export * from './{package_data.package_symbol}/{interface_module_symbol}'"
             )
+            package_data.module.imports.append(
+                f"import {{ {entrypoint_symbols.fn_execute} }} from './{package_data.package_symbol}/{interface_module_symbol}'"
+            )
 
+            yield CompiledFile(
+                path=pathlib.Path(package_data.package_symbol) / (interface_module_symbol + ".ts"),
+                content=collapse(self.generate_module(interface_module)),
+            )
+
+        for package_data in packages.values():
             dyn_execute_dict = {
                 self.expr_str(global_name): entrypoint.fn_execute
                 for global_name, entrypoint in package_data.dyn_entrypoints.items()
@@ -748,13 +757,8 @@ class TypeScriptLanguageCompileProvider(LanguageCompileProvider):
             )
             package_data.module.funcs_and_classes.append(fn_pkg_dyn_execute)
             package_data.module.imports.append("import { Runner } from 'styxdefs';")
+            package_data.module.exports.append("execute")
 
-            yield CompiledFile(
-                path=pathlib.Path(package_data.package_symbol) / (interface_module_symbol + ".ts"),
-                content=collapse(self.generate_module(interface_module)),
-            )
-
-        for package_data in packages.values():
             package_data.module.imports.sort()
             yield CompiledFile(
                 path=pathlib.Path(f"{package_data.package_symbol}.ts"),
