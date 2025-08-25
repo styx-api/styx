@@ -341,6 +341,7 @@ def _struct_from_boutiques(
         outputs = _collect_outputs(bt, ir_id_lookup, id_counter)
 
         docs = ir.Documentation(
+            title=bt.get("name"),
             description=bt.get("description"),
             authors=_get_authors(bt),
             urls=_get_urls(bt),
@@ -365,12 +366,14 @@ def _struct_from_boutiques(
         outputs = _collect_outputs(bt, ir_id_lookup, id_counter)
 
         docs_parent = ir.Documentation(
+            title=bt.get("name"),
             description=parent_input.get("description"),
             authors=_get_authors(parent_input),
             urls=_get_urls(parent_input),
         )
 
         docs = ir.Documentation(
+            title=bt.get("name"),
             description=bt.get("description"),
             authors=_get_authors(bt),
             urls=_get_urls(bt),
