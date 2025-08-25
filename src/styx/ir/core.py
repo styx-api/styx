@@ -72,6 +72,9 @@ class Output:
     docs: Documentation = dataclasses.field(default_factory=Documentation)
     """Documentation for the output."""
 
+    media_types: list[str] = dataclasses.field(default_factory=list)
+    """Media types the output may have."""
+
 
 T = TypeVar("T")
 
@@ -158,6 +161,9 @@ class Param(Generic[T]):
 
         mutable: bool = False
         """This file may be mutated."""
+
+        media_types: list[str] = dataclasses.field(default_factory=list)
+        """Media types the file may have."""
 
     @dataclass
     class Struct:
