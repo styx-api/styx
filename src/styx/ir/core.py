@@ -229,6 +229,20 @@ class Param(Generic[T]):
         alts: list[Param[Param.Struct]] = dataclasses.field(default_factory=list)
         """List of alternative struct parameters."""
 
+    def has_outputs(self) -> bool:
+        """Check if this param or any child param has outputs."""
+        if len(self.base.outputs) > 0:
+            return True
+        if isinstance(self.body, Param.Struct):
+            for e in self.body.iter_params():
+                if e.has_outputs():
+                    return True
+        elif isinstance(self.body, Param.StructUnion):
+            for e in self.body.alts:
+                if e.has_outputs():
+                    return True
+        return False
+
     def __init__(
         self,
         base: Base,

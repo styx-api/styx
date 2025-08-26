@@ -1,4 +1,5 @@
 """Common codegen utilities."""
+from typing_extensions import deprecated
 
 from styx.ir import core as ir
 
@@ -61,6 +62,7 @@ def escape_backslash(s: str) -> str:
     return s.replace("\\", "\\\\")
 
 
+@deprecated("Use Param.has_outputs() instead")
 def struct_has_outputs(struct: ir.Param[ir.Param.Struct]) -> bool:
     """Check if the sub-command has outputs."""
     if len(struct.base.outputs) > 0:
