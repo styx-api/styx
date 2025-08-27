@@ -43,13 +43,13 @@ def _param_to_input_schema_json(
             return {"type": "string", "x-styx-type": "file"}
         if isinstance(param.body, ir.Param.Struct):  # , ir.Param.StructUnion)):
             v = _struct_to_input_schema_json(param)
-            v["properties"]["@type"] = {"const": param.body.name}
+            v["properties"]["@type"] = {"const": param.body.global_name}
             return v
         if isinstance(param.body, ir.Param.StructUnion):
             alternatives = []
             for struct in param.body.alts:
                 struct_json = _param_to_input_schema_json(struct)
-                struct_json["properties"]["@type"] = {"const": struct.body.name}
+                struct_json["properties"]["@type"] = {"const": struct.body.global_name}
                 alternatives.append(struct_json)
             return {"anyOf": alternatives}
         assert False
