@@ -752,7 +752,7 @@ class PythonLanguageCompileProvider(Compilable):
                 package_dyn_entrypoints[interface.command.body.global_name] = entrypoint_symbols
                 package_module.imports.append(f"from .{interface_module_symbol} import *")
                 yield TextFile(
-                    path=python_package_path_src / package_symbol / (interface_module_symbol + ".py"),
+                    path=python_package_path_src / f"{project.name}_{package.name}" / package_symbol / (interface_module_symbol + ".py"),
                     content=collapse(self.generate_module(interface_module)),
                 )
 
@@ -779,7 +779,7 @@ class PythonLanguageCompileProvider(Compilable):
 
             package_module.imports.sort()
             yield TextFile(
-                path=python_package_path_src / package_symbol / "__init__.py",
+                path=python_package_path_src /  f"{project.name}_{package.name}" / package_symbol / "__init__.py",
                 content=collapse(self.generate_module(package_module)),
             )
 
