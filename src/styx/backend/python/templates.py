@@ -45,6 +45,9 @@ dependencies = [
     "styxdefs{STYXDEFS_COMPAT}"
 ]
 
+[tool.uv.build-backend]
+module-name = "{project.name}_{package.name}.{package.name}"
+
 [build-system]
 requires = ["uv_build>=0.8.13,<0.9.0"]
 build-backend = "uv_build"'''
