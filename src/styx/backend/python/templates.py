@@ -8,7 +8,7 @@ def template_root_pyproject(project: ir.Project, dependencies: list[str]) -> str
         if project.docs.description
         else f"Styx generated wrappers for {project.docs.title or project.name}."
     )
-    dependencies = "".join([f'\n  "{d}",' for d in dependencies])
+    dependencies = "".join([f'\n  "{project.name}_{d}",' for d in dependencies])
     authors = ", ".join(project.docs.authors) if project.docs.authors else "unknown"
     return f'''[project]
 name = "{project.name}"
