@@ -560,12 +560,13 @@ class EntrypointSymbols(NamedTuple):
 
 def compile_interface(
     lang: LanguageProvider,
+    package: ir.Package,
     interface: ir.Interface,
     package_scope: Scope,
     interface_module: GenericModule,
 ) -> EntrypointSymbols:
     """Entry point to the Python backend."""
-    interface.update_global_names()
+    interface.update_global_names(package.name)
 
     interface_module.imports.extend(lang.wrapper_module_imports())
 
@@ -573,6 +574,7 @@ def compile_interface(
         lang=lang,
         module=interface_module,
         scope=package_scope,
+        package=package,
         interface=interface,
     )
     interface_module.exports.append(metadata_symbol)

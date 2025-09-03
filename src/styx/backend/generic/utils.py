@@ -1,4 +1,5 @@
 """Common codegen utilities."""
+
 from typing_extensions import deprecated
 
 from styx.ir import core as ir

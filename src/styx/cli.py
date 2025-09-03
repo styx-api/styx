@@ -10,6 +10,7 @@ from pathlib import Path
 import styx.ir.core as ir
 from styx.backend import BACKEND_ID_TYPE, compile_language, get_backends
 from styx.frontend.boutiques import from_boutiques
+from styx.frontend.boutiques.core import partial_package_info_from_boutiques
 from styx.ir.optimize import optimize
 
 
@@ -130,41 +131,9 @@ def load_boutiques_file(file_path: Path, verbose: bool = False) -> dict:
         raise ValueError(f"Invalid JSON in {file_path}: {e}")
 
 
-def create_ir_interface(
-    json_data: dict,
-    package_name: str,
-    package_title: str | None = None,
-    package_description: str | None = None,
-    package_authors: list[str] | None = None,
-    package_literature: list[str] | None = None,
-    package_urls: list[str] | None = None,
-    optimize_ir: bool = True,
-    verbose: bool = False,
-) -> ir.Interface:
-    """Create IR interface from Boutiques JSON data."""
-    if verbose:
-        print(f"Creating IR interface for package '{package_name}'...")
-
-    # Create documentation object with all fields
-    docs = ir.Documentation(
-        title=package_title,
-        description=package_description,
-        authors=package_authors or [],
-        literature=package_literature or [],
-        urls=package_urls or [],
-    )
-
-    ir_interface = from_boutiques(json_data, package_name=package_name, package_docs=docs)
-
-    if optimize_ir:
-        if verbose:
-            print("Optimizing IR...")
-        ir_interface = optimize(ir_interface)
-
-    return ir_interface
-
-
 def compile_and_output(
+    project: ir.Project,
+    package: ir.Package,
     ir_interface: ir.Interface,
     backends: list[BACKEND_ID_TYPE],
     output_dir_user: Path | None = None,
@@ -185,7 +154,7 @@ def compile_and_output(
             print(f"Compiling to {backend}...")
 
         try:
-            compiled_files = list(compile_language(backend, [ir_interface]))
+            compiled_files = list(compile_language(backend, project, [(package, [ir_interface])]))
 
             for compiled_file in compiled_files:
                 if print_to_stdout:
@@ -223,6 +192,10 @@ def compile_and_output(
 
         except Exception as e:
             print(f"Error compiling to {backend}: {e}", file=sys.stderr)
+            if verbose:
+                import traceback
+
+                print(traceback.format_exc(), file=sys.stderr)
             continue
 
 
@@ -263,24 +236,34 @@ def main() -> int:
             # Load JSON data
             json_data = load_boutiques_file(input_file, args.verbose)
 
-            # Determine package name
-            package_name = args.package_name or "unknown"
+            project = ir.Project()
+
+            _partial_package = partial_package_info_from_boutiques(json_data)
+
+            package = ir.Package(
+                name=args.package_name or "unknown",
+                version=_partial_package.docker,
+                docker=_partial_package.version,
+                docs=ir.Documentation(
+                    title=args.package_title,
+                    description=args.package_description,
+                    authors=args.package_authors,
+                    literature=args.package_literature,
+                    urls=args.package_urls,
+                ),
+            )
 
             # Create IR interface
-            ir_interface = create_ir_interface(
-                json_data=json_data,
-                package_name=package_name,
-                package_title=args.package_title,
-                package_description=args.package_description,
-                package_authors=args.package_authors,
-                package_literature=args.package_literature,
-                package_urls=args.package_urls,
-                optimize_ir=not args.no_optimize,
-                verbose=args.verbose,
-            )
+            ir_interface = from_boutiques(json_data)
+            if not args.no_optimize:
+                if args.verbose:
+                    print("Optimizing IR...")
+                ir_interface = optimize(ir_interface)
 
             # Compile and output
             compile_and_output(
+                project=project,
+                package=package,
                 ir_interface=ir_interface,
                 backends=backends,
                 output_dir_user=args.output_dir,
@@ -291,6 +274,10 @@ def main() -> int:
 
         except Exception as e:
             print(f"Error processing {input_file}: {e}", file=sys.stderr)
+            if args.verbose:
+                import traceback
+
+                print(traceback.format_exc(), file=sys.stderr)
             continue
 
     if not args.dry_run and args.output_dir:

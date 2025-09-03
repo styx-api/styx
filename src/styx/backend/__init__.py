@@ -6,11 +6,9 @@ import typing
 import styx.ir.core as ir
 from styx.backend.boutiques.core import compile_boutiques_json
 from styx.backend.boutiques.core import to_boutiques as to_boutiques
-from styx.backend.common import CompiledFile
-from styx.backend.jsonschema import compile_schema_json
-from styx.backend.python.languageprovider import PythonLanguageProvider
-from styx.backend.r.languageprovider import RLanguageProvider
-from styx.backend.typescript.languageprovider import TypeScriptLanguageProvider
+from styx.backend.common import TextFile
+from styx.backend.compile import Compilable
+
 
 BACKEND_ID_TYPE = typing.Literal[
     "python",
@@ -47,40 +45,50 @@ def get_backends() -> list[BackendDescriptor]:
 
 def compile_language(
     lang: BACKEND_ID_TYPE,
-    interfaces: typing.Iterable[ir.Interface],
-) -> typing.Generator[CompiledFile, typing.Any, None]:
+    project: ir.Project,
+    packages: typing.Iterable[
+        tuple[
+            ir.Package,
+            typing.Iterable[ir.Interface],
+        ]
+    ],
+) -> typing.Generator[TextFile, typing.Any, None]:
     """For a stream of IR interfaces return a stream of compiled files.
 
     Args:
         lang: Target language.
-        interfaces: Stream of IR interfaces.
+        project: Project metadata.
+        packages: Stream of package metadata and IR interfaces.
 
     Returns:
         Stream of compiled files.
     """
+
+    compiler: Compilable | None = None
     if lang == "boutiques":
-        yield from compile_boutiques_json(interfaces)
+        yield from compile_boutiques_json((i for i in (i for _, i in packages)))
         return
     if lang == "ir":
-        import styx.ir.serialize
+        from styx.ir.serialize import JsonDumper
 
-        yield from (
-            CompiledFile(
-                path=pathlib.Path(interface.package.name) / (interface.command.base.name + ".json"),
-                content=styx.ir.serialize.to_json(interface, 2),
-            )
-            for interface in interfaces
-        )
-        return
+        compiler = JsonDumper()
     elif lang == "jsonschema":
-        yield from compile_schema_json(interfaces)
-        return
+        from styx.backend.jsonschema import JsonSchemaCompiler
+
+        compiler = JsonSchemaCompiler()
     if lang == "python":
-        lp = PythonLanguageProvider
+        from styx.backend.python.languageprovider import PythonLanguageProvider
+
+        compiler = PythonLanguageProvider()
     elif lang == "r":
-        lp = RLanguageProvider
+        from styx.backend.r.languageprovider import RLanguageProvider
+
+        compiler = RLanguageProvider()
     elif lang == "typescript":
-        lp = TypeScriptLanguageProvider
-    else:
-        raise Exception(f"Unknown language '{lang}'")
-    yield from lp().compile(interfaces)
+        from styx.backend.typescript.languageprovider import TypeScriptLanguageProvider
+
+        compiler = TypeScriptLanguageProvider()
+
+    if not compiler:
+        raise Exception(f"No compiler found for '{lang}'")
+    yield from compiler.compile(project, packages)

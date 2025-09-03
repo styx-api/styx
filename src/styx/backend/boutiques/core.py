@@ -6,7 +6,7 @@ import typing
 from typing import Optional, Union
 
 import styx.ir.core as ir
-from styx.backend.common import CompiledFile
+from styx.backend.common import TextFile
 
 
 class BoutiquesConversionError(Exception):
@@ -314,9 +314,9 @@ def to_boutiques(interface: ir.Interface) -> dict:
 
 def compile_boutiques_json(
     interfaces: typing.Iterable[ir.Interface],
-) -> typing.Generator[CompiledFile, typing.Any, None]:
+) -> typing.Generator[TextFile, typing.Any, None]:
     for interface in interfaces:
-        yield CompiledFile(
+        yield TextFile(
             path=pathlib.Path(interface.uid + ".json"),
             content=json.dumps(to_boutiques(interface), indent=2),
         )

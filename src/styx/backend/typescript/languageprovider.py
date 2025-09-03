@@ -2,14 +2,14 @@ import pathlib
 import re
 import typing
 
-from styx.backend import CompiledFile
+from styx.backend import TextFile
+from styx.backend.compile import Compilable
 from styx.backend.generic.documentation import docs_to_docstring
 from styx.backend.generic.gen.interface import compile_interface, EntrypointSymbols
 from styx.backend.generic.gen.lookup import LookupParam
 from styx.backend.generic.languageprovider import (
     TYPE_PYLITERAL,
     ExprType,
-    LanguageCompileProvider,
     LanguageExprProvider,
     LanguageHighLevelProvider,
     LanguageIrProvider,
@@ -27,6 +27,7 @@ from styx.backend.generic.utils import (
     enquote,
     struct_has_outputs,
 )
+from styx.backend.typescript.templates import template_build_js, template_package_json, template_tsconfig_json
 from styx.ir import core as ir
 
 
@@ -691,56 +692,55 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
         return f"({name}[{self.expr_str(param.base.name)}] ?? null)"
 
 
-class _PackageData(typing.NamedTuple):
-    package: ir.Package
-    package_symbol: str
-    scope: Scope
-    module: GenericModule
-    dyn_entrypoints: dict[str, EntrypointSymbols]
-
-
-class TypeScriptLanguageCompileProvider(LanguageCompileProvider):
-    def compile(self, interfaces: typing.Iterable[ir.Interface]) -> typing.Generator[CompiledFile, typing.Any, None]:
-        packages: dict[str, _PackageData] = {}
+class TypeScriptLanguageCompileProvider(Compilable):
+    def compile(
+        self,
+        project: ir.Project,
+        packages: typing.Iterable[
+            tuple[
+                ir.Package,
+                typing.Iterable[ir.Interface],
+            ]
+        ],
+    ) -> typing.Generator[TextFile, typing.Any, None]:
         global_scope = self.language_scope()
 
-        for interface in interfaces:
-            if interface.package.name not in packages:
-                packages[interface.package.name] = _PackageData(
-                    package=interface.package,
-                    package_symbol=global_scope.add_or_dodge(self.symbol_var_case_from(interface.package.name)),
-                    scope=Scope(parent=global_scope),
-                    module=GenericModule(
-                        docstr=docs_to_docstring(interface.package.docs),
-                    ),
-                    dyn_entrypoints={},
+        package_names: list[str] = []
+        for package, interfaces in packages:
+            package_names.append(package.name)
+
+            package_symbol: str = global_scope.add_or_dodge(self.symbol_var_case_from(package.name))
+            package_scope: Scope = Scope(parent=global_scope)
+            package_module: GenericModule = GenericModule(
+                docstr=docs_to_docstring(package.docs),
+            )
+            package_dyn_entrypoints: dict[str, EntrypointSymbols] = {}
+
+            for interface in interfaces:
+                interface_module_symbol = self.symbol_var_case_from(interface.command.base.name)
+
+                interface_module: GenericModule = GenericModule()
+                entrypoint_symbols = compile_interface(
+                    lang=self,
+                    package=package,
+                    interface=interface,
+                    package_scope=package_scope,
+                    interface_module=interface_module,
                 )
-            package_data = packages[interface.package.name]
+                package_dyn_entrypoints[interface.command.body.global_name] = entrypoint_symbols
+                package_module.imports.append(f"export * from './{package_symbol}/{interface_module_symbol}'")
+                package_module.imports.append(
+                    f"import {{ {entrypoint_symbols.fn_execute} }} from './{package_symbol}/{interface_module_symbol}'"
+                )
 
-            # interface_module_symbol = global_scope.add_or_dodge(python_snakify(interface.command.param.name))
-            interface_module_symbol = self.symbol_var_case_from(interface.command.base.name)
+                yield TextFile(
+                    path=pathlib.Path("src") / package_symbol / (interface_module_symbol + ".ts"),
+                    content=collapse(self.generate_module(interface_module)),
+                )
 
-            interface_module: GenericModule = GenericModule()
-            entrypoint_symbols = compile_interface(
-                lang=self, interface=interface, package_scope=package_data.scope, interface_module=interface_module
-            )
-            package_data.dyn_entrypoints[interface.command.body.global_name] = entrypoint_symbols
-            package_data.module.imports.append(
-                f"export * from './{package_data.package_symbol}/{interface_module_symbol}'"
-            )
-            package_data.module.imports.append(
-                f"import {{ {entrypoint_symbols.fn_execute} }} from './{package_data.package_symbol}/{interface_module_symbol}'"
-            )
-
-            yield CompiledFile(
-                path=pathlib.Path(package_data.package_symbol) / (interface_module_symbol + ".ts"),
-                content=collapse(self.generate_module(interface_module)),
-            )
-
-        for package_data in packages.values():
             dyn_execute_dict = {
                 self.expr_str(global_name): entrypoint.fn_execute
-                for global_name, entrypoint in package_data.dyn_entrypoints.items()
+                for global_name, entrypoint in package_dyn_entrypoints.items()
             }
             fn_pkg_dyn_execute = GenericFunc(
                 name=f"execute",
@@ -755,15 +755,31 @@ class TypeScriptLanguageCompileProvider(LanguageCompileProvider):
                     '}[params["@type"]](params, runner)',
                 ],
             )
-            package_data.module.funcs_and_classes.append(fn_pkg_dyn_execute)
-            package_data.module.imports.append("import { Runner } from 'styxdefs';")
-            package_data.module.exports.append("execute")
+            package_module.funcs_and_classes.append(fn_pkg_dyn_execute)
+            package_module.imports.append("import { Runner } from 'styxdefs';")
+            package_module.exports.append("execute")
 
-            package_data.module.imports.sort()
-            yield CompiledFile(
-                path=pathlib.Path(f"{package_data.package_symbol}.ts"),
-                content=collapse(self.generate_module(package_data.module)),
+            package_module.imports.sort()
+            yield TextFile(
+                path=pathlib.Path("src") / f"{package_symbol}.ts",
+                content=collapse(self.generate_module(package_module)),
             )
+
+        yield TextFile(
+            path=pathlib.Path("src/index.ts"),
+            content="\n".join([f"export * as {x} from './{x}'" for x in package_names])
+            + "\n"
+            + "\n".join([f"import * as {x} from './{x}'" for x in package_names])
+            + f"\nimport {{Runner}} from 'styxdefs'\nexport const version = '{project.version}';"
+            + "\nexport function execute(params: any, runner: Runner | null = null) {;"
+            + '\n  const stype = params["@type"];\n'
+            + "\n".join([f'  if (stype.startsWith("{x}")) return {x}.execute(params, runner);' for x in package_names])
+            + "\n}",
+        )
+
+        yield TextFile(path=pathlib.Path("build.js"), content=template_build_js())
+        yield TextFile(path=pathlib.Path("package.json"), content=template_package_json(project))
+        yield TextFile(path=pathlib.Path("tsconfig.json"), content=template_tsconfig_json())
 
 
 class TypeScriptLanguageProvider(

@@ -2,14 +2,13 @@ import pathlib
 import re
 import typing
 
-from styx.backend.common import CompiledFile
+from styx.backend.common import TextFile
 from styx.backend.generic.documentation import docs_to_docstring
 from styx.backend.generic.gen.interface import compile_interface
 from styx.backend.generic.gen.lookup import LookupParam
 from styx.backend.generic.languageprovider import (
     TYPE_PYLITERAL,
     ExprType,
-    LanguageCompileProvider,
     LanguageExprProvider,
     LanguageHighLevelProvider,
     LanguageIrProvider,
@@ -722,8 +721,8 @@ class _PackageData(typing.NamedTuple):
     module: GenericModule
 
 
-class RLanguageCompileProvider(LanguageCompileProvider):
-    def compile(self, interfaces: typing.Iterable[ir.Interface]) -> typing.Generator[CompiledFile, typing.Any, None]:
+class RLanguageCompileProvider:
+    def compile(self, interfaces: typing.Iterable[ir.Interface]) -> typing.Generator[TextFile, typing.Any, None]:
         packages: dict[str, _PackageData] = {}
         global_scope = self.language_scope()
 
@@ -747,7 +746,7 @@ class RLanguageCompileProvider(LanguageCompileProvider):
                 lang=self, interface=interface, package_scope=package_data.scope, interface_module=interface_module
             )
             # package_data.module.imports.append(f"from .{interface_module_symbol} import *")
-            yield CompiledFile(
+            yield TextFile(
                 path=pathlib.Path(package_data.package_symbol) / (interface_module_symbol + ".R"),
                 content=collapse(self.generate_module(interface_module)),
             )

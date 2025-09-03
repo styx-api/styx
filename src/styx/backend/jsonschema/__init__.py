@@ -6,7 +6,8 @@ import re
 import typing
 
 import styx.ir.core as ir
-from styx.backend.common import CompiledFile
+from styx.backend.common import TextFile
+from styx.backend.compile import Compilable
 
 
 def _param_to_input_schema_json(
@@ -159,18 +160,14 @@ def to_output_schema_json(
         }
 
     def _param_to_output_json_schema(param: ir.Param):
-        outs = {
+        outs: dict = {
             "root": {
                 "type": "string",
                 "title": "Root",
                 "description": "Output root directory",
             }
         }
-        ret = {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": outs
-        }
+        ret = {"type": "object", "additionalProperties": False, "properties": outs}
         if param.list_:
             ret = {
                 "type": "array",
@@ -199,10 +196,7 @@ def to_output_schema_json(
 
     ret.update(_param_to_output_json_schema(struct))
 
-
-
     return ret
-
 
 
 def _make_filename_safe(filename: str) -> str:
@@ -212,31 +206,51 @@ def _make_filename_safe(filename: str) -> str:
     return safe_filename if safe_filename else "unnamed"
 
 
-def compile_schema_json(
-    interfaces: typing.Iterable[ir.Interface],
-) -> typing.Generator[CompiledFile, typing.Any, None]:
-    input_schema_paths = []
-    output_schema_paths = []
-    for interface in interfaces:
-        interface.update_global_names()
-        safe_global_name = _make_filename_safe(interface.command.body.global_name)
-        input_schema_path = pathlib.Path(safe_global_name + ".input.json")
-        input_schema_paths.append(input_schema_path)
-        output_schema_path = pathlib.Path(safe_global_name + ".output.json")
-        output_schema_paths.append(output_schema_path)
-        yield CompiledFile(
-            path=input_schema_path,
-            content=json.dumps(to_input_schema_json(interface), indent=2),
+class JsonSchemaCompiler(Compilable):
+    def compile(
+        self,
+        project: ir.Project,
+        packages: typing.Iterable[
+            tuple[
+                ir.Package,
+                typing.Iterable[ir.Interface],
+            ]
+        ],
+    ) -> typing.Generator[TextFile, typing.Any, None]:
+        package_names: list[str] = []
+        for package, interfaces in packages:
+            input_schema_paths: list[pathlib.Path] = []
+            output_schema_paths: list[pathlib.Path] = []
+            package_path = pathlib.Path(package.name)
+            package_names.append(package.name)
+            for interface in interfaces:
+                interface.update_global_names(package.name)
+                safe_global_name = _make_filename_safe(interface.command.body.global_name)
+                input_schema_path = package_path / (safe_global_name + ".input.json")
+                input_schema_paths.append(input_schema_path)
+                output_schema_path = package_path / (safe_global_name + ".output.json")
+                output_schema_paths.append(output_schema_path)
+                yield TextFile.json(
+                    path=input_schema_path,
+                    content=to_input_schema_json(interface),
+                )
+                yield TextFile.json(
+                    path=output_schema_path,
+                    content=to_output_schema_json(interface),
+                )
+            yield TextFile.json(
+                path=package_path / "input.schema.json",
+                content={"oneOf": [({"$ref": x.as_posix()}) for x in input_schema_paths]},
+            )
+            yield TextFile.json(
+                path=package_path / "output.schema.json",
+                content={"oneOf": [({"$ref": x.as_posix()}) for x in output_schema_paths]},
+            )
+        yield TextFile.json(
+            path=pathlib.Path("input.schema.json"),
+            content={"oneOf": [({"$ref": f"{x}/input.schema.json"}) for x in package_names]},
         )
-        yield CompiledFile(
-            path=output_schema_path,
-            content=json.dumps(to_output_schema_json(interface), indent=2),
+        yield TextFile.json(
+            path=pathlib.Path("output.schema.json"),
+            content={"oneOf": [({"$ref": f"{x}/output.schema.json"}) for x in package_names]},
         )
-    yield CompiledFile(
-        path=pathlib.Path("input.schema.json"),
-        content=json.dumps({"oneOf": [({"$ref": str(x)}) for x in input_schema_paths]}, indent=2),
-    )
-    yield CompiledFile(
-        path=pathlib.Path("output.schema.json"),
-        content=json.dumps({"oneOf": [({"$ref": str(x)}) for x in output_schema_paths]}, indent=2),
-    )

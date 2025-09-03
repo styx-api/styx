@@ -2,9 +2,15 @@
 
 import dataclasses
 import json
+import pathlib
+import re
+import typing
 from typing import Any
 
+from styx.backend import TextFile
+from styx.backend.compile import Compilable
 from styx.ir.core import Param
+from styx.ir import core as ir
 
 
 def _param_body_type(param_body: Any) -> str:
@@ -108,3 +114,44 @@ def from_json_file(filename: str) -> Any:
         Deserialized object
     """
     raise NotImplementedError
+
+
+def _make_filename_safe(filename: str) -> str:
+    """Make a string safe for use as a filename."""
+    safe_filename = re.sub(r'[<>:"/\\|?*]', "_", filename)
+    safe_filename = safe_filename.strip(". ")
+    return safe_filename if safe_filename else "unnamed"
+
+
+class JsonDumper(Compilable):
+    def compile(
+        self,
+        project: ir.Project,
+        packages: typing.Iterable[
+            tuple[
+                ir.Package,
+                typing.Iterable[ir.Interface],
+            ]
+        ],
+    ) -> typing.Generator[TextFile, typing.Any, None]:
+        package_index = {"packages": []}
+
+        for package, interfaces in packages:
+            endpoints = []
+            for interface in interfaces:
+                out_path = pathlib.Path(package.name) / (_make_filename_safe(interface.command.base.name) + ".json")
+                yield TextFile(
+                    path=out_path,
+                    content=to_json(interface, 2),
+                )
+                endpoints.append({
+                    "name": interface.command.base.name,
+                    "file": out_path.as_posix(),
+                })
+
+            package_index["packages"].append(package)
+
+        yield TextFile(
+            path=pathlib.Path("package_index.json"),
+            content=to_json(package_index),
+        )

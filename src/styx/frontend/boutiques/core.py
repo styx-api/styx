@@ -462,17 +462,31 @@ def _collect_stdout_stderr_output(bt: dict, id_counter: IdCounter) -> ir.StdOutE
     )
 
 
-def from_boutiques(
+@dataclass
+class BoutiquesPartialPackage:
+    docker: str | None = None
+    version: str | None = None
+
+
+def partial_package_info_from_boutiques(
     tool: dict,
-    package_name: str,
-    package_docs: ir.Documentation | None = None,
-) -> ir.Interface:
-    """Convert a Boutiques tool to a Styx descriptor."""
-    hash_ = _hash_from_boutiques(tool)
+) -> BoutiquesPartialPackage:
+    """Boutiques may provide some package level information in the tool descriptor."""
 
     docker: str | None = None
     if "container-image" in tool:
         docker = tool["container-image"].get("image")
+    return BoutiquesPartialPackage(
+        docker=docker,
+        version=tool.get("tool-version"),
+    )
+
+
+def from_boutiques(
+    tool: dict,
+) -> ir.Interface:
+    """Convert a Boutiques tool to a Styx descriptor."""
+    hash_ = _hash_from_boutiques(tool)
 
     id_counter = IdCounter()
 
@@ -488,12 +502,6 @@ def from_boutiques(
     return normalize(
         ir.Interface(
             uid=f"{hash_}.boutiques",
-            package=ir.Package(
-                name=package_name,
-                version=tool.get("tool-version"),
-                docker=docker,
-                docs=package_docs if package_docs else ir.Documentation(),
-            ),
             command=ir.Param(
                 base=dparam,
                 body=dstruct,

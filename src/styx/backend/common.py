@@ -1,8 +1,9 @@
+import json
 import pathlib
 import typing
 
 
-class CompiledFile(typing.NamedTuple):
+class TextFile(typing.NamedTuple):
     path: pathlib.Path
     """Relative path of the output file"""
     content: str
@@ -18,3 +19,16 @@ class CompiledFile(typing.NamedTuple):
     def __repr__(self) -> str:
         """Human-readable representation."""
         return f"{'=' * 80}\nFile: {self.path.as_posix()}\n{'-' * 80}\n{self.content}\n{'=' * 80}"
+
+    @classmethod
+    def json(
+        cls,
+        path: pathlib.Path,
+        content: typing.Any,
+        indent: None | int | str = 2,
+    ):
+        """Utility constructor that creates a TextFile via JSON serialization."""
+        return cls(
+            path=path,
+            content=json.dumps(content, indent=indent),
+        )

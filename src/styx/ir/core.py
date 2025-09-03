@@ -26,6 +26,26 @@ class Documentation:
 
 
 @dataclass
+class Project:
+    """Metadata for project containing multiple packages."""
+
+    name: str = "unknown"
+    """The name of the project."""
+
+    version: str = "0.1.0"
+    """The version of the project."""
+
+    docs: Documentation = dataclasses.field(default_factory=Documentation)
+    """Documentation for the project."""
+
+    license: str | None = None
+    """License of the project."""
+
+    extras: dict[str, Any] = dataclasses.field(default_factory=dict)
+    """Additional backend specific config options."""
+
+
+@dataclass
 class Package:
     """Metadata for software package containing command."""
 
@@ -36,7 +56,7 @@ class Package:
     """The version of the package."""
 
     docker: str | None
-    """Docker image information, if applicable."""
+    """Docker image tag."""
 
     docs: Documentation = dataclasses.field(default_factory=Documentation)
     """Documentation for the package."""
@@ -575,9 +595,6 @@ class Interface:
     uid: str
     """Unique identifier for the interface."""
 
-    package: Package
-    """The package associated with this interface."""
-
     command: Param[Param.Struct]
     """The command structure for this interface."""
 
@@ -587,7 +604,10 @@ class Interface:
     stderr_as_string_output: StdOutErrAsStringOutput | None = None
     """Collect stderr as string output."""
 
-    def update_global_names(self) -> None:
+    project: Project = dataclasses.field(default_factory=Project)
+    """Project metadata."""
+
+    def update_global_names(self, package_name: str) -> None:
         """Generate/update global struct names."""
 
         def _rec(
@@ -602,5 +622,5 @@ class Interface:
                         yield from _rec(e, path + [e])
 
         for node, path in _rec(self.command, [self.command]):
-            global_name = ".".join([self.package.name] + [e.base.name for e in path])
+            global_name = ".".join([package_name] + [e.base.name for e in path])
             node.body.global_name = global_name
