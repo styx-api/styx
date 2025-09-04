@@ -134,24 +134,30 @@ class JsonDumper(Compilable):
             ]
         ],
     ) -> typing.Generator[TextFile, typing.Any, None]:
-        package_index = {"packages": []}
-
+        package_index = {
+            "project": project,
+            "packages": [],
+        }
         for package, interfaces in packages:
-            endpoints = []
+            apps = []
             for interface in interfaces:
                 out_path = pathlib.Path(package.name) / (_make_filename_safe(interface.command.base.name) + ".json")
                 yield TextFile(
                     path=out_path,
                     content=to_json(interface, 2),
                 )
-                endpoints.append({
+                apps.append({
+                    "id": interface.uid,
                     "name": interface.command.base.name,
-                    "file": out_path.as_posix(),
+                    "app": out_path.as_posix(),
                 })
 
-            package_index["packages"].append(package)
+            package_index["packages"].append({
+                "package": package,
+                "apps": apps,
+            })
 
         yield TextFile(
-            path=pathlib.Path("package_index.json"),
-            content=to_json(package_index),
+            path=pathlib.Path("index.json"),
+            content=to_json(package_index, indent=2),
         )

@@ -218,11 +218,13 @@ class JsonSchemaCompiler(Compilable):
         ],
     ) -> typing.Generator[TextFile, typing.Any, None]:
         package_names: list[str] = []
+        package_index = []
         for package, interfaces in packages:
             input_schema_paths: list[pathlib.Path] = []
             output_schema_paths: list[pathlib.Path] = []
             package_path = pathlib.Path(package.name)
             package_names.append(package.name)
+            apps = []
             for interface in interfaces:
                 interface.update_global_names(package.name)
                 safe_global_name = _make_filename_safe(interface.command.body.global_name)
@@ -238,6 +240,15 @@ class JsonSchemaCompiler(Compilable):
                     path=output_schema_path,
                     content=to_output_schema_json(interface),
                 )
+                apps.append({
+                    "id": interface.uid,
+                    "inputSchema": input_schema_path.as_posix(),
+                    "outputSchema": output_schema_path.as_posix(),
+                })
+            package_index.append({
+                "name": package.name,
+                "apps": apps,
+            })
             yield TextFile.json(
                 path=package_path / "input.schema.json",
                 content={"oneOf": [({"$ref": x.as_posix()}) for x in input_schema_paths]},
@@ -253,4 +264,12 @@ class JsonSchemaCompiler(Compilable):
         yield TextFile.json(
             path=pathlib.Path("output.schema.json"),
             content={"oneOf": [({"$ref": f"{x}/output.schema.json"}) for x in package_names]},
+        )
+        yield TextFile.json(
+            path=pathlib.Path("index.json"),
+            content={
+                "name": project.name,
+                "version": project.version,
+                "packages": package_index,
+            }
         )
