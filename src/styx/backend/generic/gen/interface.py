@@ -316,7 +316,10 @@ def _compile_func_build_outputs(
         output_param_reference: ir.OutputParamReference,
     ) -> str:
         p = lookup.param[output_param_reference.ref_id]
-        symbol = lang.param_dict_get_or_null("params", p)
+        if output_param_reference.fallback is None:
+            symbol = lang.param_dict_get_or_null("params", p)
+        else:
+            symbol = lang.param_dict_get_or_default("params", p, lang.expr_str(output_param_reference.fallback))
 
         if p.list_:
             raise Exception(f"Output path template replacements cannot be lists. ({p.base.name})")
@@ -355,9 +358,11 @@ def _compile_func_build_outputs(
             output_segments.append(_py_get_val(token))
 
             ostruct = lookup.param[token.ref_id]
-            # param_symbol = lookup.expr_param_symbol_alias[ostruct.base.id_]
+
             param_symbol = lang.param_dict_get_or_null("params", ostruct)
-            if (py_var_is_set_by_user := lang.param_var_is_set_by_user(ostruct, param_symbol, False)) is not None:
+            if (
+                py_var_is_set_by_user := lang.param_var_is_set_by_user(ostruct, param_symbol, False)
+            ) is not None and token.fallback is None:
                 conditions.append(py_var_is_set_by_user)
 
         if len(conditions) > 0:

@@ -688,8 +688,8 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
     def param_dict_get(self, name: str, param: ir.Param) -> ExprType:
         return f"{name}[{self.expr_str(param.base.name)}]"
 
-    def param_dict_get_or_null(self, name: str, param: ir.Param) -> ExprType:
-        return f"({name}[{self.expr_str(param.base.name)}] ?? null)"
+    def param_dict_get_or_default(self, name: str, param: ir.Param, default: ExprType) -> ExprType:
+        return f"({name}[{self.expr_str(param.base.name)}] ?? {default})"
 
 
 class TypeScriptLanguageCompileProvider(Compilable):

@@ -479,7 +479,7 @@ class LanguageHighLevelProvider(Protocol):
 
     @abstractmethod
     def param_dict_set(self, dict_symbol: str, param: ir.Param, value_expr: str) -> LineBuffer:
-        """Get a parameter from its dict."""
+        """Set a parameter from in a dict."""
         ...
 
     @abstractmethod
@@ -488,9 +488,13 @@ class LanguageHighLevelProvider(Protocol):
         ...
 
     @abstractmethod
-    def param_dict_get_or_null(self, name: str, param: ir.Param) -> ExprType:
+    def param_dict_get_or_default(self, name: str, param: ir.Param, default: ExprType) -> ExprType:
         """Get a parameter from its dict."""
         ...
+
+    def param_dict_get_or_null(self, name: str, param: ir.Param) -> ExprType:
+        """Get a parameter from its dict."""
+        return self.param_dict_get_or_default(name, param, self.expr_null())
 
 
 class LanguageIrProvider(Protocol):

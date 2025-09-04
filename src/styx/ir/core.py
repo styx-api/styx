@@ -75,6 +75,9 @@ class OutputParamReference:
     file_remove_suffixes: list[str] = dataclasses.field(default_factory=list)
     """List of suffixes to remove from file names."""
 
+    fallback: str | None = None
+    """Fall back to this value if the referenced parameter is optional and set to None."""
+
 
 @dataclass
 class Output:

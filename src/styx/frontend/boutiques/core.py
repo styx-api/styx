@@ -400,6 +400,7 @@ def _collect_outputs(bt: dict, ir_id_lookup: dict[str, ir.IdType], id_counter: I
             ir.OutputParamReference(
                 ref_id=x,
                 file_remove_suffixes=bt_output.get("path-template-stripped-extensions", []),
+                fallback=bt_output.get("path-template-fallback", None),
             )
             if isinstance(x, int)
             else x
