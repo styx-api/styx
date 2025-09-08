@@ -405,12 +405,12 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
         if struct.list_:
             o = f'{struct_symbol}.map(i => dynOutputs(i["@type"])?.(i, execution) ?? null)'
             if struct.nullable:
-                o = f"({o} ?? null)"
+                o = f"{struct_symbol} ? {o} : null"
             return o
 
         o = f'dynOutputs({struct_symbol}["@type"])?.({struct_symbol}, execution)'
         if struct.nullable:
-            o = f"({o} ?? null)"
+            o = f"{struct_symbol} ? ({o} ?? null) : null"
         return o
 
     def runner_symbol(self) -> str:
