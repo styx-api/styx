@@ -100,7 +100,7 @@ def _struct_to_input_schema_json(
     if struct.base.docs.description:
         ret["description"] = struct.base.docs.description
 
-    required_properties: list[str] = []
+    required_properties: list[str] = ["@type"]
     for param in struct.body.iter_params():
         if not (param.nullable or param.default_value is not None):
             required_properties.append(param.base.name)
