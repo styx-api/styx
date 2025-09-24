@@ -114,7 +114,7 @@ def _compile_build_cargs(
                     carg_exprs_maybe_null.append(MStr(lang.expr_literal(token), False))
                     continue
                 # elem_symbol = lookup.py_symbol[token.base.id_]
-                elem_symbol = lang.param_dict_get_or_null("params", token)
+                elem_symbol = lang.param_dict_get_or_default("params", token, lang.expr_null() if token.default_value == ir.Param.SetToNone else lang.expr_literal(token.default_value)) #todo: only on undefined not on null - this will need a change in the system
                 param_as_mstr = lang.param_var_to_mstr(token, elem_symbol)
                 carg_exprs.append(param_as_mstr)
                 if (param_is_set_expr := lang.param_var_is_set_by_user(token, elem_symbol, False)) is not None:
