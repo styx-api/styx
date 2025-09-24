@@ -1,6 +1,5 @@
 """Compile JSON schema (of input parameters)."""
 
-import json
 import pathlib
 import re
 import typing
@@ -15,26 +14,35 @@ def _param_to_input_schema_json(
 ) -> dict:
     def _val() -> dict:
         if isinstance(param.body, ir.Param.String):
-            return {
+            v = {
                 "type": "string",
             }
+            if param.choices:
+                v["enum"] = param.choices
+            return v
         if isinstance(param.body, ir.Param.Int):
             v: dict = {
                 "type": "integer",
             }
-            if param.body.min_value is not None:
-                v["minimum"] = param.body.min_value
-            if param.body.max_value is not None:
-                v["maximum"] = param.body.max_value
+            if param.choices:
+                v["enum"] = param.choices
+            else:
+                if param.body.min_value is not None:
+                    v["minimum"] = param.body.min_value
+                if param.body.max_value is not None:
+                    v["maximum"] = param.body.max_value
             return v
         if isinstance(param.body, ir.Param.Float):
             v = {
                 "type": "number",
             }
-            if param.body.min_value is not None:
-                v["minimum"] = param.body.min_value
-            if param.body.max_value is not None:
-                v["maximum"] = param.body.max_value
+            if param.choices:
+                v["enum"] = param.choices
+            else:
+                if param.body.min_value is not None:
+                    v["minimum"] = param.body.min_value
+                if param.body.max_value is not None:
+                    v["maximum"] = param.body.max_value
             return v
         if isinstance(param.body, ir.Param.Bool):
             return {
@@ -113,7 +121,7 @@ def _struct_to_input_schema_json(
 
 
 def to_input_schema_json(
-    interface: ir.Interface,
+        interface: ir.Interface,
 ) -> dict:
     """Input params JSON schema."""
     struct = interface.command
