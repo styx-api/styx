@@ -206,6 +206,12 @@ def to_output_schema_json(
 
     ret.update(_param_to_output_json_schema(struct))
 
+    # always require root @type for hub - maybe handle this on hub side?
+    if "required" in ret:
+        ret["required"].append("@type")
+    else:
+        ret["required"] = ["@type"]
+
     return ret
 
 
