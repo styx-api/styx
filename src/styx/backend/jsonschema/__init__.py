@@ -237,7 +237,7 @@ class JsonSchemaCompiler(Compilable):
             apps = []
             for interface in interfaces:
                 interface.setup(package.name)
-                safe_global_name = _make_filename_safe(interface.command.body.public_name)
+                safe_global_name = _make_filename_safe(interface.command.body.public_name.replace("/","."))
                 input_schema_path = package_path / (safe_global_name + ".input.json")
                 input_schema_paths.append(input_schema_path)
                 output_schema_path = package_path / (safe_global_name + ".output.json")
