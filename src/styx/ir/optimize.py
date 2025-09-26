@@ -3,11 +3,11 @@ from typing import Generator
 import styx.ir.core as ir
 
 
-def _merge_string_tokens(interface: ir.Interface) -> ir.Interface:
+def _merge_string_tokens(interface: ir.App) -> ir.App:
     """Merge neighbouring string literals in Carg tokens."""
 
-    def _iter_cargs() -> Generator[ir.Carg, None, None]:
-        for param in interface.command.iter_params_recursively(False):
+    def _iter_cargs() -> Generator[ir.CmdArg, None, None]:
+        for param in interface.command.iter_params_deep(False):
             if isinstance(param.body, ir.Param.Struct):
                 for group in param.body.groups:
                     yield from group.cargs
@@ -29,7 +29,7 @@ def _merge_string_tokens(interface: ir.Interface) -> ir.Interface:
     return interface
 
 
-def optimize(interface: ir.Interface) -> ir.Interface:
+def optimize(interface: ir.App) -> ir.App:
     """Simplify IR without changing meaning."""
     interface = _merge_string_tokens(interface)
     return interface

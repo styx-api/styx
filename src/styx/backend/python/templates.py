@@ -73,6 +73,10 @@ This package contains wrappers only and has no affiliation with the original aut
 def template_root_init_py(project: ir.Project, package_names: list[str]) -> str:
     reexports = "\n".join([f"from {project.name}_{x} import {x}" for x in package_names])
 
+    dyn_execute = "\n".join([
+        f'    if (stype.startswith("{x}/")): return {x}.execute(params, runner)' for x in package_names
+    ])
+
     return f'''{reexports}
 from styxdefs import *  # Reexport styxdefs
 from styxdocker import DockerRunner
@@ -102,4 +106,10 @@ def use_singularity(*args, **kwargs):
 
 def use_graph(*args, **kwargs):
     """Set the GraphRunner as the global runner."""
-    set_global_runner(GraphRunner(*args, **kwargs))'''
+    set_global_runner(GraphRunner(*args, **kwargs))
+
+def execute(params, runner: Runner | None = None):
+    stype = params["@type"]
+{dyn_execute}
+    return None
+'''

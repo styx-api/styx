@@ -1,5 +1,5 @@
 import styx.ir.core as ir
-from styx.backend.generic.gen.lookup import LookupParam
+from styx.backend.generic.gen.lookup import SymbolLUT
 from styx.backend.generic.languageprovider import LanguageProvider
 from styx.backend.generic.linebuffer import LineBuffer, indent
 from styx.backend.generic.model import GenericFunc
@@ -19,10 +19,10 @@ def _generate_raise_value_err(obj: str, expectation: str, reality: str | None = 
 
 
 def _param_compile_constraint_checks(
-    lang: LanguageProvider, buf: LineBuffer, param: ir.Param, lookup: LookupParam
+    lang: LanguageProvider, buf: LineBuffer, param: ir.Param, lookup: SymbolLUT
 ) -> None:
     """Generate input constraint validation code for an input argument."""
-    py_symbol = lookup.expr_param_symbol_alias[param.base.id_]
+    py_symbol = lookup.var_param[param.base.id_]
 
     min_value: float | int | None = None
     max_value: float | int | None = None
@@ -171,9 +171,9 @@ def struct_compile_constraint_checks(
     lang: LanguageProvider,
     func: GenericFunc,
     struct: ir.Param[ir.Param.Struct],
-    lookup: LookupParam,
+    lookup: SymbolLUT,
 ) -> None:
     if not isinstance(lang, PythonLanguageProvider):  # todo
         return
-    for param in struct.body.iter_params():
+    for param in struct.body.iter_params_shallow():
         _param_compile_constraint_checks(lang, func.body, param, lookup)

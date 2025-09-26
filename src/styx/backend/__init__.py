@@ -49,7 +49,7 @@ def compile_language(
     packages: typing.Iterable[
         tuple[
             ir.Package,
-            typing.Iterable[ir.Interface],
+            typing.Iterable[ir.App],
         ]
     ],
 ) -> typing.Generator[TextFile, typing.Any, None]:

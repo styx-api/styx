@@ -134,7 +134,7 @@ def load_boutiques_file(file_path: Path, verbose: bool = False) -> dict:
 def compile_and_output(
     project: ir.Project,
     package: ir.Package,
-    ir_interface: ir.Interface,
+    ir_interface: ir.App,
     backends: list[BACKEND_ID_TYPE],
     output_dir_user: Path | None = None,
     dry_run: bool = False,

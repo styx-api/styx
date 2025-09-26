@@ -52,13 +52,13 @@ def _param_to_input_schema_json(
             return {"type": "string", "x-styx-type": "file"}
         if isinstance(param.body, ir.Param.Struct):  # , ir.Param.StructUnion)):
             v = _struct_to_input_schema_json(param)
-            v["properties"]["@type"] = {"const": param.body.global_name}
+            v["properties"]["@type"] = {"const": param.body.public_name}
             return v
         if isinstance(param.body, ir.Param.StructUnion):
             alternatives = []
             for struct in param.body.alts:
                 struct_json = _param_to_input_schema_json(struct)
-                struct_json["properties"]["@type"] = {"const": struct.body.global_name}
+                struct_json["properties"]["@type"] = {"const": struct.body.public_name}
                 alternatives.append(struct_json)
             return {"anyOf": alternatives}
         assert False
@@ -97,7 +97,7 @@ def _struct_to_input_schema_json(
     ret: dict = {
         "type": "object",
         "properties": {
-            "@type": {"const": struct.body.global_name},
+            "@type": {"const": struct.body.public_name},
         },
         "additionalProperties": False,
     }
@@ -108,8 +108,10 @@ def _struct_to_input_schema_json(
     if struct.base.docs.description:
         ret["description"] = struct.base.docs.description
 
-    required_properties: list[str] = ["@type"]
-    for param in struct.body.iter_params():
+    required_properties: list[str] = []
+    if struct.parent and isinstance(struct.parent.body, ir.Param.StructUnion):
+        required_properties.append("@type")
+    for param in struct.body.iter_params_shallow():
         if not (param.nullable or param.default_value is not None):
             required_properties.append(param.base.name)
         ret["properties"][param.base.name] = _param_to_input_schema_json(param)
@@ -121,7 +123,7 @@ def _struct_to_input_schema_json(
 
 
 def to_input_schema_json(
-        interface: ir.Interface,
+    interface: ir.App,
 ) -> dict:
     """Input params JSON schema."""
     struct = interface.command
@@ -143,7 +145,7 @@ def to_input_schema_json(
 
 
 def to_output_schema_json(
-    interface: ir.Interface,
+    interface: ir.App,
 ):
     """Output object JSON schema."""
 
@@ -189,14 +191,14 @@ def to_output_schema_json(
             outs[o.name] = _output_json(o)
 
         if isinstance(param.body, ir.Param.Struct):
-            for p in param.body.iter_params():
-                if p.has_outputs():
+            for p in param.body.iter_params_shallow():
+                if p.has_outputs_deep():
                     outs[param.base.name] = _param_to_output_json_schema(p)
 
         if isinstance(param.body, ir.Param.StructUnion):
             alternatives = []
             for struct in param.body.alts:
-                if struct.has_outputs():
+                if struct.has_outputs_deep():
                     alternatives.append(_param_to_output_json_schema(struct))
             outs[param.base.name] = {"anyOf": alternatives}
 
@@ -221,7 +223,7 @@ class JsonSchemaCompiler(Compilable):
         packages: typing.Iterable[
             tuple[
                 ir.Package,
-                typing.Iterable[ir.Interface],
+                typing.Iterable[ir.App],
             ]
         ],
     ) -> typing.Generator[TextFile, typing.Any, None]:
@@ -234,8 +236,8 @@ class JsonSchemaCompiler(Compilable):
             package_names.append(package.name)
             apps = []
             for interface in interfaces:
-                interface.update_global_names(package.name)
-                safe_global_name = _make_filename_safe(interface.command.body.global_name)
+                interface.setup(package.name)
+                safe_global_name = _make_filename_safe(interface.command.body.public_name)
                 input_schema_path = package_path / (safe_global_name + ".input.json")
                 input_schema_paths.append(input_schema_path)
                 output_schema_path = package_path / (safe_global_name + ".output.json")
@@ -279,5 +281,5 @@ class JsonSchemaCompiler(Compilable):
                 "name": project.name,
                 "version": project.version,
                 "packages": package_index,
-            }
+            },
         )

@@ -198,8 +198,8 @@ def _build_command_template(groups: list[ir.ConditionalGroup]) -> tuple[str, dic
 
 def _convert_outputs(
     outputs: list[ir.Output],
-    stdout: Optional[ir.StdOutErrAsStringOutput],
-    stderr: Optional[ir.StdOutErrAsStringOutput],
+    stdout: Optional[ir.StreamOutput],
+    stderr: Optional[ir.StreamOutput],
 ) -> dict:
     """Convert IR outputs to Boutiques format."""
     result = {}
@@ -250,7 +250,7 @@ def _convert_outputs(
     return result
 
 
-def to_boutiques(interface: ir.Interface) -> dict:
+def to_boutiques(interface: ir.App) -> dict:
     """Convert a Styx IR Interface to a Boutiques descriptor."""
     try:
         descriptor = {
@@ -301,9 +301,7 @@ def to_boutiques(interface: ir.Interface) -> dict:
             descriptor["inputs"] = inputs
 
         # Convert outputs
-        outputs = _convert_outputs(
-            interface.command.base.outputs, interface.stdout_as_string_output, interface.stderr_as_string_output
-        )
+        outputs = _convert_outputs(interface.command.base.outputs, interface.capture_stdout, interface.capture_stderr)
         descriptor.update(outputs)
 
         return descriptor
@@ -313,7 +311,7 @@ def to_boutiques(interface: ir.Interface) -> dict:
 
 
 def compile_boutiques_json(
-    interfaces: typing.Iterable[ir.Interface],
+    interfaces: typing.Iterable[ir.App],
 ) -> typing.Generator[TextFile, typing.Any, None]:
     for interface in interfaces:
         yield TextFile(

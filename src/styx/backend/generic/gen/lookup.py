@@ -1,133 +1,242 @@
+from dataclasses import dataclass, field
+from typing import Dict, Optional
 import styx.ir.core as ir
 from styx.backend.generic.languageprovider import LanguageProvider
 from styx.backend.generic.scope import Scope
 
+SymbolType = str
 
-class LookupParam:
-    """Pre-compute and store symbols, types, class-names, etc. to reduce spaghetti code everywhere else."""
 
-    def __init__(
-        self,
+@dataclass
+class SymbolLUT:
+    """Symbol lookup table for code generation."""
+
+    # Root-exclusive symbols
+
+    obj_metadata: SymbolType
+    """Static metadata table, public"""
+
+    fn_root_make_params_and_execute: SymbolType
+    """Main entrypoint (combines `fn_root_make_params` + `fn_root_execute` for: native arguments -> outputs object)"""
+
+    # Also may exist for sub-structs but guaranteed for root
+
+    fn_root_execute: SymbolType
+    """Execute function (params -> outputs object, also executes runner as side effect)"""
+
+    type_root_params: SymbolType
+    """Root parameter struct type"""
+
+    type_root_params_tagged: SymbolType
+    """Root parameter struct type with tagged unions"""
+
+    fn_root_make_params: SymbolType
+    """Function to build root parameters from native arguments"""
+
+    fn_root_make_cmdargs: SymbolType
+    """Function to build command line arguments from parameters"""
+
+    type_root_outputs: SymbolType
+    """Root outputs struct type"""
+
+    fn_root_make_outputs: SymbolType
+    """Function to build outputs from execution results"""
+
+    # Struct mappings
+
+    type_struct_params: dict[ir.IdType, SymbolType] = field(default_factory=dict)
+    """Parameter struct types by struct ID. IStruct.id_ -> Language type"""
+
+    type_struct_params_tagged: dict[ir.IdType, SymbolType] = field(default_factory=dict)
+    """Parameter struct types by struct ID. IStruct.id_ -> Language type"""
+
+    type_struct_outputs: dict[ir.IdType, SymbolType] = field(default_factory=dict)
+    """Find outputs class name by struct param ID. IStruct.id_ -> Language class name"""
+
+    # Struct -> function mappings
+
+    fn_struct_make_params: dict[ir.IdType, SymbolType] = field(default_factory=dict)
+    """Function to build parameters for each struct. IStruct.id_ -> Language function symbol"""
+
+    fn_struct_make_cmdargs: dict[ir.IdType, SymbolType] = field(default_factory=dict)
+    """Function to build command args for each struct. IStruct.id_ -> Language function symbol"""
+
+    fn_struct_make_outputs: dict[ir.IdType, SymbolType] = field(default_factory=dict)
+    """Function to build outputs for each struct. IStruct.id_ -> Language function symbol"""
+
+    fn_struct_execute: dict[ir.IdType, SymbolType] = field(default_factory=dict)
+    """Execute function for each struct. IStruct.id_ -> Language function symbol"""
+
+    # Dynamic lookup functions for unions
+
+    fn_dyn_union_fn_struct_make_cmdargs: dict[ir.IdType, SymbolType] = field(default_factory=dict)
+    """StructUnion ID -> function which dynamically grabs the appropriate `fn_struct_make_cmdargs` based on tagged param passed in union field."""
+
+    fn_dyn_union_fn_struct_make_outputs: dict[ir.IdType, SymbolType] = field(default_factory=dict)
+    """StructUnion ID -> function which dynamically grabs the appropriate `fn_struct_make_outputs` based on tagged param passed in union field."""
+
+    # For each param
+
+    param_by_id: dict[ir.IdType, ir.Param] = field(default_factory=dict)
+    """Find param object by its ID. Param ID -> Param"""
+
+    type_param: dict[ir.IdType, SymbolType] = field(default_factory=dict)
+    """Find Language type by param id. Param ID -> Language type"""
+
+    var_param: dict[ir.IdType, SymbolType] = field(default_factory=dict)
+    """Find function-parameter symbol by param ID. IParam.id_ -> Language symbol"""
+
+    var_output: dict[ir.IdType, SymbolType] = field(default_factory=dict)
+    """Find output field symbol by output ID. Output ID -> Language symbol"""
+
+    @classmethod
+    def create(
+        cls,
         lang: LanguageProvider,
-        interface: ir.Interface,
+        app: ir.App,
         package_scope: Scope,
-        function_symbol: str,
-        function_scope: Scope,
-    ) -> None:
+    ) -> "SymbolLUT":
+        """Factory method to create a SymbolLUT from an IR App."""
+        app.assert_set_up()
+
+        function_scope = Scope(lang).language_base_scope()
+        function_scope.add_or_die("runner")
+        function_scope.add_or_die("execution")
+        function_scope.add_or_die("cargs")
+        function_scope.add_or_die("ret")
+        function_scope.add_or_die("params")
+
+        # Create instance with empty dicts
+        instance = cls(
+            obj_metadata=package_scope.add_or_dodge(lang.metadata_symbol(app.command.base.name)),
+            fn_root_execute=package_scope.add_or_dodge(lang.symbol_var_case_from(app.command.body.name + "_execute")),
+            fn_root_make_params_and_execute=package_scope.add_or_dodge(
+                lang.symbol_var_case_from(app.command.base.name)
+            ),
+            type_root_params=package_scope.add_or_dodge(
+                lang.symbol_class_case_from(app.command.body.name + "_Parameters")
+            ),
+            type_root_params_tagged=package_scope.add_or_dodge(
+                lang.symbol_class_case_from(app.command.body.name + "_ParametersTagged")
+            ),
+            fn_root_make_params=package_scope.add_or_dodge(
+                lang.symbol_var_case_from(app.command.body.name + "_params")
+            ),
+            fn_root_make_cmdargs=package_scope.add_or_dodge(
+                lang.symbol_var_case_from(app.command.body.name + "_cargs")
+            ),
+            type_root_outputs=package_scope.add_or_dodge(
+                lang.symbol_class_case_from(f"{app.command.body.name}_Outputs")
+            ),
+            fn_root_make_outputs=package_scope.add_or_dodge(
+                lang.symbol_var_case_from(app.command.body.name + "_outputs")
+            ),
+        )
+
         def _collect_output_field_symbols(
             param: ir.Param[ir.Param.Struct],
         ) -> None:
             scope = Scope(parent=package_scope)
             scope.add_or_die("root")
 
-            for stdout_stderr_output in (interface.stdout_as_string_output, interface.stderr_as_string_output):
-                if stdout_stderr_output is None:
+            for capture_stream in (app.capture_stdout, app.capture_stderr):
+                if capture_stream is None:
                     continue
-                output_field_symbol = scope.add_or_dodge(lang.symbol_var_case_from(stdout_stderr_output.name))
-                assert stdout_stderr_output.id_ not in self.expr_output_field_symbol
-                self.expr_output_field_symbol[stdout_stderr_output.id_] = output_field_symbol
+                output_field_symbol = scope.add_or_dodge(lang.symbol_var_case_from(capture_stream.name))
+                assert capture_stream.id_ not in instance.var_output
+                instance.var_output[capture_stream.id_] = output_field_symbol
 
             for output in param.base.outputs:
                 output_field_symbol = scope.add_or_dodge(lang.symbol_var_case_from(output.name))
-                assert output.id_ not in self.expr_output_field_symbol
-                self.expr_output_field_symbol[output.id_] = output_field_symbol
+                assert output.id_ not in instance.var_output
+                instance.var_output[output.id_] = output_field_symbol
 
-            for sub_struct in param.body.iter_params():
+            for sub_struct in param.body.iter_params_shallow():
                 if isinstance(sub_struct.body, (ir.Param.Struct, ir.Param.StructUnion)):
                     output_field_symbol = scope.add_or_dodge(lang.symbol_var_case_from(sub_struct.base.name))
-                    assert sub_struct.base.id_ not in self.expr_output_field_symbol
-                    self.expr_output_field_symbol[sub_struct.base.id_] = output_field_symbol
+                    assert sub_struct.base.id_ not in instance.var_output
+                    instance.var_output[sub_struct.base.id_] = output_field_symbol
 
         def _collect_param_alias_symbol(param: ir.Param[ir.Param.Struct]) -> None:
             scope = Scope(parent=function_scope)
-            for elem in param.body.iter_params():
+            for elem in param.body.iter_params_shallow():
                 symbol = scope.add_or_dodge(lang.symbol_var_case_from(elem.base.name))
-                assert elem.base.id_ not in self.expr_param_symbol_alias
-                self.expr_param_symbol_alias[elem.base.id_] = symbol
+                assert elem.base.id_ not in instance.var_param
+                instance.var_param[elem.base.id_] = symbol
 
-        self.param: dict[ir.IdType, ir.Param] = {interface.command.base.id_: interface.command}
-        """Find param object by its ID. IParam.id_ -> IParam"""
-        self.expr_params_dict_type: dict[ir.IdType, str] = {}
-        """Parameter dict types."""
-        self.expr_param_type: dict[ir.IdType, str] = {interface.command.base.id_: function_symbol}
-        """Find Language type by param id. IParam.id_ -> Language type"""
-        self.expr_param_symbol_alias: dict[ir.IdType, str] = {}
-        """Find function-parameter symbol by param ID. IParam.id_ -> Language symbol"""
-        self.expr_struct_output_type: dict[ir.IdType, str] = {}
-        """Find outputs class name by struct param ID. IStruct.id_ -> Language class name"""
-        self.expr_output_field_symbol: dict[ir.IdType, str] = {}
-        """Find output field symbol by output ID. Output.id_ -> Language symbol"""
-
-        self.expr_func_build_params: dict[ir.IdType, str] = {}
-        self.expr_func_build_cargs: dict[ir.IdType, str] = {}
-        self.expr_func_build_outputs: dict[ir.IdType, str] = {}
-        self.expr_func_execute: dict[ir.IdType, str] = {}
+        # Initialize with command
+        instance.param_by_id[app.command.base.id_] = app.command
+        instance.type_param[app.command.base.id_] = instance.type_root_params
 
         scope = Scope(parent=package_scope)
 
-        struct = interface.command
-        self.expr_params_dict_type[struct.base.id_] = scope.add_or_dodge(
-            lang.symbol_class_case_from(struct.body.name + "_Parameters")
-        )
-        self.expr_func_build_params[struct.base.id_] = scope.add_or_dodge(
-            lang.symbol_var_case_from(struct.body.name + "_params")
-        )
-        self.expr_func_build_cargs[struct.base.id_] = scope.add_or_dodge(
-            lang.symbol_var_case_from(struct.body.name + "_cargs")
-        )
-        self.expr_func_build_outputs[struct.base.id_] = scope.add_or_dodge(
-            lang.symbol_var_case_from(struct.body.name + "_outputs")
-        )
-        self.expr_func_execute[struct.base.id_] = scope.add_or_dodge(
-            lang.symbol_var_case_from(struct.body.name + "_execute")
-        )
-        self.expr_struct_output_type[struct.base.id_] = package_scope.add_or_dodge(
-            lang.symbol_class_case_from(f"{struct.body.name}_Outputs")
-        )
-        for struct in interface.command.iter_structs_recursively():
-            self.expr_params_dict_type[struct.base.id_] = scope.add_or_dodge(
-                lang.symbol_class_case_from(f"{interface.command.body.name}_{struct.body.name}_Parameters")
+        # Process the command struct
+        instance.type_struct_params[app.command.base.id_] = instance.type_root_params
+        instance.type_struct_params_tagged[app.command.base.id_] = instance.type_root_params_tagged
+        instance.fn_struct_make_params[app.command.base.id_] = instance.fn_root_make_params
+        instance.fn_struct_make_cmdargs[app.command.base.id_] = instance.fn_root_make_cmdargs
+        instance.fn_struct_make_outputs[app.command.base.id_] = instance.fn_root_make_outputs
+        instance.fn_struct_execute[app.command.base.id_] = instance.fn_root_execute
+        instance.type_struct_outputs[app.command.base.id_] = instance.type_root_outputs
+
+        # Process nested structs
+        for struct in app.command.iter_structs_deep():
+            instance.type_struct_params[struct.base.id_] = scope.add_or_dodge(
+                lang.symbol_class_case_from(f"{app.command.body.name}_{struct.body.name}_Parameters")
             )
-            self.expr_func_build_params[struct.base.id_] = scope.add_or_dodge(
-                lang.symbol_var_case_from(f"{interface.command.body.name}_{struct.body.name}_params")
+            instance.type_struct_params_tagged[struct.base.id_] = scope.add_or_dodge(
+                lang.symbol_class_case_from(f"{app.command.body.name}_{struct.body.name}_ParametersTagged")
             )
-            self.expr_func_build_cargs[struct.base.id_] = scope.add_or_dodge(
-                lang.symbol_var_case_from(f"{interface.command.body.name}_{struct.body.name}_cargs")
+            instance.fn_struct_make_params[struct.base.id_] = scope.add_or_dodge(
+                lang.symbol_var_case_from(f"{app.command.body.name}_{struct.body.name}_params")
             )
-            self.expr_func_build_outputs[struct.base.id_] = scope.add_or_dodge(
-                lang.symbol_var_case_from(f"{interface.command.body.name}_{struct.body.name}_outputs")
+            instance.fn_struct_make_cmdargs[struct.base.id_] = scope.add_or_dodge(
+                lang.symbol_var_case_from(f"{app.command.body.name}_{struct.body.name}_cargs")
             )
-            self.expr_func_execute[struct.base.id_] = scope.add_or_dodge(
-                lang.symbol_var_case_from(f"{interface.command.body.name}_{struct.body.name}_execute")
+            instance.fn_struct_make_outputs[struct.base.id_] = scope.add_or_dodge(
+                lang.symbol_var_case_from(f"{app.command.body.name}_{struct.body.name}_outputs")
             )
-            self.expr_struct_output_type[struct.base.id_] = package_scope.add_or_dodge(
-                lang.symbol_class_case_from(f"{interface.command.body.name}_{struct.body.name}_Outputs")
+            instance.fn_struct_execute[struct.base.id_] = scope.add_or_dodge(
+                lang.symbol_var_case_from(f"{app.command.body.name}_{struct.body.name}_execute")
+            )
+            instance.type_struct_outputs[struct.base.id_] = package_scope.add_or_dodge(
+                lang.symbol_class_case_from(f"{app.command.body.name}_{struct.body.name}_Outputs")
             )
 
-        _collect_param_alias_symbol(
-            param=interface.command,
-        )
-        _collect_output_field_symbols(
-            param=interface.command,
-        )
+        # Collect symbols for the root command
+        _collect_param_alias_symbol(app.command)
+        _collect_output_field_symbols(app.command)
 
-        for elem in interface.command.iter_params_recursively():
-            self.param[elem.base.id_] = elem
+        # Process all parameters
+        for elem in app.command.iter_params_deep():
+            instance.param_by_id[elem.base.id_] = elem
 
             if isinstance(elem.body, ir.Param.Struct):
-                self.expr_param_type[elem.base.id_] = lang.type_param(elem, self.expr_params_dict_type)
-
-                _collect_param_alias_symbol(
-                    param=elem,
+                instance.type_param[elem.base.id_] = lang.type_param(
+                    elem, instance.type_struct_params, instance.type_struct_params_tagged
                 )
-                _collect_output_field_symbols(
-                    param=elem,
-                )
+                _collect_param_alias_symbol(elem)
+                _collect_output_field_symbols(elem)
             elif isinstance(elem.body, ir.Param.StructUnion):
                 for alternative in elem.body.alts:
-                    self.expr_param_type[alternative.base.id_] = lang.type_param(
-                        alternative, self.expr_params_dict_type
+                    instance.type_param[alternative.base.id_] = lang.type_param(
+                        alternative, instance.type_struct_params, instance.type_struct_params_tagged
                     )
-                self.expr_param_type[elem.base.id_] = lang.type_param(elem, self.expr_params_dict_type)
+
+                # Union dynamic function lookup tables
+                instance.fn_dyn_union_fn_struct_make_outputs[elem.base.id_] = scope.add_or_dodge(
+                    lang.symbol_var_case_from(f"{app.command.body.name}_{elem.base.name}_outputs_dyn_fn")
+                )
+                instance.fn_dyn_union_fn_struct_make_cmdargs[elem.base.id_] = scope.add_or_dodge(
+                    lang.symbol_var_case_from(f"{app.command.body.name}_{elem.base.name}_cargs_dyn_fn")
+                )
+
+                instance.type_param[elem.base.id_] = lang.type_param(
+                    elem, instance.type_struct_params, instance.type_struct_params_tagged
+                )
             else:
-                self.expr_param_type[elem.base.id_] = lang.type_param(elem, self.expr_params_dict_type)
+                instance.type_param[elem.base.id_] = lang.type_param(
+                    elem, instance.type_struct_params, instance.type_struct_params_tagged
+                )
+
+        return instance

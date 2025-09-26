@@ -4,8 +4,8 @@ import typing
 
 from styx.backend.common import TextFile
 from styx.backend.generic.documentation import docs_to_docstring
-from styx.backend.generic.gen.interface import compile_interface
-from styx.backend.generic.gen.lookup import LookupParam
+from styx.backend.generic.gen.interface import compile_app
+from styx.backend.generic.gen.lookup import SymbolLUT
 from styx.backend.generic.languageprovider import (
     TYPE_PYLITERAL,
     ExprType,
@@ -26,7 +26,6 @@ from styx.backend.generic.utils import (
     enquote,
     escape_backslash,
     linebreak_paragraph,
-    struct_has_outputs,
 )
 from styx.ir import core as ir
 
@@ -204,18 +203,18 @@ class RLanguageSymbolProvider(LanguageSymbolProvider):
 
 class RLanguageIrProvider(LanguageIrProvider):
     def build_params_and_execute(
-        self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct], runner_symbol: ExprType
+        self, lookup: SymbolLUT, struct: ir.Param[ir.Param.Struct], runner_symbol: ExprType
     ) -> LineBuffer:
         """Build parameters and execute in R style."""
-        args = [lookup.expr_param_symbol_alias[elem.base.id_] for elem in struct.body.iter_params()]
+        args = [lookup.var_param[elem.base.id_] for elem in struct.body.iter_params_shallow()]
         return [
-            f"params <- {lookup.expr_func_build_params[struct.base.id_]}({', '.join([f'{a}={a}' for a in args])})",
-            self.return_statement(f"{lookup.expr_func_execute[struct.base.id_]}(params, {runner_symbol})"),
+            f"params <- {lookup.fn_struct_make_params[struct.base.id_]}({', '.join([f'{a}={a}' for a in args])})",
+            self.return_statement(f"{lookup.fn_struct_execute[struct.base.id_]}(params, {runner_symbol})"),
         ]
 
     def call_build_cargs(
         self,
-        lookup: LookupParam,
+        lookup: SymbolLUT,
         struct: ir.Param[ir.Param.Struct],
         params_symbol: ExprType,
         execution_symbol: ExprType,
@@ -223,12 +222,12 @@ class RLanguageIrProvider(LanguageIrProvider):
     ) -> LineBuffer:
         """Build command arguments in R style."""
         return [
-            f"{return_symbol} <- {lookup.expr_func_build_cargs[struct.base.id_]}({params_symbol}, {execution_symbol})"
+            f"{return_symbol} <- {lookup.fn_struct_make_cmdargs[struct.base.id_]}({params_symbol}, {execution_symbol})"
         ]
 
     def call_build_outputs(
         self,
-        lookup: LookupParam,
+        lookup: SymbolLUT,
         struct: ir.Param[ir.Param.Struct],
         params_symbol: ExprType,
         execution_symbol: ExprType,
@@ -236,7 +235,7 @@ class RLanguageIrProvider(LanguageIrProvider):
     ) -> LineBuffer:
         """Build outputs in R style."""
         return [
-            f"{return_symbol} <- {lookup.expr_func_build_outputs[struct.base.id_]}({params_symbol}, {execution_symbol})"
+            f"{return_symbol} <- {lookup.fn_struct_make_outputs[struct.base.id_]}({params_symbol}, {execution_symbol})"
         ]
 
     def param_var_to_mstr(self, param: ir.Param, symbol: str) -> MStr:
@@ -609,7 +608,7 @@ class RLanguageHighLevelProvider(LanguageHighLevelProvider):
         return [f"{cargs_symbol} <- append({cargs_symbol}, list({mstr.expr}))"]
 
     def param_dict_create(
-        self, lookup: LookupParam, name: str, param: ir.Param, items: list[tuple[ir.Param, ExprType]] | None = None
+        self, lookup: SymbolLUT, name: str, param: ir.Param, items: list[tuple[ir.Param, ExprType]] | None = None
     ) -> LineBuffer:
         return [
             f"{name} <- list(",
@@ -621,10 +620,10 @@ class RLanguageHighLevelProvider(LanguageHighLevelProvider):
     def param_dict_set(self, dict_symbol: str, param: ir.Param, value_expr: str) -> LineBuffer:
         return [f"{dict_symbol}[[{self.expr_str(param.base.name)}]] <- {value_expr}"]
 
-    def dyn_declare(self, lookup: LookupParam, root_struct: ir.Param[ir.Param.Struct]) -> list[GenericFunc]:
+    def dyn_declare(self, lookup: SymbolLUT, root_struct: ir.Param[ir.Param.Struct]) -> list[GenericFunc]:
         items = [
-            (self.expr_str(lookup.expr_struct_global_name[s.base.id_]), lookup.expr_func_build_cargs[s.base.id_])
-            for s in root_struct.iter_structs_recursively(False)
+            (self.expr_str(lookup.expr_struct_global_name[s.base.id_]), lookup.fn_struct_make_cmdargs[s.base.id_])
+            for s in root_struct.iter_structs_deep(False)
         ]
         func_get_build_cargs = GenericFunc(
             name="dyn.cargs",
@@ -641,9 +640,9 @@ class RLanguageHighLevelProvider(LanguageHighLevelProvider):
         )
 
         items = [
-            (self.expr_str(lookup.expr_struct_global_name[s.base.id_]), lookup.expr_func_build_outputs[s.base.id_])
-            for s in root_struct.iter_structs_recursively(False)
-            if struct_has_outputs(s)
+            (self.expr_str(lookup.expr_struct_global_name[s.base.id_]), lookup.fn_struct_make_outputs[s.base.id_])
+            for s in root_struct.iter_structs_deep(False)
+            if s.has_outputs_deep()
         ]
         func_get_build_outputs = GenericFunc(
             name="dyn.outputs",
@@ -661,12 +660,12 @@ class RLanguageHighLevelProvider(LanguageHighLevelProvider):
 
         return [func_get_build_cargs, func_get_build_outputs]
 
-    def param_dict_type_declare(self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct]) -> LineBuffer:
+    def param_dict_type_declare(self, lookup: SymbolLUT, struct: ir.Param[ir.Param.Struct]) -> LineBuffer:
         param_items = [(self.expr_str("@type"), lookup.expr_struct_global_name[struct.base.id_])]
-        for p in struct.body.iter_params():
-            param_items.append((self.expr_str(p.base.name), lookup.expr_param_type[p.base.id_]))
+        for p in struct.body.iter_params_shallow():
+            param_items.append((self.expr_str(p.base.name), lookup.type_param[p.base.id_]))
 
-        dict_symbol = lookup.expr_params_dict_type[struct.base.id_]
+        dict_symbol = lookup.type_struct_params[struct.base.id_]
 
         return [
             f"validate.{dict_symbol} <- function(x) {{",
@@ -722,7 +721,7 @@ class _PackageData(typing.NamedTuple):
 
 
 class RLanguageCompileProvider:
-    def compile(self, interfaces: typing.Iterable[ir.Interface]) -> typing.Generator[TextFile, typing.Any, None]:
+    def compile(self, interfaces: typing.Iterable[ir.App]) -> typing.Generator[TextFile, typing.Any, None]:
         packages: dict[str, _PackageData] = {}
         global_scope = self.language_scope()
 
@@ -742,9 +741,7 @@ class RLanguageCompileProvider:
             interface_module_symbol = self.symbol_var_case_from(interface.command.base.name)
 
             interface_module: GenericModule = GenericModule()
-            compile_interface(
-                lang=self, interface=interface, package_scope=package_data.scope, interface_module=interface_module
-            )
+            compile_app(lang=self, app=interface, package_scope=package_data.scope, module_app=interface_module)
             # package_data.module.imports.append(f"from .{interface_module_symbol} import *")
             yield TextFile(
                 path=pathlib.Path(package_data.package_symbol) / (interface_module_symbol + ".R"),

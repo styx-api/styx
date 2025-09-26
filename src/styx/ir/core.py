@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import dataclasses
+import weakref
 from dataclasses import dataclass
-from typing import Any, Generator, Generic, Optional, TypeGuard, TypeVar, Union
+from typing import Any, Generator, Generic, Optional, TypeVar, Union
 
 
 @dataclass
@@ -190,17 +191,16 @@ class Param(Generic[T]):
 
     @dataclass
     class Struct:
-        """Represents struct parameters."""
+        """Represents a command structure."""
 
         name: str | None = None
-        """Name of the struct."""
+        """Name of the structure."""
 
-        global_name: str | None = None
-        """Struct global name. 
+        public_name: str | None = None
+        """Structure public name. 
         
         This is the @type.
-        This name should uniquely identify a struct across commands and packages.
-        (i.e. "{package_name}.{command}.{sub-command}").
+        This name should uniquely identify the root structure across commands and packages and union members between each others.
         """
 
         groups: list[ConditionalGroup] = dataclasses.field(default_factory=list)
@@ -212,57 +212,145 @@ class Param(Generic[T]):
         """
 
         docs: Documentation | None = None
-        """Documentation for the struct."""
+        """Documentation for the structure."""
 
-        def iter_params(self) -> Generator[Param, Any, None]:
-            """Iterate over all parameters in the struct.
+        def iter_params_shallow(self) -> Generator[Param, Any, None]:
+            """Iterate over all parameters in the structure.
 
             Yields:
-                Each parameter in the struct.
+                Each parameter in the structure.
             """
             for group in self.groups:
                 yield from group.iter_params()
 
-    def iter_params_recursively(self, skip_self: bool = True) -> Generator[Param, Any, None]:
+    @dataclass
+    class StructUnion:
+        """Represents a union of parameter structures."""
+
+        alts: list[Param[Param.Struct]] = dataclasses.field(default_factory=list)
+        """List of alternative structure parameters."""
+
+    def iter_params_deep(self, skip_self: bool = True) -> Generator[Param, Any, None]:
         """Iterate through all child-params recursively."""
         if not skip_self:
             yield self
         if isinstance(self.body, Param.Struct):
-            for e in self.body.iter_params():
-                yield from e.iter_params_recursively(False)
+            for e in self.body.iter_params_shallow():
+                yield from e.iter_params_deep(False)
         elif isinstance(self.body, Param.StructUnion):
             for e in self.body.alts:
-                yield from e.iter_params_recursively(False)
+                yield from e.iter_params_deep(False)
 
-    def iter_structs_recursively(self, skip_self: bool = True) -> Generator[Param[Param.Struct], Any, None]:
-        """Iterate through all child-structs recursively."""
+    def iter_structs_deep(self, skip_self: bool = True) -> Generator[Param[Param.Struct], Any, None]:
+        """Iterate through all child-structures recursively."""
         if not skip_self and isinstance(self.body, Param.Struct):
             yield self  # type: ignore
         if isinstance(self.body, Param.Struct):
-            for e in self.body.iter_params():
-                yield from e.iter_structs_recursively(False)
+            for e in self.body.iter_params_shallow():
+                yield from e.iter_structs_deep(False)
         elif isinstance(self.body, Param.StructUnion):
             for e in self.body.alts:
-                yield from e.iter_structs_recursively(False)
+                yield from e.iter_structs_deep(False)
 
-    @dataclass
-    class StructUnion:
-        """Represents a union of struct parameters."""
+    def iter_unions_deep(self, skip_self: bool = True) -> Generator[Param[Param.StructUnion], Any, None]:
+        """Iterate through all child-unions recursively."""
+        if not skip_self and isinstance(self.body, Param.StructUnion):
+            yield self  # type: ignore
+        if isinstance(self.body, Param.Struct):
+            for e in self.body.iter_params_shallow():
+                yield from e.iter_unions_deep(False)
+        elif isinstance(self.body, Param.StructUnion):
+            for e in self.body.alts:
+                yield from e.iter_unions_deep(False)
 
-        alts: list[Param[Param.Struct]] = dataclasses.field(default_factory=list)
-        """List of alternative struct parameters."""
+    @property
+    def parent(self) -> Optional[Param[Param.Struct] | Param[Param.StructUnion]]:
+        """Get the parent parameter, if any.
 
-    def has_outputs(self) -> bool:
+        Returns:
+            The parent parameter, or None if this is a root parameter or the parent
+            has been garbage collected.
+        """
+        if self._parent_ref is None:
+            return None
+        return self._parent_ref()
+
+    def set_parent(self, parent: Optional[Param[Param.Struct] | Param[Param.StructUnion]]) -> None:
+        """Set the parent parameter.
+
+        Args:
+            parent: The parent parameter, or None to clear the parent reference.
+        """
+        if parent is None:
+            self._parent_ref = None
+        else:
+            self._parent_ref = weakref.ref(parent)
+
+    def get_path_to_root(self) -> list[Param[Param.Struct] | Param[Param.StructUnion]]:
+        """Get the path from this parameter to the root parameter.
+
+        Returns:
+            List of parameter names from this parameter up to (but not including) the root.
+            Empty list if this is the root parameter.
+        """
+        path: list[Param[Param.Struct] | Param[Param.StructUnion]] = []
+        current = self.parent
+        while current is not None:
+            path.append(current)
+            current = current.parent
+        return list(reversed(path))
+
+    def get_full_path(self) -> list[Param[Param.Struct] | Param[Param.StructUnion]]:
+        """Get the full path from root to this parameter.
+
+        Returns:
+            List of parameter names from root down to this parameter.
+        """
+        path = self.get_path_to_root()
+        path.append(self)
+        return path
+
+    def is_root(self) -> bool:
+        """Check if this parameter is a root parameter (has no parent).
+
+        Returns:
+            True if this parameter has no parent, False otherwise.
+        """
+        return self.parent is None
+
+    def get_root(self) -> Param[Param.Struct] | Param[Param.StructUnion]:
+        """Get the root parameter of this parameter tree.
+
+        Returns:
+            The root parameter (may be self if this is already the root).
+        """
+        current = self
+        while current.parent is not None:
+            current = current.parent
+        return current
+
+    def setup_parent_references(self) -> None:
+        """Set up parent references for all child parameters."""
+        if isinstance(self.body, Param.Struct):
+            for child in self.body.iter_params_shallow():
+                child.set_parent(self)
+                child.setup_parent_references()
+        elif isinstance(self.body, Param.StructUnion):
+            for child in self.body.alts:
+                child.set_parent(self)
+                child.setup_parent_references()
+
+    def has_outputs_deep(self) -> bool:
         """Check if this param or any child param has outputs."""
         if len(self.base.outputs) > 0:
             return True
         if isinstance(self.body, Param.Struct):
-            for e in self.body.iter_params():
-                if e.has_outputs():
+            for e in self.body.iter_params_shallow():
+                if e.has_outputs_deep():
                     return True
         elif isinstance(self.body, Param.StructUnion):
             for e in self.body.alts:
-                if e.has_outputs():
+                if e.has_outputs_deep():
                     return True
         return False
 
@@ -297,6 +385,9 @@ class Param(Generic[T]):
         self.nullable = nullable
         self.choices = choices
         self.default_value = default_value
+
+        self._parent_ref: Optional[weakref.ReferenceType[Param[Param.Struct] | Param[Param.StructUnion]]] = None
+        """Weak reference to parent parameter."""
 
         # Runtime type checking
         self._check_base()
@@ -431,109 +522,8 @@ class Param(Generic[T]):
         return ", ".join(parts) + ")"
 
 
-# Unfortunately TypeGuards dont work as methods with implicit self
-
-
-def is_bool(param: Param[Any]) -> TypeGuard[Param[Param.Bool]]:
-    """Check if the parameter is a boolean type.
-
-    Args:
-        param: The parameter to check.
-
-    Returns:
-        True if the parameter is a boolean type, False otherwise.
-
-    This function can be used for type narrowing in conditional blocks.
-    """
-    return isinstance(param.body, Param.Bool)
-
-
-def is_int(param: Param[Any]) -> TypeGuard[Param[Param.Int]]:
-    """Check if the parameter is an integer type.
-
-    Args:
-        param: The parameter to check.
-
-    Returns:
-        True if the parameter is an integer type, False otherwise.
-
-    This function can be used for type narrowing in conditional blocks.
-    """
-    return isinstance(param.body, Param.Int)
-
-
-def is_float(param: Param[Any]) -> TypeGuard[Param[Param.Float]]:
-    """Check if the parameter is a float type.
-
-    Args:
-        param: The parameter to check.
-
-    Returns:
-        True if the parameter is a float type, False otherwise.
-
-    This function can be used for type narrowing in conditional blocks.
-    """
-    return isinstance(param.body, Param.Float)
-
-
-def is_string(param: Param[Any]) -> TypeGuard[Param[Param.String]]:
-    """Check if the parameter is a string type.
-
-    Args:
-        param: The parameter to check.
-
-    Returns:
-        True if the parameter is a string type, False otherwise.
-
-    This function can be used for type narrowing in conditional blocks.
-    """
-    return isinstance(param.body, Param.String)
-
-
-def is_file(param: Param[Any]) -> TypeGuard[Param[Param.File]]:
-    """Check if the parameter is a file type.
-
-    Args:
-        param: The parameter to check.
-
-    Returns:
-        True if the parameter is a file type, False otherwise.
-
-    This function can be used for type narrowing in conditional blocks.
-    """
-    return isinstance(param.body, Param.File)
-
-
-def is_struct(param: Param[Any]) -> TypeGuard[Param[Param.Struct]]:
-    """Check if the parameter is a struct type.
-
-    Args:
-        param: The parameter to check.
-
-    Returns:
-        True if the parameter is a struct type, False otherwise.
-
-    This function can be used for type narrowing in conditional blocks.
-    """
-    return isinstance(param.body, Param.Struct)
-
-
-def is_struct_union(param: Param[Any]) -> TypeGuard[Param[Param.StructUnion]]:
-    """Check if the parameter is a struct union type.
-
-    Args:
-        param: The parameter to check.
-
-    Returns:
-        True if the parameter is a struct union type, False otherwise.
-
-    This function can be used for type narrowing in conditional blocks.
-    """
-    return isinstance(param.body, Param.StructUnion)
-
-
 @dataclass
-class Carg:
+class CmdArg:
     """Represents command arguments."""
 
     tokens: list[Param | str] = dataclasses.field(default_factory=list)
@@ -561,7 +551,7 @@ class ConditionalGroup:
     Arguments will only be emitted if at least one parameter within is defined, or if there are no parameters.
     """
 
-    cargs: list[Carg] = dataclasses.field(default_factory=list)
+    cargs: list[CmdArg] = dataclasses.field(default_factory=list)
     """List of command arguments."""
 
     join: str | None = None
@@ -580,7 +570,7 @@ class ConditionalGroup:
 
 
 @dataclass
-class StdOutErrAsStringOutput:
+class StreamOutput:
     id_: IdType
     """Unique ID of the output. Unique including param IDs."""
 
@@ -592,38 +582,39 @@ class StdOutErrAsStringOutput:
 
 
 @dataclass
-class Interface:
-    """Represents an interface."""
+class App:
+    """Represents an application."""
 
     uid: str
-    """Unique identifier for the interface."""
+    """Unique identifier for the app."""
 
     command: Param[Param.Struct]
-    """The command structure for this interface."""
+    """The command structure for this app."""
 
-    stdout_as_string_output: StdOutErrAsStringOutput | None = None
+    capture_stdout: StreamOutput | None = None
     """Collect stdout as string output."""
 
-    stderr_as_string_output: StdOutErrAsStringOutput | None = None
+    capture_stderr: StreamOutput | None = None
     """Collect stderr as string output."""
 
     project: Project = dataclasses.field(default_factory=Project)
     """Project metadata."""
 
-    def update_global_names(self, package_name: str) -> None:
-        """Generate/update global struct names."""
+    _is_set_up: bool = dataclasses.field(default=False, init=False, repr=False, compare=False)
 
-        def _rec(
-            node: Param[Param.Struct], path: list[Param[Param.Struct]]
-        ) -> Generator[tuple[Param[Param.Struct], list[Param[Param.Struct]]], None, None]:
-            yield node, path
-            for child in node.body.iter_params():
-                if isinstance(child.body, Param.Struct):
-                    yield from _rec(child, path + [child])
-                elif isinstance(child.body, Param.StructUnion):
-                    for e in child.body.alts:
-                        yield from _rec(e, path + [e])
+    def assert_set_up(self) -> None:
+        """Assert that the app is set up."""
+        assert self._is_set_up
 
-        for node, path in _rec(self.command, [self.command]):
-            global_name = ".".join([package_name] + [e.base.name for e in path])
-            node.body.global_name = global_name
+    def setup(self, package_name: str) -> None:
+        """Set up parent references and generate global structure names."""
+        if self._is_set_up:
+            return
+        self._is_set_up = True
+
+        self.command.setup_parent_references()
+
+        self.command.body.public_name = f"{package_name}/{self.command.base.name}"
+
+        for struct_param in self.command.iter_structs_deep():
+            struct_param.body.public_name = struct_param.body.name

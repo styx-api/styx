@@ -5,8 +5,8 @@ import typing
 from styx.backend import TextFile
 from styx.backend.compile import Compilable
 from styx.backend.generic.documentation import docs_to_docstring
-from styx.backend.generic.gen.interface import compile_interface, EntrypointSymbols
-from styx.backend.generic.gen.lookup import LookupParam
+from styx.backend.generic.gen.interface import compile_app, SymbolLUT
+from styx.backend.generic.gen.lookup import SymbolLUT
 from styx.backend.generic.languageprovider import (
     TYPE_PYLITERAL,
     ExprType,
@@ -37,7 +37,6 @@ from styx.backend.generic.utils import (
     ensure_endswith,
     escape_backslash,
     linebreak_paragraph,
-    struct_has_outputs,
 )
 from styx.backend.python.templates import (
     template_sub_pyproject,
@@ -142,41 +141,46 @@ class PythonLanguageSymbolProvider(LanguageSymbolProvider):
 
 class PythonLanguageIrProvider(LanguageIrProvider):
     def build_params_and_execute(
-        self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct], runner_symbol: ExprType
+        self, lookup: SymbolLUT, struct: ir.Param[ir.Param.Struct], runner_symbol: ExprType
     ) -> LineBuffer:
-        args = [lookup.expr_param_symbol_alias[elem.base.id_] for elem in struct.body.iter_params()]
+        args = [lookup.var_param[elem.base.id_] for elem in struct.body.iter_params_shallow()]
         return [
-            f"params = {lookup.expr_func_build_params[struct.base.id_]}(",
+            f"params = {lookup.fn_struct_make_params[struct.base.id_]}(",
             *indent([f"{a}={a}," for a in args]),
             ")",
-            self.return_statement(f"{lookup.expr_func_execute[struct.base.id_]}(params, {runner_symbol})"),
+            self.return_statement(f"{lookup.fn_struct_execute[struct.base.id_]}(params, {runner_symbol})"),
         ]
 
     def call_build_cargs(
         self,
-        lookup: LookupParam,
+        lookup: SymbolLUT,
         struct: ir.Param[ir.Param.Struct],
         params_symbol: ExprType,
         execution_symbol: ExprType,
         return_symbol: ExprType,
     ) -> LineBuffer:
         return [
-            f"{return_symbol} = {lookup.expr_func_build_cargs[struct.base.id_]}({params_symbol}, {execution_symbol})"
+            f"{return_symbol} = {lookup.fn_struct_make_cmdargs[struct.base.id_]}({params_symbol}, {execution_symbol})"
         ]
 
     def call_build_outputs(
         self,
-        lookup: LookupParam,
+        lookup: SymbolLUT,
         struct: ir.Param[ir.Param.Struct],
         params_symbol: ExprType,
         execution_symbol: ExprType,
         return_symbol: ExprType,
     ) -> LineBuffer:
         return [
-            f"{return_symbol} = {lookup.expr_func_build_outputs[struct.base.id_]}({params_symbol}, {execution_symbol})"
+            f"{return_symbol} = {lookup.fn_struct_make_outputs[struct.base.id_]}({params_symbol}, {execution_symbol})"
         ]
 
-    def param_var_to_mstr(self, param: ir.Param, symbol: str) -> MStr:
+    def param_var_to_mstr(
+        self,
+        lut: SymbolLUT,
+        param: ir.Param,
+        symbol: str,
+    ) -> MStr:
         def _val() -> MStr:
             if not param.list_:
                 if isinstance(param.body, ir.Param.String):
@@ -207,8 +211,13 @@ class PythonLanguageIrProvider(LanguageIrProvider):
                     if param.body.mutable:
                         extra_args += ", mutable=True"
                     return MStr(f"execution.input_file({symbol}{extra_args})", False)
-                if isinstance(param.body, (ir.Param.Struct, ir.Param.StructUnion)):
-                    return MStr(f'dyn_cargs({symbol}["@type"])({symbol}, execution)', True)
+                if isinstance(param.body, ir.Param.Struct):
+                    return MStr(f"{lut.fn_struct_make_cmdargs[param.base.id_]}({symbol}, execution)", True)
+                if isinstance(param.body, ir.Param.StructUnion):
+                    return MStr(
+                        f'{lut.fn_dyn_union_fn_struct_make_cmdargs[param.base.id_]}({symbol}["@type"])({symbol}, execution)',
+                        True,
+                    )
                 assert False
 
             if param.list_.join is None:
@@ -225,9 +234,15 @@ class PythonLanguageIrProvider(LanguageIrProvider):
                     if param.body.mutable:
                         extra_args += ", mutable=True"
                     return MStr(f"[execution.input_file(f{extra_args}) for f in {symbol}]", True)
-                if isinstance(param.body, (ir.Param.Struct, ir.Param.StructUnion)):
+                if isinstance(param.body, ir.Param.Struct):
                     return MStr(
-                        f'[a for c in [dyn_cargs(s["@type"])(s, execution) for s in {symbol}] for a in c]', True
+                        f"[a for c in [{lut.fn_struct_make_cmdargs[param.base.id_]}(s, execution) for s in {symbol}] for a in c]",
+                        True,
+                    )
+                if isinstance(param.body, ir.Param.StructUnion):
+                    return MStr(
+                        f'[a for c in [{lut.fn_dyn_union_fn_struct_make_cmdargs[param.base.id_]}(s["@type"])(s, execution) for s in {symbol}] for a in c]',
+                        True,
                     )
                 assert False
 
@@ -246,9 +261,14 @@ class PythonLanguageIrProvider(LanguageIrProvider):
                 if param.body.mutable:
                     extra_args += ", mutable=True"
                 return MStr(f"{sep_join}([execution.input_file(f{extra_args}) for f in {symbol}])", False)
-            if isinstance(param.body, (ir.Param.Struct, ir.Param.StructUnion)):
+            if isinstance(param.body, ir.Param.Struct):
                 return MStr(
-                    f'{sep_join}([a for c in [dyn_cargs(s["@type"])(s, execution) for s in {symbol}] for a in c])',
+                    f"{sep_join}([a for c in [{lut.fn_struct_make_cmdargs[param.base.id_]}(s, execution) for s in {symbol}] for a in c])",
+                    False,
+                )
+            if isinstance(param.body, ir.Param.StructUnion):
+                return MStr(
+                    f'{sep_join}([a for c in [{lut.fn_dyn_union_fn_struct_make_cmdargs[param.base.id_]}(s["@type"])(s, execution) for s in {symbol}] for a in c])',
                     False,
                 )
             assert False
@@ -361,19 +381,38 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
             "from styxdefs import *",
         ]
 
-    def struct_collect_outputs(self, struct: ir.Param[ir.Param.Struct], struct_symbol: str) -> str:
-        if struct.list_:
-            opt = ""
-            if struct.nullable:
-                opt = f" if {struct_symbol} else None"
-            return (
-                f'[dyn_outputs(i["@type"])(i, execution) '
-                f'if dyn_outputs(i["@type"]) else None for i in {struct_symbol}]{opt}'
-            )
+    def struct_collect_outputs(
+        self, lut: SymbolLUT, struct: ir.Param[ir.Param.Struct] | ir.Param[ir.Param.StructUnion], struct_symbol: str
+    ) -> str:
+        if isinstance(struct.body, ir.Param.Struct):
+            if struct.list_:
+                opt = ""
+                if struct.nullable:
+                    opt = f" if {struct_symbol} else None"
 
-        o = f'dyn_outputs({struct_symbol}["@type"])({struct_symbol}, execution)'
-        if struct.nullable:
-            o = f"{o} if {struct_symbol} else None"
+                return (  # todo what is this condition?
+                    f"[{lut.fn_struct_make_outputs[struct.base.id_]}(i, execution) "
+                    f"if {lut.fn_struct_make_outputs[struct.base.id_]} else None for i in {struct_symbol}]{opt}"
+                )
+
+            o = f"{lut.fn_struct_make_outputs[struct.base.id_]}({struct_symbol}, execution)"
+            if struct.nullable:
+                o = f"{o} if {struct_symbol} else None"
+
+        else:
+            if struct.list_:
+                opt = ""
+                if struct.nullable:
+                    opt = f" if {struct_symbol} else None"
+                return (
+                    f'[{lut.fn_dyn_union_fn_struct_make_outputs[struct.base.id_]}(i["@type"])(i, execution) '
+                    f'if {lut.fn_dyn_union_fn_struct_make_outputs[struct.base.id_]}(i["@type"]) else None for i in {struct_symbol}]{opt}'
+                )
+
+            o = f'{lut.fn_dyn_union_fn_struct_make_outputs[struct.base.id_]}({struct_symbol}["@type"])({struct_symbol}, execution)'
+            if struct.nullable:
+                o = f"{o} if {struct_symbol} else None"
+
         return o
 
     def runner_symbol(self) -> str:
@@ -597,14 +636,14 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
 
     def param_dict_create(
         self,
-        lookup: LookupParam,
+        lookup: SymbolLUT,
         name: str,
         param: ir.Param[ir.Param.Struct],
         items: list[tuple[ir.Param, ExprType]] | None = None,
     ) -> LineBuffer:
         return [
             f"{name} = {{",
-            *indent([f'"@type": {self.expr_str(param.body.global_name)},']),
+            *indent([f'"@type": {self.expr_str(param.body.public_name)},']),
             *indent([f"{self.expr_str(key.base.name)}: {value}," for key, value in items]),
             "}",
         ]
@@ -612,13 +651,10 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
     def param_dict_set(self, dict_symbol: str, param: ir.Param, value_expr: str) -> LineBuffer:
         return [f"{dict_symbol}[{self.expr_str(param.base.name)}] = {value_expr}"]
 
-    def dyn_declare(self, lookup: LookupParam, root_struct: ir.Param[ir.Param.Struct]) -> list[GenericFunc]:
-        items = [
-            (self.expr_str(s.body.global_name), lookup.expr_func_build_cargs[s.base.id_])
-            for s in root_struct.iter_structs_recursively(False)
-        ]
+    def dyn_declare(self, lut: SymbolLUT, union: ir.Param[ir.Param.StructUnion]) -> list[GenericFunc]:
+        items = [(self.expr_str(s.body.public_name), lut.fn_struct_make_cmdargs[s.base.id_]) for s in union.body.alts]
         func_get_build_cargs = GenericFunc(
-            name="dyn_cargs",
+            name=lut.fn_dyn_union_fn_struct_make_cmdargs[union.base.id_],
             return_type="typing.Any",
             docstring_body="Get build cargs function by command type.",
             return_descr="Build cargs function.",
@@ -634,12 +670,12 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
 
         # Build outputs function lookup
         items = [
-            (self.expr_str(s.body.global_name), lookup.expr_func_build_outputs[s.base.id_])
-            for s in root_struct.iter_structs_recursively(False)
-            if struct_has_outputs(s)
+            (self.expr_str(s.body.public_name), lut.fn_struct_make_outputs[s.base.id_])
+            for s in union.body.alts
+            if s.has_outputs_deep()
         ]
         func_get_build_outputs = GenericFunc(
-            name="dyn_outputs",
+            name=lut.fn_dyn_union_fn_struct_make_outputs[union.base.id_],
             return_type="typing.Any",
             docstring_body="Get build outputs function by command type.",
             return_descr="Build outputs function.",
@@ -658,25 +694,41 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
             func_get_build_outputs,
         ]
 
-    def param_dict_type_declare(self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct]) -> LineBuffer:
-        param_items: list[tuple[str, str]] = [
-            (self.expr_str("@type"), self.type_literal_union([struct.body.global_name]))
-        ]
-        for p in struct.body.iter_params():
-            _type = lookup.expr_param_type[p.base.id_]
+    def _make_typed_dict(self, symbol: ExprType, items: list[tuple[ExprType, ExprType]]) -> LineBuffer:
+        if items is None or len(items) == 0:
+            return [f"{symbol} = typing.TypedDict('{symbol}', {{}})"]
+        else:
+            return [
+                f"{symbol} = typing.TypedDict('{symbol}', {{",
+                *indent([f"{key}: {value}," for key, value in items]),
+                "})",
+            ]
+
+    def param_dict_type_declare(self, lut: SymbolLUT, struct: ir.Param[ir.Param.Struct]) -> LineBuffer:
+        def _not_required(s):
+            return f"typing.NotRequired[{s}]"
+
+        param_items: list[tuple[str, str]] = []
+        for p in struct.body.iter_params_shallow():
+            _type = lut.type_param[p.base.id_]
             if p.nullable:
-                _type = f"typing.NotRequired[{_type}]"
+                _type = _not_required(_type)
             param_items.append((self.expr_str(p.base.name), _type))
 
-        dict_symbol = lookup.expr_params_dict_type[struct.base.id_]
+        dict_symbol = lut.type_struct_params[struct.base.id_]
+        dict_symbol_tagged = lut.type_struct_params_tagged[struct.base.id_]
 
-        if param_items is None or len(param_items) == 0:
-            return [f"{dict_symbol} = typing.TypedDict('{dict_symbol}', {{}})"]
-        return [
-            f"{dict_symbol} = typing.TypedDict('{dict_symbol}', {{",
-            *indent([f"{key}: {value}," for key, value in param_items]),
-            "})",
-        ]
+        # todo: this needs helper function
+        attype_key = self.expr_str("@type")
+        attype_value = self.type_literal_union([struct.body.public_name])
+        buf = self._make_typed_dict(dict_symbol, [(attype_key, _not_required(attype_value))] + param_items)
+
+        # if struct.is_root() or isinstance(struct.parent.body, ir.Param.StructUnion):
+        # only create tagged types for structs used in unions
+        # todo: maybe move logic to generic
+        buf += self._make_typed_dict(dict_symbol_tagged, [(attype_key, attype_value)] + param_items)
+
+        return buf
 
     def param_dict_get(self, name: str, param: ir.Param) -> ExprType:
         return f"{name}[{self.expr_str(param.base.name)}]"
@@ -695,7 +747,7 @@ class PythonLanguageCompileProvider(Compilable):
         packages: typing.Iterable[
             tuple[
                 ir.Package,
-                typing.Iterable[ir.Interface],
+                typing.Iterable[ir.App],
             ]
         ],
     ) -> typing.Generator[TextFile, typing.Any, None]:
@@ -739,20 +791,20 @@ class PythonLanguageCompileProvider(Compilable):
             package_module: GenericModule = GenericModule(
                 docstr=docs_to_docstring(package.docs),
             )
-            package_dyn_entrypoints: dict[str, EntrypointSymbols] = {}
+            package_dyn_entrypoints: dict[str, SymbolLUT] = {}
 
             for interface in interfaces:
                 interface_module_symbol = self.symbol_var_case_from(interface.command.base.name)
 
                 interface_module: GenericModule = GenericModule()
-                entrypoint_symbols = compile_interface(
+                entrypoint_symbols = compile_app(
                     lang=self,
                     package=package,
-                    interface=interface,
+                    app=interface,
                     package_scope=package_scope,
-                    interface_module=interface_module,
+                    module_app=interface_module,
                 )
-                package_dyn_entrypoints[interface.command.body.global_name] = entrypoint_symbols
+                package_dyn_entrypoints[interface.command.body.public_name] = entrypoint_symbols
                 package_module.imports.append(f"from .{interface_module_symbol} import *")
                 yield TextFile(
                     path=python_package_path_src
@@ -763,7 +815,7 @@ class PythonLanguageCompileProvider(Compilable):
                 )
 
             dyn_execute_dict = {
-                self.expr_str(global_name): entrypoint.fn_execute
+                self.expr_str(global_name): entrypoint.fn_root_execute
                 for global_name, entrypoint in package_dyn_entrypoints.items()
             }
             fn_pkg_dyn_execute = GenericFunc(
@@ -801,7 +853,9 @@ class PythonLanguageCompileProvider(Compilable):
 
         yield TextFile(
             path=pathlib.Path("requirements.txt"),
-            content="\n".join([f"{project.name}_{package_name}" for package_name in package_names] + [project.name]),
+            content="\n".join(
+                [f"./{project.name}_{package_name}" for package_name in package_names] + ["./" + project.name]
+            ),
         )
 
         if python_dist_repo_url := _get_checked(project.extras, "dist_repo_url", str):

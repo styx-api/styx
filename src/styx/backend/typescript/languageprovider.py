@@ -5,8 +5,8 @@ import typing
 from styx.backend import TextFile
 from styx.backend.compile import Compilable
 from styx.backend.generic.documentation import docs_to_docstring
-from styx.backend.generic.gen.interface import compile_interface, EntrypointSymbols
-from styx.backend.generic.gen.lookup import LookupParam
+from styx.backend.generic.gen.interface import compile_app
+from styx.backend.generic.gen.lookup import SymbolLUT
 from styx.backend.generic.languageprovider import (
     TYPE_PYLITERAL,
     ExprType,
@@ -25,7 +25,6 @@ from styx.backend.generic.string_case import pascal_case, screaming_snake_case, 
 from styx.backend.generic.utils import (
     enbrace,
     enquote,
-    struct_has_outputs,
 )
 from styx.backend.typescript.templates import template_build_js, template_package_json, template_tsconfig_json
 from styx.ir import core as ir
@@ -184,41 +183,41 @@ class TypeScriptLanguageSymbolProvider(LanguageSymbolProvider):
 
 class TypeScriptLanguageIrProvider(LanguageIrProvider):
     def build_params_and_execute(
-        self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct], runner_symbol: ExprType
+        self, lookup: SymbolLUT, struct: ir.Param[ir.Param.Struct], runner_symbol: ExprType
     ) -> LineBuffer:
-        param_list = list(struct.body.iter_params())
+        param_list = list(struct.body.iter_params_shallow())
         param_list.sort(key=lambda a: a.default_value is not None)
-        args = [lookup.expr_param_symbol_alias[elem.base.id_] for elem in param_list]
+        args = [lookup.var_param[elem.base.id_] for elem in param_list]
         return [
-            f"const params = {lookup.expr_func_build_params[struct.base.id_]}({', '.join([a for a in args])})",
-            self.return_statement(f"{lookup.expr_func_execute[struct.base.id_]}(params, {runner_symbol})"),
+            f"const params = {lookup.fn_struct_make_params[struct.base.id_]}({', '.join([a for a in args])})",
+            self.return_statement(f"{lookup.fn_struct_execute[struct.base.id_]}(params, {runner_symbol})"),
         ]
 
     def call_build_cargs(
         self,
-        lookup: LookupParam,
+        lookup: SymbolLUT,
         struct: ir.Param[ir.Param.Struct],
         params_symbol: ExprType,
         execution_symbol: ExprType,
         return_symbol: ExprType,
     ) -> LineBuffer:
         return [
-            f"const {return_symbol} = {lookup.expr_func_build_cargs[struct.base.id_]}({params_symbol}, {execution_symbol})"
+            f"const {return_symbol} = {lookup.fn_struct_make_cmdargs[struct.base.id_]}({params_symbol}, {execution_symbol})"
         ]
 
     def call_build_outputs(
         self,
-        lookup: LookupParam,
+        lookup: SymbolLUT,
         struct: ir.Param[ir.Param.Struct],
         params_symbol: ExprType,
         execution_symbol: ExprType,
         return_symbol: ExprType,
     ) -> LineBuffer:
         return [
-            f"const {return_symbol} = {lookup.expr_func_build_outputs[struct.base.id_]}({params_symbol}, {execution_symbol})"
+            f"const {return_symbol} = {lookup.fn_struct_make_outputs[struct.base.id_]}({params_symbol}, {execution_symbol})"
         ]
 
-    def param_var_to_mstr(self, param: ir.Param, symbol: str) -> MStr:
+    def param_var_to_mstr(self, lut: SymbolLUT, param: ir.Param, symbol: str) -> MStr:
         def _val() -> MStr:
             if not param.list_:
                 if isinstance(param.body, ir.Param.String):
@@ -249,8 +248,13 @@ class TypeScriptLanguageIrProvider(LanguageIrProvider):
                     if param.body.mutable:
                         extra_args += ", { mutable: true }"
                     return MStr(f"execution.inputFile({symbol}{extra_args})", False)
-                if isinstance(param.body, (ir.Param.Struct, ir.Param.StructUnion)):
-                    return MStr(f'dynCargs({symbol}["@type"])({symbol}, execution)', True)
+                if isinstance(param.body, ir.Param.Struct):
+                    return MStr(f"{lut.fn_struct_make_cmdargs[param.base.id_]}({symbol}, execution)", True)
+                if isinstance(param.body, ir.Param.StructUnion):
+                    return MStr(
+                        f'{lut.fn_dyn_union_fn_struct_make_cmdargs[param.base.id_]}({symbol}["@type"])({symbol}, execution)',
+                        True,
+                    )
                 assert False
 
             if param.list_.join is None:
@@ -267,8 +271,15 @@ class TypeScriptLanguageIrProvider(LanguageIrProvider):
                     if param.body.mutable:
                         extra_args += ", { mutable: true }"
                     return MStr(f"{symbol}.map(f => execution.inputFile(f{extra_args}))", True)
-                if isinstance(param.body, (ir.Param.Struct, ir.Param.StructUnion)):
-                    return MStr(f'{symbol}.map(s => dynCargs(s["@type"])(s, execution)).flat()', True)
+                if isinstance(param.body, ir.Param.Struct):
+                    return MStr(
+                        f"{symbol}.map(s => {lut.fn_struct_make_cmdargs[param.base.id_]}(s, execution)).flat()", True
+                    )
+                if isinstance(param.body, ir.Param.StructUnion):
+                    return MStr(
+                        f'{symbol}.map(s => {lut.fn_dyn_union_fn_struct_make_cmdargs[param.base.id_]}(s["@type"])(s, execution)).flat()',
+                        True,
+                    )
                 assert False
 
             # param.list_.join is not None
@@ -286,9 +297,14 @@ class TypeScriptLanguageIrProvider(LanguageIrProvider):
                 if param.body.mutable:
                     extra_args += ", { mutable: true }"
                 return MStr(f"{symbol}.map(f => execution.inputFile(f{extra_args})).join({sep_join})", False)
-            if isinstance(param.body, (ir.Param.Struct, ir.Param.StructUnion)):
+            if isinstance(param.body, ir.Param.Struct):
                 return MStr(
-                    f'{symbol}.map(s => dynCargs(s["@type"])(s, execution)).flat().join({sep_join})',
+                    f"{symbol}.map(s => {lut.fn_struct_make_cmdargs[param.base.id_]}(s, execution)).flat().join({sep_join})",
+                    False,
+                )
+            if isinstance(param.body, ir.Param.StructUnion):
+                return MStr(
+                    f'{symbol}.map(s => {lut.fn_dyn_union_fn_struct_make_cmdargs[param.base.id_]}(s["@type"])(s, execution)).flat().join({sep_join})',
                     False,
                 )
             assert False
@@ -401,16 +417,30 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
             "import { Runner, Execution, Metadata, InputPathType, OutputPathType, getGlobalRunner } from 'styxdefs';",
         ]
 
-    def struct_collect_outputs(self, struct: ir.Param[ir.Param.Struct], struct_symbol: str) -> str:
-        if struct.list_:
-            o = f'{struct_symbol}.map(i => dynOutputs(i["@type"])?.(i, execution) ?? null)'
-            if struct.nullable:
-                o = f"{struct_symbol} ? {o} : null"
-            return o
+    def struct_collect_outputs(
+        self, lut: SymbolLUT, struct: ir.Param[ir.Param.Struct] | ir.Param[ir.Param.StructUnion], struct_symbol: str
+    ) -> str:
+        if isinstance(struct.body, ir.Param.Struct):
+            if struct.list_:
+                o = f"{struct_symbol}.map(i => {lut.fn_struct_make_outputs[struct.base.id_]}(i, execution) ?? null)"
+                if struct.nullable:
+                    o = f"{struct_symbol} ? {o} : null"
+                return o
 
-        o = f'dynOutputs({struct_symbol}["@type"])?.({struct_symbol}, execution)'
-        if struct.nullable:
-            o = f"{struct_symbol} ? ({o} ?? null) : null"
+            o = f"{lut.fn_struct_make_outputs[struct.base.id_]}({struct_symbol}, execution)"
+            if struct.nullable:
+                o = f"{struct_symbol} ? ({o} ?? null) : null"
+
+        else:
+            if struct.list_:
+                o = f'{struct_symbol}.map(i => {lut.fn_dyn_union_fn_struct_make_outputs[struct.base.id_]}(i["@type"])?.(i, execution) ?? null)'
+                if struct.nullable:
+                    o = f"{struct_symbol} ? {o} : null"
+                return o
+
+            o = f'{lut.fn_dyn_union_fn_struct_make_outputs[struct.base.id_]}({struct_symbol}["@type"])?.({struct_symbol}, execution)'
+            if struct.nullable:
+                o = f"{struct_symbol} ? ({o} ?? null) : null"
         return o
 
     def runner_symbol(self) -> str:
@@ -605,7 +635,7 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
         return [
             f"const {name} = {{",
             *indent(
-                [f'"@type": {self.expr_str(param.body.global_name)} as const,']
+                [f'"@type": {self.expr_str(param.body.public_name)} as const,']
                 + [f"{self.expr_str(key.base.name)}: {value}," for key, value in (items or [])]
             ),
             "};",
@@ -614,14 +644,13 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
     def param_dict_set(self, dict_symbol: str, param: ir.Param, value_expr: str) -> LineBuffer:
         return [f"{dict_symbol}[{self.expr_str(param.base.name)}] = {value_expr};"]
 
-    def dyn_declare(self, lookup: LookupParam, root_struct: ir.Param[ir.Param.Struct]) -> list[GenericFunc]:
+    def dyn_declare(self, lut: SymbolLUT, union: ir.Param[ir.Param.StructUnion]) -> list[GenericFunc]:
         cargs_items = [
-            (self.expr_str(s.body.global_name), lookup.expr_func_build_cargs[s.base.id_])
-            for s in root_struct.iter_structs_recursively(False)
+            (self.expr_str(s.body.public_name), lut.fn_struct_make_cmdargs[s.base.id_]) for s in union.body.alts
         ]
 
         func_get_build_cargs = GenericFunc(
-            name="dynCargs",
+            name=lut.fn_dyn_union_fn_struct_make_cmdargs[union.base.id_],
             return_type="Function | undefined",
             docstring_body="Get build cargs function by command type.",
             return_descr="Build cargs function.",
@@ -641,13 +670,13 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
         )
 
         outputs_items = [
-            (self.expr_str(s.body.global_name), lookup.expr_func_build_outputs[s.base.id_])
-            for s in root_struct.iter_structs_recursively(False)
-            if struct_has_outputs(s)
+            (self.expr_str(s.body.public_name), lut.fn_struct_make_outputs[s.base.id_])
+            for s in union.body.alts
+            if s.has_outputs_deep()
         ]
 
         func_get_build_outputs = GenericFunc(
-            name="dynOutputs",
+            name=lut.fn_dyn_union_fn_struct_make_outputs[union.base.id_],
             return_type="Function | undefined",
             docstring_body="Get build outputs function by command type.",
             return_descr="Build outputs function.",
@@ -668,22 +697,30 @@ class TypeScriptLanguageHighLevelProvider(LanguageHighLevelProvider):
 
         return [func_get_build_cargs, func_get_build_outputs]
 
-    def param_dict_type_declare(self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct]) -> LineBuffer:
-        param_items: list[tuple[str, str]] = [('"@type"', self.type_literal_union([struct.body.global_name]))]
+    def param_dict_type_declare(self, lut: SymbolLUT, struct: ir.Param[ir.Param.Struct]) -> LineBuffer:
+        param_items: list[tuple[str, str]] = [('"@type"?', self.type_literal_union([struct.body.public_name]))]
 
-        for p in struct.body.iter_params():
-            _type = lookup.expr_param_type[p.base.id_]
+        for p in struct.body.iter_params_shallow():
+            _type = lut.type_param[p.base.id_]
             if p.nullable:
                 _type = f"{_type} | undefined"
             param_items.append((self.expr_str(p.base.name) + ("?" if p.nullable else ""), _type))
 
-        dict_symbol = lookup.expr_params_dict_type[struct.base.id_]
+        dict_symbol = lut.type_struct_params[struct.base.id_]
+        dict_symbol_tagged = lut.type_struct_params_tagged[struct.base.id_]
 
-        return [
+        buf = [
             f"interface {dict_symbol} {{",
             *indent([f"{key}: {value};" for key, value in param_items]),
             "}",
         ]
+
+        # if struct.is_root() or isinstance(struct.parent.body, ir.Param.StructUnion):
+        # only create tagged types for structs used in unions
+        # todo: maybe move logic to generic
+        buf.append(f"type {dict_symbol_tagged} = Required<Pick<{dict_symbol}, '@type'>> & {dict_symbol};")
+
+        return buf
 
     def param_dict_get(self, name: str, param: ir.Param) -> ExprType:
         return f"{name}[{self.expr_str(param.base.name)}]"
@@ -699,7 +736,7 @@ class TypeScriptLanguageCompileProvider(Compilable):
         packages: typing.Iterable[
             tuple[
                 ir.Package,
-                typing.Iterable[ir.Interface],
+                typing.Iterable[ir.App],
             ]
         ],
     ) -> typing.Generator[TextFile, typing.Any, None]:
@@ -714,23 +751,30 @@ class TypeScriptLanguageCompileProvider(Compilable):
             package_module: GenericModule = GenericModule(
                 docstr=docs_to_docstring(package.docs),
             )
-            package_dyn_entrypoints: dict[str, EntrypointSymbols] = {}
+            package_dyn_entrypoints: dict[str, SymbolLUT] = {}
 
             for interface in interfaces:
                 interface_module_symbol = self.symbol_var_case_from(interface.command.base.name)
 
                 interface_module: GenericModule = GenericModule()
-                entrypoint_symbols = compile_interface(
+                entrypoint_symbols = compile_app(
                     lang=self,
                     package=package,
-                    interface=interface,
+                    app=interface,
                     package_scope=package_scope,
-                    interface_module=interface_module,
+                    module_app=interface_module,
                 )
-                package_dyn_entrypoints[interface.command.body.global_name] = entrypoint_symbols
-                package_module.imports.append(f"export * from './{package_symbol}/{interface_module_symbol}'")
+                package_dyn_entrypoints[interface.command.body.public_name] = entrypoint_symbols
+
+                exports = [entrypoint_symbols.fn_root_make_params_and_execute, entrypoint_symbols.fn_root_execute] + [
+                    x for _, x in entrypoint_symbols.fn_struct_make_params.items()
+                ]
+
                 package_module.imports.append(
-                    f"import {{ {entrypoint_symbols.fn_execute} }} from './{package_symbol}/{interface_module_symbol}'"
+                    f"export {{{', '.join(exports)}}} from './{package_symbol}/{interface_module_symbol}'"
+                )
+                package_module.imports.append(
+                    f"import {{ {entrypoint_symbols.fn_root_execute} }} from './{package_symbol}/{interface_module_symbol}'"
                 )
 
                 yield TextFile(
@@ -739,7 +783,7 @@ class TypeScriptLanguageCompileProvider(Compilable):
                 )
 
             dyn_execute_dict = {
-                self.expr_str(global_name): entrypoint.fn_execute
+                self.expr_str(global_name): entrypoint.fn_root_execute
                 for global_name, entrypoint in package_dyn_entrypoints.items()
             }
             fn_pkg_dyn_execute = GenericFunc(
@@ -773,7 +817,8 @@ class TypeScriptLanguageCompileProvider(Compilable):
             + f"\nimport {{Runner}} from 'styxdefs'\nexport const version = '{project.version}';"
             + "\nexport function execute(params: any, runner: Runner | null = null) {;"
             + '\n  const stype = params["@type"];\n'
-            + "\n".join([f'  if (stype.startsWith("{x}")) return {x}.execute(params, runner);' for x in package_names])
+            + "\n".join([f'  if (stype.startsWith("{x}/")) return {x}.execute(params, runner);' for x in package_names])
+            + "\n  return null;\n"
             + "\n}",
         )
 

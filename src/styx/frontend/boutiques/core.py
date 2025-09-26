@@ -424,7 +424,7 @@ def _collect_inputs(bt: dict, id_counter: IdCounter) -> tuple[list[ir.Conditiona
     groups: list[ir.ConditionalGroup] = []
     for bt_segment in _bt_template_str_parse(bt.get("command-line", ""), inputs_lookup):
         group = ir.ConditionalGroup()
-        carg = ir.Carg()
+        carg = ir.CmdArg()
 
         for bt_elem in bt_segment:
             if isinstance(bt_elem, str):
@@ -444,7 +444,7 @@ def _collect_inputs(bt: dict, id_counter: IdCounter) -> tuple[list[ir.Conditiona
                 if input_prefix_join is not None:
                     carg.tokens.append((input_prefix if input_prefix else "") + input_prefix_join)
                 elif input_prefix:
-                    group.cargs.append(ir.Carg([input_prefix]))
+                    group.cargs.append(ir.CmdArg([input_prefix]))
 
             carg.tokens.append(param)
 
@@ -454,9 +454,9 @@ def _collect_inputs(bt: dict, id_counter: IdCounter) -> tuple[list[ir.Conditiona
     return groups, ir_id_lookup
 
 
-def _collect_stdout_stderr_output(bt: dict, id_counter: IdCounter) -> ir.StdOutErrAsStringOutput:
+def _collect_stdout_stderr_output(bt: dict, id_counter: IdCounter) -> ir.StreamOutput:
     assert "id" in bt, "StdOut / StdErr Output needs id"
-    return ir.StdOutErrAsStringOutput(
+    return ir.StreamOutput(
         id_=id_counter.next(),
         name=bt["id"],
         docs=ir.Documentation(title=bt.get("name"), description=bt.get("description")),
@@ -485,14 +485,14 @@ def partial_package_info_from_boutiques(
 
 def from_boutiques(
     tool: dict,
-) -> ir.Interface:
+) -> ir.App:
     """Convert a Boutiques tool to a Styx descriptor."""
     hash_ = _hash_from_boutiques(tool)
 
     id_counter = IdCounter()
 
-    stdout_output: ir.StdOutErrAsStringOutput | None = None
-    stderr_output: ir.StdOutErrAsStringOutput | None = None
+    stdout_output: ir.StreamOutput | None = None
+    stderr_output: ir.StreamOutput | None = None
     if "stdout-output" in tool:
         stdout_output = _collect_stdout_stderr_output(tool["stdout-output"], id_counter)
     if "stderr-output" in tool:
@@ -501,13 +501,13 @@ def from_boutiques(
     dparam, dstruct = _struct_from_boutiques(tool, id_counter)
 
     return normalize(
-        ir.Interface(
+        ir.App(
             uid=f"{hash_}.boutiques",
             command=ir.Param(
                 base=dparam,
                 body=dstruct,
             ),
-            stderr_as_string_output=stderr_output,
-            stdout_as_string_output=stdout_output,
+            capture_stderr=stderr_output,
+            capture_stdout=stdout_output,
         )
     )

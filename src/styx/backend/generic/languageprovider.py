@@ -7,9 +7,9 @@ import styx.ir.core as ir
 from styx.backend.compile import Compilable
 
 if typing.TYPE_CHECKING:
-    from styx.backend.generic.gen.lookup import LookupParam
+    from styx.backend.generic.gen.lookup import SymbolLUT
 else:
-    LookupParam = None
+    SymbolLUT = None
 from styx.backend.generic.linebuffer import LineBuffer
 from styx.backend.generic.model import GenericArg, GenericFunc, GenericModule, GenericStructure
 
@@ -95,7 +95,9 @@ class LanguageTypeProvider(Protocol):
 
     # Default implementations
 
-    def type_param(self, param: ir.Param, lookup_struct_type: dict[ir.IdType, str]) -> TypeType:
+    def type_param(
+        self, param: ir.Param, lookup_struct_type: dict[ir.IdType, str], lookup_struct_type_tagged: dict[ir.IdType, str]
+    ) -> TypeType:
         """Return the Python type expression for a param.
 
         Args:
@@ -124,7 +126,7 @@ class LanguageTypeProvider(Protocol):
             if isinstance(param.body, ir.Param.Struct):
                 return lookup_struct_type[param.base.id_]
             if isinstance(param.body, ir.Param.StructUnion):
-                return self.type_union([lookup_struct_type[i.base.id_] for i in param.body.alts])
+                return self.type_union([lookup_struct_type_tagged[i.base.id_] for i in param.body.alts])
             assert False
 
         type_ = _base()
@@ -452,24 +454,26 @@ class LanguageHighLevelProvider(Protocol):
         ...
 
     @abstractmethod
-    def struct_collect_outputs(self, struct: ir.Param[ir.Param.Struct], struct_symbol: str) -> str:
+    def struct_collect_outputs(
+        self, lut: SymbolLUT, struct: ir.Param[ir.Param.Struct] | ir.Param[ir.Param.StructUnion], struct_symbol: str
+    ) -> str:
         """Collect outputs for a sub-struct."""
         ...
 
     @abstractmethod
-    def dyn_declare(self, lookup: LookupParam, root_struct: ir.Param[ir.Param.Struct]) -> list[GenericFunc]:
+    def dyn_declare(self, lookup: SymbolLUT, union: ir.Param[ir.Param.StructUnion]) -> list[GenericFunc]:
         """Declare functions needed for performing dynamic dispatch of subcommand carg and output building."""
         ...
 
     @abstractmethod
-    def param_dict_type_declare(self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct]) -> LineBuffer:
+    def param_dict_type_declare(self, lookup: SymbolLUT, struct: ir.Param[ir.Param.Struct]) -> LineBuffer:
         """Declare the type a subcommand parameter dictionary."""
         ...
 
     @abstractmethod
     def param_dict_create(
         self,
-        lookup: LookupParam,
+        lookup: SymbolLUT,
         name: str,
         param: ir.Param[ir.Param.Struct],
         items: list[tuple[ir.Param, ExprType]] | None = None,
@@ -509,10 +513,11 @@ class LanguageIrProvider(Protocol):
     @abstractmethod
     def param_var_to_mstr(
         self,
+        lut: SymbolLUT,
         param: ir.Param,
         symbol: str,
     ) -> MStr:
-        """Language var to MStr."""
+        """Language var to MStr. Needs LUT for resolving struct and union functions."""
         ...
 
     @abstractmethod
@@ -543,13 +548,13 @@ class LanguageIrProvider(Protocol):
 
     @abstractmethod
     def build_params_and_execute(
-        self, lookup: LookupParam, struct: ir.Param[ir.Param.Struct], runner_symbol: ExprType
+        self, lookup: SymbolLUT, struct: ir.Param[ir.Param.Struct], runner_symbol: ExprType
     ) -> LineBuffer: ...
 
     @abstractmethod
     def call_build_cargs(
         self,
-        lookup: LookupParam,
+        lookup: SymbolLUT,
         struct: ir.Param[ir.Param.Struct],
         params_symbol: ExprType,
         execution_symbol: ExprType,
@@ -559,7 +564,7 @@ class LanguageIrProvider(Protocol):
     @abstractmethod
     def call_build_outputs(
         self,
-        lookup: LookupParam,
+        lookup: SymbolLUT,
         struct: ir.Param[ir.Param.Struct],
         params_symbol: ExprType,
         execution_symbol: ExprType,

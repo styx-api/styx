@@ -3,7 +3,7 @@ import styx.ir.core as ir
 
 def _expr_counter(expr: ir.Param) -> int:
     if isinstance(expr.body, ir.Param.Struct):
-        return 1 + sum([_expr_counter(e) for e in expr.body.iter_params()])
+        return 1 + sum([_expr_counter(e) for e in expr.body.iter_params_shallow()])
     if isinstance(expr.body, ir.Param.StructUnion):
         return 1 + sum([_expr_counter(e) for e in expr.body.alts])
     return 1
@@ -11,7 +11,7 @@ def _expr_counter(expr: ir.Param) -> int:
 
 def _param_counter(expr: ir.Param) -> int:
     if isinstance(expr.body, ir.Param.Struct):
-        return sum([_param_counter(e) for e in expr.body.iter_params()])
+        return sum([_param_counter(e) for e in expr.body.iter_params_shallow()])
     if isinstance(expr.body, ir.Param.StructUnion):
         return sum([_param_counter(e) for e in expr.body.alts])
     return 1
@@ -25,14 +25,14 @@ def _mccabe(expr: ir.Param) -> int:
 
     match expr.body:
         case ir.Param.Struct():
-            x = [_mccabe(e) for e in expr.body.iter_params()]
+            x = [_mccabe(e) for e in expr.body.iter_params_shallow()]
             return complexity * (sum(x) - len(x) + 1)
         case ir.Param.StructUnion():
             return complexity * sum([_mccabe(e) for e in expr.body.alts])
     return complexity
 
 
-def stats(interface: ir.Interface) -> dict[str, str | int | float]:
+def stats(interface: ir.App) -> dict[str, str | int | float]:
     return {
         "name": interface.command.base.name,
         "num_expressions": _expr_counter(interface.command),

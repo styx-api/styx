@@ -61,19 +61,3 @@ def ensure_endswith(text: str, suffix: str) -> str:
 def escape_backslash(s: str) -> str:
     """Escape backslashes with double backslash."""
     return s.replace("\\", "\\\\")
-
-
-@deprecated("Use Param.has_outputs() instead")
-def struct_has_outputs(struct: ir.Param[ir.Param.Struct]) -> bool:
-    """Check if the sub-command has outputs."""
-    if len(struct.base.outputs) > 0:
-        return True
-    for p in struct.body.iter_params():
-        if isinstance(p.body, ir.Param.Struct):
-            if struct_has_outputs(p):
-                return True
-        if isinstance(p.body, ir.Param.StructUnion):
-            for struct in p.body.alts:
-                if struct_has_outputs(struct):
-                    return True
-    return False
