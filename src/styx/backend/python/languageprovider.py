@@ -791,20 +791,25 @@ class PythonLanguageCompileProvider(Compilable):
             package_module: GenericModule = GenericModule(
                 docstr=docs_to_docstring(package.docs),
             )
-            package_dyn_entrypoints: dict[str, SymbolLUT] = {}
+            package_luts: dict[str, SymbolLUT] = {}
 
             for interface in interfaces:
                 interface_module_symbol = self.symbol_var_case_from(interface.command.base.name)
 
                 interface_module: GenericModule = GenericModule()
-                entrypoint_symbols = compile_app(
+                lut = compile_app(
                     lang=self,
                     package=package,
                     app=interface,
                     package_scope=package_scope,
                     module_app=interface_module,
                 )
-                package_dyn_entrypoints[interface.command.body.public_name] = entrypoint_symbols
+                yield TextFile.json(
+                    path=pathlib.Path(f"symbolmaps") / package.name / f"{lut.fn_root_make_params_and_execute}.json",
+                    content=lut.symbol_map(),
+                )
+
+                package_luts[interface.command.body.public_name] = lut
                 package_module.imports.append(f"from .{interface_module_symbol} import *")
                 yield TextFile(
                     path=python_package_path_src
@@ -814,9 +819,14 @@ class PythonLanguageCompileProvider(Compilable):
                     content=collapse(self.generate_module(interface_module)),
                 )
 
+            yield TextFile.json(
+                path=pathlib.Path(f"symbolmaps") / f"{package.name}.json",
+                content={global_name: f"{package.name}/{lut.fn_root_make_params_and_execute}.json" for global_name, lut in package_luts.items()},
+            )
+
             dyn_execute_dict = {
                 self.expr_str(global_name): entrypoint.fn_root_execute
-                for global_name, entrypoint in package_dyn_entrypoints.items()
+                for global_name, entrypoint in package_luts.items()
             }
             fn_pkg_dyn_execute = GenericFunc(
                 name=f"execute",
@@ -886,6 +896,12 @@ class PythonLanguageCompileProvider(Compilable):
                 path=pathlib.Path("README.md"),
                 content=python_readme,
             )
+
+        yield TextFile.json(
+            path=pathlib.Path(f"symbolmaps") / f"index.json",
+            content={package_name: f"{package_name}.json" for package_name in
+                     package_names},
+        )
 
 
 class PythonLanguageProvider(

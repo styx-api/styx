@@ -300,7 +300,7 @@ class Param(Generic[T]):
             current = current.parent
         return list(reversed(path))
 
-    def get_full_path(self) -> list[Param[Param.Struct] | Param[Param.StructUnion]]:
+    def get_full_path(self) -> list[Param]:
         """Get the full path from root to this parameter.
 
         Returns:
@@ -318,7 +318,7 @@ class Param(Generic[T]):
         """
         return self.parent is None
 
-    def get_root(self) -> Param[Param.Struct] | Param[Param.StructUnion]:
+    def get_root(self) -> Param[Param.Struct]:
         """Get the root parameter of this parameter tree.
 
         Returns:
