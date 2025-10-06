@@ -257,6 +257,14 @@ class SymbolLUT:
                     p["fn_struct_make_params"] = self.fn_struct_make_params.get(child.base.id_)
                     p["properties"] = _process_param(child)
 
+                if isinstance(child.body, ir.Param.StructUnion):
+                    p["variants"] = {
+                        alt.body.public_name: {
+                            "fn_struct_make_params": self.fn_struct_make_params.get(alt.base.id_),
+                            "properties": _process_param(alt)
+                        } for alt in child.body.alts
+                    }
+
                 out[child.base.name] = p
             return out
 
