@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from typing import Dict, Optional
 import styx.ir.core as ir
 from styx.backend.generic.languageprovider import LanguageProvider
 from styx.backend.generic.scope import Scope
@@ -242,16 +241,16 @@ class SymbolLUT:
         return instance
 
     def symbol_map(self) -> dict:
-        first_node =  self.param_by_id.items().__iter__().__next__()
+        first_node = self.param_by_id.items().__iter__().__next__()
         assert first_node is not None, "No params defined"
-        root =  first_node[1].get_root()
+        root = first_node[1].get_root()
 
         def _process_param(param: ir.Param):
             out = {}
             for child in param.body.iter_params_shallow():
                 p = {}
 
-                p["var_param"]  = self.var_param[child.base.id_]
+                p["var_param"] = self.var_param[child.base.id_]
 
                 if isinstance(child.body, ir.Param.Struct):
                     p["fn_struct_make_params"] = self.fn_struct_make_params.get(child.base.id_)
@@ -261,8 +260,9 @@ class SymbolLUT:
                     p["variants"] = {
                         alt.body.public_name: {
                             "fn_struct_make_params": self.fn_struct_make_params.get(alt.base.id_),
-                            "properties": _process_param(alt)
-                        } for alt in child.body.alts
+                            "properties": _process_param(alt),
+                        }
+                        for alt in child.body.alts
                     }
 
                 out[child.base.name] = p
@@ -270,9 +270,9 @@ class SymbolLUT:
 
         return {
             "fn_root_make_params_and_execute": self.fn_root_make_params_and_execute,
-            "properties": _process_param(root)
+            "properties": _process_param(root),
         }
 
-        #for param in self.param_by_id.items().__iter__().__next__()[1].get_root().iter_params_deep(False):
+        # for param in self.param_by_id.items().__iter__().__next__()[1].get_root().iter_params_deep(False):
         #    path = ".".join([x.base.name.replace(".", "..") for x in param.get_full_path()])
         #    print(path)

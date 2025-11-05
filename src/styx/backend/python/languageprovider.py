@@ -821,7 +821,10 @@ class PythonLanguageCompileProvider(Compilable):
 
             yield TextFile.json(
                 path=pathlib.Path(f"symbolmaps") / f"{package.name}.json",
-                content={global_name: f"{package.name}/{lut.fn_root_make_params_and_execute}.json" for global_name, lut in package_luts.items()},
+                content={
+                    global_name: f"{package.name}/{lut.fn_root_make_params_and_execute}.json"
+                    for global_name, lut in package_luts.items()
+                },
             )
 
             dyn_execute_dict = {
@@ -899,8 +902,7 @@ class PythonLanguageCompileProvider(Compilable):
 
         yield TextFile.json(
             path=pathlib.Path(f"symbolmaps") / f"index.json",
-            content={package_name: f"{package_name}.json" for package_name in
-                     package_names},
+            content={package_name: f"{package_name}.json" for package_name in package_names},
         )
 
 

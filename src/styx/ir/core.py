@@ -518,6 +518,8 @@ class Param(Generic[T]):
             parts.append(f"choices={self.choices!r}")
         if self.default_value is not None:
             parts.append(f"default={self.default_value!r}")
+        if self.base.outputs:
+            parts.append(f"outputs={self.base.outputs!r}")
 
         return ", ".join(parts) + ")"
 
