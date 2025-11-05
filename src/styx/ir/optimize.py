@@ -265,11 +265,13 @@ def _truthy_choices(app: ir.App) -> ir.App:
                     value_true=[choice1],
                     value_false=[choice2],
                 )
+                param.choices = None
             elif choice2_truthy and choice1_falsy:
                 param.body = ir.Param.Bool(
                     value_true=[choice2],
                     value_false=[choice1],
                 )
+                param.choices = None
 
         elif isinstance(param.body, ir.Param.Int):
             choice1_truthy = choice1 == 1
@@ -282,11 +284,13 @@ def _truthy_choices(app: ir.App) -> ir.App:
                     value_true=[str(choice1)],
                     value_false=[str(choice2)],
                 )
+                param.choices = None
             elif choice2_truthy and choice1_falsy:
                 param.body = ir.Param.Bool(
                     value_true=[str(choice2)],
                     value_false=[str(choice1)],
                 )
+                param.choices = None
 
     return app
 

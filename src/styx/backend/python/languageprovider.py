@@ -198,7 +198,7 @@ class PythonLanguageIrProvider(LanguageIrProvider):
                     if len(param.body.value_true) > 0:
                         if len(param.body.value_false) > 0:
                             return MStr(
-                                f"({self.expr_literal(value_true)} if {symbol} else {self.expr_literal(value_true)})",
+                                f"({self.expr_literal(value_true)} if {symbol} else {self.expr_literal(value_false)})",
                                 as_list,
                             )
                         return MStr(self.expr_literal(value_true), as_list)
@@ -226,7 +226,9 @@ class PythonLanguageIrProvider(LanguageIrProvider):
                 if isinstance(param.body, (ir.Param.Int, ir.Param.Float)):
                     return MStr(f"map(str, {symbol})", True)
                 if isinstance(param.body, ir.Param.Bool):
-                    assert False, "TODO: Not implemented yet"
+                    on_true = self.expr_literal("".join(param.body.value_true))
+                    on_false = self.expr_literal("".join(param.body.value_false))
+                    return MStr(f"[{on_true} if v else {on_false} for v in {symbol}]", True)
                 if isinstance(param.body, ir.Param.File):
                     extra_args = ""
                     if param.body.resolve_parent:
@@ -253,7 +255,9 @@ class PythonLanguageIrProvider(LanguageIrProvider):
             if isinstance(param.body, (ir.Param.Int, ir.Param.Float)):
                 return MStr(f"{sep_join}(map(str, {symbol}))", False)
             if isinstance(param.body, ir.Param.Bool):
-                assert False, "TODO: Not implemented yet"
+                on_true = self.expr_literal("".join(param.body.value_true))
+                on_false = self.expr_literal("".join(param.body.value_false))
+                return MStr(f"{sep_join}([{on_true} if v else {on_false} for v in {symbol}])", True)
             if isinstance(param.body, ir.Param.File):
                 extra_args = ""
                 if param.body.resolve_parent:
