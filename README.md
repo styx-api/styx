@@ -40,7 +40,7 @@ standard library (and on shared type definition). Runtimes are decoupled via dep
 Styx is not needed to run the generated wrappers, but is required to compile them.
 
 ```bash
-pip install git+https://github.com/childmindresearch/styx.git
+pip install git+https://github.com/styx-api/styx.git
 ```
 
 ## License
