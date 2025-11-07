@@ -1,11 +1,11 @@
 # Styx <img src="docs/logo.svg" align="right" width="25%"/>
 
-[![Build](https://github.com/childmindresearch/styx/actions/workflows/test.yaml/badge.svg?branch=main)](https://github.com/childmindresearch/styx/actions/workflows/test.yaml?query=branch%3Amain)
-[![codecov](https://codecov.io/gh/childmindresearch/styx/branch/main/graph/badge.svg?token=22HWWFWPW5)](https://codecov.io/gh/childmindresearch/styx)
+[![Build](https://github.com/styx-api/styx/actions/workflows/test.yaml/badge.svg?branch=main)](https://github.com/styx-api/styx/actions/workflows/test.yaml?query=branch%3Amain)
+[![codecov](https://codecov.io/gh/styx-api/styx/branch/main/graph/badge.svg?token=22HWWFWPW5)](https://codecov.io/gh/styx-api/styx)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 ![stability-wip](https://img.shields.io/badge/stability-work_in_progress-lightgrey.svg)
-[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/childmindresearch/styx/blob/main/LICENSE)
-[![pages](https://img.shields.io/badge/api-docs-blue)](https://childmindresearch.github.io/styx)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/styx-api/styx/blob/main/LICENSE)
+[![pages](https://img.shields.io/badge/api-docs-blue)](https://niwrap.dev/styx)
 
 Command line tool wrapper compiler.
 
@@ -18,21 +18,21 @@ standard library (and on shared type definition). Runtimes are decoupled via dep
 
 ### Documentation
 
-- [Styx Book](https://childmindresearch.github.io/styxbook/)
-- [Styx Playground](https://childmindresearch.github.io/styxplayground/)
+- [Styx Book](https://niwrap.dev/styxbook/)
+- [Styx Playground](https://niwrap.dev/styxplayground/)
 
 ### Precompiled wrappers
 
-- [Neuroimaging](https://github.com/childmindresearch/niwrap)
+- [Neuroimaging](https://github.com/styx-api/niwrap)
 
 ### Runtimes
 
-- [Docker](https://github.com/childmindresearch/styxdocker)
-- [Singularity](https://github.com/childmindresearch/styxsingularity)
+- [Docker](https://github.com/styx-api/styxdocker)
+- [Singularity](https://github.com/styx-api/styxsingularity)
 
 ### Middleware
 
-- [Graph generation](https://github.com/childmindresearch/styxgraph)
+- [Graph generation](https://github.com/styx-api/styxgraph)
 
 
 ## Installation
