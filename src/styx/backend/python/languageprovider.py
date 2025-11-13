@@ -5,7 +5,7 @@ import typing
 from styx.backend import TextFile
 from styx.backend.compile import Compilable
 from styx.backend.generic.documentation import docs_to_docstring
-from styx.backend.generic.gen.interface import compile_app, SymbolLUT
+from styx.backend.generic.gen.app import compile_app
 from styx.backend.generic.gen.lookup import SymbolLUT
 from styx.backend.generic.languageprovider import (
     TYPE_PYLITERAL,
@@ -319,27 +319,27 @@ class PythonLanguageExprProvider(LanguageExprProvider):
         return "True" if obj else "False"
 
     def expr_int(self, obj: int) -> ExprType:
-        """Convert a bool to a language literal."""
+        """Convert an int to a language literal."""
         return str(obj)
 
     def expr_float(self, obj: float) -> ExprType:
-        """Convert a bool to a language literal."""
+        """Convert a float to a language literal."""
         return str(obj)
 
     def expr_str(self, obj: str) -> ExprType:
-        """Convert a bool to a language literal."""
-        return enquote(obj)  # todo string escape?
+        """Convert a string to a language literal."""
+        return enquote(obj.replace('\\', '\\\\').replace('"', '\\"'))
 
     def expr_path(self, obj: pathlib.Path) -> ExprType:
-        """Convert a bool to a language literal."""
-        return enquote(str(obj))  # todo string escape?
+        """Convert a path to a language literal."""
+        return f"pathlib.Path({self.expr_str(str(obj))})"
 
     def expr_list(self, obj: list[ExprType]) -> ExprType:
-        """Convert a bool to a language literal."""
+        """Convert a list to a language literal."""
         return enbrace(", ".join(obj), "[")
 
     def expr_dict(self, obj: dict[ExprType, ExprType]) -> ExprType:
-        """Convert a bool to a language literal."""
+        """Convert a dict to a language literal."""
         return enbrace(", ".join([f"{k}: {v}" for k, v in obj.items()]), "{")
 
     def expr_numeric_to_str(self, numeric_expr: str) -> str:

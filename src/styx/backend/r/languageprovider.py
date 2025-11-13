@@ -4,7 +4,7 @@ import typing
 
 from styx.backend.common import TextFile
 from styx.backend.generic.documentation import docs_to_docstring
-from styx.backend.generic.gen.interface import compile_app
+from styx.backend.generic.gen.app import compile_app
 from styx.backend.generic.gen.lookup import SymbolLUT
 from styx.backend.generic.languageprovider import (
     TYPE_PYLITERAL,
