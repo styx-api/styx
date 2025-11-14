@@ -21,6 +21,6 @@ class StyxDefsCompat(typing.NamedTuple):
 
 
 STYXDEFS_COMPAT = StyxDefsCompat(
-    minimum=Version(0, 5, 0),
-    maximum=Version(0, 6, 0),
+    minimum=Version(0, 6, 0),
+    maximum=Version(0, 7, 0),
 )
