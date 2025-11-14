@@ -328,7 +328,7 @@ class PythonLanguageExprProvider(LanguageExprProvider):
 
     def expr_str(self, obj: str) -> ExprType:
         """Convert a string to a language literal."""
-        return enquote(obj.replace('\\', '\\\\').replace('"', '\\"'))
+        return enquote(obj.replace("\\", "\\\\").replace('"', '\\"'))
 
     def expr_path(self, obj: pathlib.Path) -> ExprType:
         """Convert a path to a language literal."""
