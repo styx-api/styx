@@ -5,7 +5,7 @@ from styx.backend.generic.documentation import docs_to_docstring
 from styx.backend.generic.gen.lookup import SymbolLUT
 from styx.backend.generic.gen.metadata import generate_static_metadata
 from styx.backend.generic.languageprovider import LanguageProvider, MStr
-from styx.backend.generic.linebuffer import LineBuffer, blank_before
+from styx.backend.generic.linebuffer import LineBuffer, blank_before, indent
 from styx.backend.generic.model import GenericArg, GenericFunc, GenericModule, GenericStructure
 from styx.backend.generic.scope import Scope
 from styx.backend.generic.utils import enquote
@@ -437,9 +437,9 @@ def _compile_func_execute(
     )
 
     func.body.extend([
+        *(lang.call_validate_params(lut, "params") if lang.does_validate() else []),
         *lang.runner_declare("runner"),
         *lang.execution_declare("execution", lut.obj_metadata),
-        # lang.expr_line_comment("todo: validate constraint checks (or after middlewares?)"),
         *lang.execution_process_params("execution", "params"),
         *lang.call_build_cargs(lut, struct, "params", "execution", "cargs"),
         *lang.call_build_outputs(lut, struct, "params", "execution", "ret"),
@@ -540,6 +540,11 @@ def _compile_struct(
 
     module_app.header.extend(blank_before(_compile_param_dict_type(lang, struct, lut), 2))
     # module_app.exports.append(lut.type_struct_params[struct.base.id_])
+
+    if lang.does_validate():
+        f = lang.build_fn_validate_params(struct, lut)
+        assert f, "Language provider claims to produce validation functions but returned none"
+        module_app.funcs_and_classes.append(f)
 
     f = _compile_build_cargs(lang, struct, lut)
     module_app.funcs_and_classes.append(f)

@@ -41,6 +41,9 @@ class SymbolLUT:
     fn_root_make_outputs: SymbolType
     """Function to build outputs from execution results"""
 
+    fn_root_validate_params: SymbolType
+    """Function to validate root parameters object"""
+
     # Struct mappings
 
     type_struct_params: dict[ir.IdType, SymbolType] = field(default_factory=dict)
@@ -66,6 +69,9 @@ class SymbolLUT:
     fn_struct_execute: dict[ir.IdType, SymbolType] = field(default_factory=dict)
     """Execute function for each struct. IStruct.id_ -> Language function symbol"""
 
+    fn_struct_validate_params: dict[ir.IdType, SymbolType] = field(default_factory=dict)
+    """Param validation function for each struct. IStruct.id_ -> Language function symbol"""
+
     # Dynamic lookup functions for unions
 
     fn_dyn_union_fn_struct_make_cmdargs: dict[ir.IdType, SymbolType] = field(default_factory=dict)
@@ -73,6 +79,9 @@ class SymbolLUT:
 
     fn_dyn_union_fn_struct_make_outputs: dict[ir.IdType, SymbolType] = field(default_factory=dict)
     """StructUnion ID -> function which dynamically grabs the appropriate `fn_struct_make_outputs` based on tagged param passed in union field."""
+
+    fn_dyn_union_fn_struct_validate_params: dict[ir.IdType, SymbolType] = field(default_factory=dict)
+    """StructUnion ID -> function which dynamically grabs the appropriate `fn_struct_validate_params` based on tagged param passed in union field."""
 
     # For each param
 
@@ -130,6 +139,9 @@ class SymbolLUT:
             fn_root_make_outputs=package_scope.add_or_dodge(
                 lang.symbol_var_case_from(app.command.body.name + "_outputs")
             ),
+            fn_root_validate_params=package_scope.add_or_dodge(
+                lang.symbol_var_case_from(app.command.body.name + "_validate")
+            ),
         )
 
         def _collect_output_field_symbols(
@@ -177,6 +189,7 @@ class SymbolLUT:
         instance.fn_struct_make_outputs[app.command.base.id_] = instance.fn_root_make_outputs
         instance.fn_struct_execute[app.command.base.id_] = instance.fn_root_execute
         instance.type_struct_outputs[app.command.base.id_] = instance.type_root_outputs
+        instance.fn_struct_validate_params[app.command.base.id_] = instance.fn_root_validate_params
 
         # Process nested structs
         for struct in app.command.iter_structs_deep():
@@ -200,6 +213,9 @@ class SymbolLUT:
             )
             instance.type_struct_outputs[struct.base.id_] = package_scope.add_or_dodge(
                 lang.symbol_class_case_from(f"{app.command.body.name}_{struct.body.name}_Outputs")
+            )
+            instance.fn_struct_validate_params[struct.base.id_] = scope.add_or_dodge(
+                lang.symbol_var_case_from(f"{app.command.body.name}_{struct.body.name}_validate")
             )
 
         # Collect symbols for the root command
@@ -228,6 +244,9 @@ class SymbolLUT:
                 )
                 instance.fn_dyn_union_fn_struct_make_cmdargs[elem.base.id_] = scope.add_or_dodge(
                     lang.symbol_var_case_from(f"{app.command.body.name}_{elem.base.name}_cargs_dyn_fn")
+                )
+                instance.fn_dyn_union_fn_struct_validate_params[elem.base.id_] = scope.add_or_dodge(
+                    lang.symbol_var_case_from(f"{app.command.body.name}_{elem.base.name}_validate_dyn_fn")
                 )
 
                 instance.type_param[elem.base.id_] = lang.type_param(

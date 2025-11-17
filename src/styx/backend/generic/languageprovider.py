@@ -500,6 +500,16 @@ class LanguageHighLevelProvider(Protocol):
         """Get a parameter from its dict."""
         return self.param_dict_get_or_default(name, param, self.expr_null())
 
+    def does_validate(self) -> bool:
+        return False
+
+    def build_fn_validate_params(
+        self,
+        param: ir.Param[ir.Param.Struct],
+        lut: SymbolLUT,
+    ) -> GenericFunc | None:
+        return None
+
 
 class LanguageIrProvider(Protocol):
     def param_default_value(self, param: ir.Param) -> str | None:
@@ -570,6 +580,13 @@ class LanguageIrProvider(Protocol):
         execution_symbol: ExprType,
         return_symbol: ExprType,
     ) -> LineBuffer: ...
+
+    def call_validate_params(
+        self,
+        lookup: SymbolLUT,
+        params_symbol: ExprType,
+    ) -> LineBuffer:
+        return []
 
 
 class LanguageProvider(

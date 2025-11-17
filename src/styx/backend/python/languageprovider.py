@@ -309,6 +309,13 @@ class PythonLanguageIrProvider(LanguageIrProvider):
                 return f"not {symbol}"
         return None
 
+    def call_validate_params(
+        self,
+        lookup: SymbolLUT,
+        params_symbol: ExprType,
+    ) -> LineBuffer:
+        return [f"{lookup.fn_root_validate_params}({params_symbol})"]
+
 
 class PythonLanguageExprProvider(LanguageExprProvider):
     def expr_line_comment(self, comment_: LineBuffer) -> LineBuffer:
@@ -693,6 +700,25 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
             body=["return {", *indent([f"{key}: {value}," for key, value in items]), "}.get(t)"],
         )
 
+        # Validate params function lookup
+        items = [
+            (self.expr_str(s.body.public_name), lut.fn_struct_validate_params[s.base.id_]) for s in union.body.alts
+        ]
+        func_get_build_outputs = GenericFunc(
+            name=lut.fn_dyn_union_fn_struct_validate_params[union.base.id_],
+            return_type="typing.Any",
+            docstring_body="Get validate params function by command type.",
+            return_descr="Validate params function.",
+            args=[
+                GenericArg(
+                    name="t",
+                    docstring="Command type",
+                    type="str",
+                )
+            ],
+            body=["return {", *indent([f"{key}: {value}," for key, value in items]), "}.get(t)"],
+        )
+
         return [
             func_get_build_cargs,
             func_get_build_outputs,
@@ -742,6 +768,263 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
 
     def param_dict_get_or_null(self, name: str, param: ir.Param) -> ExprType:
         return f"{name}.get({self.expr_str(param.base.name)})"
+
+    def does_validate(self) -> bool:
+        return True
+
+    def build_fn_validate_params(
+        self,
+        param: ir.Param[ir.Param.Struct],
+        lut: SymbolLUT,
+    ) -> GenericFunc | None:
+        func = GenericFunc(
+            name=lut.fn_struct_validate_params[param.base.id_],
+            docstring_body=f"Validate parameters. Throws an error if `params` is not a valid `{lut.type_struct_params[param.base.id_]}` object.",
+            return_type=None,
+            args=[
+                GenericArg(
+                    name="params",
+                    type="typing.Any",
+                    default=None,
+                    docstring="The parameters object to validate.",
+                ),
+            ],
+        )
+
+        def _check_error(statement: str, error_message: str) -> LineBuffer:
+            return [
+                f"if {statement}:",
+                *indent([
+                    f"raise StyxValidationError({self.expr_str(error_message)})",
+                ]),
+            ]
+
+        def _check_error_f(statement: str, error_message: str) -> LineBuffer:
+            return [
+                f"if {statement}:",
+                *indent([
+                    f"raise StyxValidationError(f'{error_message}')",
+                ]),
+            ]
+
+        params_symbol = "params"
+
+        func.body.extend([
+            f"if {params_symbol} is None or not isinstance({params_symbol}, dict):",
+            *indent([
+                f"raise StyxValidationError(f'Params object has the wrong type \\'{{type({params_symbol})}}\\'')",
+            ]),
+        ])
+
+        def _assert_dict(symbol):
+            return [
+                f"if not isinstance({symbol}, dict):",
+                *indent([
+                    f"raise StyxValidationError(f'Params object has the wrong type \\'{{type({symbol})}}\\'')",
+                ]),
+            ]
+
+        def _assert_tagged(symbol: str) -> LineBuffer:
+            return [
+                f'if "@type" not in {symbol}:',
+                *indent([
+                    f"raise StyxValidationError({self.expr_str('Params object is missing `@type`')})",
+                ]),
+            ]
+
+        for p in param.body.iter_params_shallow():
+            get_param_or_null = self.param_dict_get_or_default(
+                params_symbol,
+                p,
+                self.expr_null() if p.default_value is ir.Param.SetToNone else self.expr_literal(p.default_value),
+            )
+            get_param_or_die = self.param_dict_get(params_symbol, p)
+
+            expr_err_expected_type = f"`{p.base.name}` has the wrong type: Received `{{type({get_param_or_null})}}` expected `{self.type_param(p, lut.type_struct_params, lut.type_struct_params_tagged)}`"
+
+            level = 0
+
+            if p.nullable:
+                func.body.extend(indent([f"if {get_param_or_null} is not None:"], level))
+                level += 1
+            else:
+                func.body.extend(
+                    indent(_check_error(f"{get_param_or_null} is None", f"`{p.base.name}` must not be None"), level)
+                )
+
+            def _not_is_instance(pytype: str):
+                return f"not isinstance({get_param_or_die}, {pytype})"
+
+            if p.list_:
+                func.body.extend(indent(_check_error_f(_not_is_instance("list"), expr_err_expected_type), level))
+
+                if p.list_.count_max is not None and p.list_.count_min is not None:
+                    if p.list_.count_max == p.list_.count_min:
+                        func.body.extend(
+                            indent(
+                                _check_error(
+                                    f"len({get_param_or_die}) == {p.list_.count_min}",
+                                    f"Parameter `{p.base.name}` must contain exactly {p.list_.count_min} element{'s' if p.list_.count_min != 1 else ''}",
+                                ),
+                                level,
+                            )
+                        )
+                    else:
+                        func.body.extend(
+                            indent(
+                                _check_error(
+                                    f"{p.list_.count_min} <= len({get_param_or_die}) <= {p.list_.count_max}",
+                                    f"Parameter `{p.base.name}` must contain between {p.list_.count_min} and {p.list_.count_max} elements (inclusive)",
+                                ),
+                                level,
+                            )
+                        )
+                elif p.list_.count_max is not None:
+                    func.body.extend(
+                        indent(
+                            _check_error(
+                                f"len({get_param_or_die}) <= {p.list_.count_max}",
+                                f"Parameter `{p.base.name}` must contain at most {p.list_.count_max} element{'s' if p.list_.count_max != 1 else ''}",
+                            ),
+                            level,
+                        )
+                    )
+                elif p.list_.count_min is not None:
+                    func.body.extend(
+                        indent(
+                            _check_error(
+                                f"len({get_param_or_die}) >= {p.list_.count_min}",
+                                f"Parameter `{p.base.name}` must contain at least {p.list_.count_min} element{'s' if p.list_.count_min != 1 else ''}",
+                            ),
+                            level,
+                        )
+                    )
+
+                func.body.extend(
+                    indent(
+                        [
+                            f"for e in {get_param_or_die}:",
+                        ],
+                        level,
+                    )
+                )
+
+                get_param_or_null = "e"
+                get_param_or_die = "e"
+
+                level += 1
+
+            if isinstance(p.body, ir.Param.String):
+                func.body.extend(indent(_check_error_f(_not_is_instance("str"), expr_err_expected_type), level))
+            elif isinstance(p.body, ir.Param.Bool):
+                func.body.extend(indent(_check_error_f(_not_is_instance("bool"), expr_err_expected_type), level))
+            elif isinstance(p.body, ir.Param.Int):
+                func.body.extend(indent(_check_error_f(_not_is_instance("int"), expr_err_expected_type), level))
+
+                if p.body.min_value is not None and p.body.max_value is not None:
+                    func.body.extend(
+                        indent(
+                            _check_error(
+                                f"{p.body.min_value} <= {get_param_or_die} <= {p.body.max_value}",
+                                f"Parameter `{p.base.name}` must be between {p.body.min_value} and {p.body.max_value} (inclusive)",
+                            ),
+                            level,
+                        )
+                    )
+                elif p.body.min_value is not None:
+                    func.body.extend(
+                        indent(
+                            _check_error(
+                                f"{get_param_or_die} >= {p.body.min_value}",
+                                f"Parameter `{p.base.name}` must be at least {p.body.min_value}",
+                            ),
+                            level,
+                        )
+                    )
+                elif p.body.max_value is not None:
+                    func.body.extend(
+                        indent(
+                            _check_error(
+                                f"{get_param_or_die} <= {p.body.max_value}",
+                                f"Parameter `{p.base.name}` must be at most {p.body.max_value}",
+                            ),
+                            level,
+                        )
+                    )
+            elif isinstance(p.body, ir.Param.Float):
+                func.body.extend(
+                    indent(_check_error_f(_not_is_instance("(float, int)"), expr_err_expected_type), level)
+                )
+
+                if p.body.min_value is not None and p.body.max_value is not None:
+                    func.body.extend(
+                        indent(
+                            _check_error(
+                                f"{p.body.min_value} <= {get_param_or_die} <= {p.body.max_value}",
+                                f"Parameter `{p.base.name}` must be between {p.body.min_value} and {p.body.max_value} (inclusive)",
+                            ),
+                            level,
+                        )
+                    )
+                elif p.body.min_value is not None:
+                    func.body.extend(
+                        indent(
+                            _check_error(
+                                f"{get_param_or_die} >= {p.body.min_value}",
+                                f"Parameter `{p.base.name}` must be at least {p.body.min_value}",
+                            ),
+                            level,
+                        )
+                    )
+                elif p.body.max_value is not None:
+                    func.body.extend(
+                        indent(
+                            _check_error(
+                                f"{get_param_or_die} <= {p.body.max_value}",
+                                f"Parameter `{p.base.name}` must be at most {p.body.max_value}",
+                            ),
+                            level,
+                        )
+                    )
+            elif isinstance(p.body, ir.Param.File):
+                func.body.extend(
+                    indent(_check_error_f(_not_is_instance("(pathlib.Path, str)"), expr_err_expected_type), level)
+                )
+            elif isinstance(p.body, ir.Param.Struct):
+                fn_validate = lut.fn_struct_validate_params[p.base.id_]
+                expr_validate = f"{fn_validate}({get_param_or_die})"
+                func.body.extend(indent([expr_validate], level))
+
+            elif isinstance(p.body, ir.Param.StructUnion):
+                fn_validate = lut.fn_dyn_union_fn_struct_validate_params[p.base.id_]
+                expr_validate = f'{fn_validate}({get_param_or_die}["@type"])({get_param_or_die})'
+
+                func.body.extend(
+                    indent(
+                        [
+                            *_assert_dict(get_param_or_die),
+                            *_assert_tagged(get_param_or_die),
+                            expr_validate,
+                        ],
+                        level,
+                    )
+                )
+
+            else:
+                assert False
+
+            if p.choices:
+                func.body.extend(
+                    indent(
+                        _check_error(
+                            f"{get_param_or_die} not in {self.expr_literal(p.choices)}",
+                            f"Parameter `{p.base.name}` must be one of {self.expr_literal(p.choices)}",
+                        ),
+                        level,
+                    )
+                )
+
+        return func
 
 
 class PythonLanguageCompileProvider(Compilable):
