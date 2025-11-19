@@ -163,6 +163,7 @@ def _flatten_single_param_structs_into_groups(app: ir.App) -> ir.App:
                 # merge all groups and use a single group with the param now nullable
 
                 single_param.nullable = True
+                single_param.default_value = ir.Param.SetToNone
                 new_cargs: list[ir.CmdArg] = []
                 for g in struct.body.groups:
                     for cmdarg in g.cargs:
