@@ -539,7 +539,8 @@ def _compile_struct(
     module_app.exports.append(f.name)
 
     module_app.header.extend(blank_before(_compile_param_dict_type(lang, struct, lut), 2))
-    # module_app.exports.append(lut.type_struct_params[struct.base.id_])
+    module_app.exports.append(lut.type_struct_params[struct.base.id_])
+    module_app.exports.append(lut.type_struct_params_tagged[struct.base.id_])
 
     if lang.does_validate():
         f = lang.build_fn_validate_params(struct, lut)

@@ -122,10 +122,10 @@ class SymbolLUT:
                 lang.symbol_var_case_from(app.command.base.name)
             ),
             type_root_params=package_scope.add_or_dodge(
-                lang.symbol_class_case_from(app.command.body.name + "_Parameters")
+                lang.symbol_class_case_from(app.command.body.name + "_ParamsDict")
             ),
             type_root_params_tagged=package_scope.add_or_dodge(
-                lang.symbol_class_case_from(app.command.body.name + "_ParametersTagged")
+                lang.symbol_class_case_from(app.command.body.name + "_ParamsDictTagged")
             ),
             fn_root_make_params=package_scope.add_or_dodge(
                 lang.symbol_var_case_from(app.command.body.name + "_params")
@@ -194,10 +194,10 @@ class SymbolLUT:
         # Process nested structs
         for struct in app.command.iter_structs_deep():
             instance.type_struct_params[struct.base.id_] = scope.add_or_dodge(
-                lang.symbol_class_case_from(f"{app.command.body.name}_{struct.body.name}_Parameters")
+                lang.symbol_class_case_from(f"{app.command.body.name}_{struct.body.name}_ParamsDict")
             )
             instance.type_struct_params_tagged[struct.base.id_] = scope.add_or_dodge(
-                lang.symbol_class_case_from(f"{app.command.body.name}_{struct.body.name}_ParametersTagged")
+                lang.symbol_class_case_from(f"{app.command.body.name}_{struct.body.name}_ParamsDictTagged")
             )
             instance.fn_struct_make_params[struct.base.id_] = scope.add_or_dodge(
                 lang.symbol_var_case_from(f"{app.command.body.name}_{struct.body.name}")
