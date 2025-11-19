@@ -200,7 +200,7 @@ class SymbolLUT:
                 lang.symbol_class_case_from(f"{app.command.body.name}_{struct.body.name}_ParametersTagged")
             )
             instance.fn_struct_make_params[struct.base.id_] = scope.add_or_dodge(
-                lang.symbol_var_case_from(f"{app.command.body.name}_{struct.body.name}_params")
+                lang.symbol_var_case_from(f"{app.command.body.name}_{struct.body.name}")
             )
             instance.fn_struct_make_cmdargs[struct.base.id_] = scope.add_or_dodge(
                 lang.symbol_var_case_from(f"{app.command.body.name}_{struct.body.name}_cargs")
