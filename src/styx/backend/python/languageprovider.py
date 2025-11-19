@@ -751,12 +751,13 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
         # todo: this needs helper function
         attype_key = self.expr_str("@type")
         attype_value = self.type_literal_union([struct.body.public_name])
-        buf = self._make_typed_dict(dict_symbol, [(attype_key, _not_required(attype_value))] + param_items)
+        buf = self._make_typed_dict(f"_{dict_symbol}NoTag", param_items)
 
         # if struct.is_root() or isinstance(struct.parent.body, ir.Param.StructUnion):
         # only create tagged types for structs used in unions
         # todo: maybe move logic to generic
         buf += self._make_typed_dict(dict_symbol_tagged, [(attype_key, attype_value)] + param_items)
+        buf.append(f"{dict_symbol} = _{dict_symbol}NoTag | {dict_symbol_tagged}")
 
         return buf
 
