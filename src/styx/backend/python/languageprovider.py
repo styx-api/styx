@@ -999,11 +999,17 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
                 fn_validate = lut.fn_dyn_union_fn_struct_validate_params[p.base.id_]
                 expr_validate = f'{fn_validate}({get_param_or_die}["@type"])({get_param_or_die})'
 
+                valid_tags = [alt.body.public_name for alt in p.body.alts]
+
                 func.body.extend(
                     indent(
                         [
                             *_assert_dict(get_param_or_die),
                             *_assert_tagged(get_param_or_die),
+                            *_check_error(
+                                f"{get_param_or_die}[\"@type\"] not in {self.expr_literal(valid_tags)}",
+                                f"Parameter `{p.base.name}`s `@type` must be one of {self.expr_literal(valid_tags)}",
+                            ),
                             expr_validate,
                         ],
                         level,
