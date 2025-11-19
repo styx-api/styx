@@ -135,6 +135,8 @@ def to_input_schema_json(
 
     if struct.base.docs.title:
         ret["title"] = struct.base.docs.title
+    else:
+        ret["title"] = struct.base.name
 
     if struct.base.docs.description:
         ret["description"] = struct.base.docs.description
