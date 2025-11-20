@@ -685,26 +685,28 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
             for s in union.body.alts
             if s.has_outputs_deep()
         ]
-        func_get_build_outputs = GenericFunc(
-            name=lut.fn_dyn_union_fn_struct_make_outputs[union.base.id_],
-            return_type="typing.Any",
-            docstring_body="Get build outputs function by command type.",
-            return_descr="Build outputs function.",
-            args=[
-                GenericArg(
-                    name="t",
-                    docstring="Command type",
-                    type="str",
-                )
-            ],
-            body=["return {", *indent([f"{key}: {value}," for key, value in items]), "}.get(t)"],
-        )
+        func_get_build_outputs = None
+        if len(items):
+            func_get_build_outputs = GenericFunc(
+                name=lut.fn_dyn_union_fn_struct_make_outputs[union.base.id_],
+                return_type="typing.Any",
+                docstring_body="Get build outputs function by command type.",
+                return_descr="Build outputs function.",
+                args=[
+                    GenericArg(
+                        name="t",
+                        docstring="Command type",
+                        type="str",
+                    )
+                ],
+                body=["return {", *indent([f"{key}: {value}," for key, value in items]), "}.get(t)"],
+            )
 
         # Validate params function lookup
         items = [
             (self.expr_str(s.body.public_name), lut.fn_struct_validate_params[s.base.id_]) for s in union.body.alts
         ]
-        func_get_build_outputs = GenericFunc(
+        func_struct_validate_params = GenericFunc(
             name=lut.fn_dyn_union_fn_struct_validate_params[union.base.id_],
             return_type="typing.Any",
             docstring_body="Get validate params function by command type.",
@@ -721,7 +723,8 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
 
         return [
             func_get_build_cargs,
-            func_get_build_outputs,
+            *([func_get_build_outputs] if func_get_build_outputs else []),
+            func_struct_validate_params,
         ]
 
     def _make_typed_dict(self, symbol: ExprType, items: list[tuple[ExprType, ExprType]]) -> LineBuffer:

@@ -466,7 +466,7 @@ class LanguageHighLevelProvider(Protocol):
         ...
 
     @abstractmethod
-    def param_dict_type_declare(self, lookup: SymbolLUT, struct: ir.Param[ir.Param.Struct]) -> LineBuffer:
+    def param_dict_type_declare(self, lut: SymbolLUT, struct: ir.Param[ir.Param.Struct]) -> LineBuffer:
         """Declare the type a subcommand parameter dictionary."""
         ...
 
