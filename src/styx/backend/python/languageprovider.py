@@ -867,7 +867,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
                         func.body.extend(
                             indent(
                                 _check_error(
-                                    f"len({get_param_or_die}) == {p.list_.count_min}",
+                                    f"len({get_param_or_die}) != {p.list_.count_min}",
                                     f"Parameter `{p.base.name}` must contain exactly {p.list_.count_min} element{'s' if p.list_.count_min != 1 else ''}",
                                 ),
                                 level,
@@ -877,7 +877,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
                         func.body.extend(
                             indent(
                                 _check_error(
-                                    f"{p.list_.count_min} <= len({get_param_or_die}) <= {p.list_.count_max}",
+                                    f"not ({p.list_.count_min} <= len({get_param_or_die}) <= {p.list_.count_max})",
                                     f"Parameter `{p.base.name}` must contain between {p.list_.count_min} and {p.list_.count_max} elements (inclusive)",
                                 ),
                                 level,
@@ -887,7 +887,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
                     func.body.extend(
                         indent(
                             _check_error(
-                                f"len({get_param_or_die}) <= {p.list_.count_max}",
+                                f"len({get_param_or_die}) > {p.list_.count_max}",
                                 f"Parameter `{p.base.name}` must contain at most {p.list_.count_max} element{'s' if p.list_.count_max != 1 else ''}",
                             ),
                             level,
@@ -897,7 +897,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
                     func.body.extend(
                         indent(
                             _check_error(
-                                f"len({get_param_or_die}) >= {p.list_.count_min}",
+                                f"len({get_param_or_die}) < {p.list_.count_min}",
                                 f"Parameter `{p.base.name}` must contain at least {p.list_.count_min} element{'s' if p.list_.count_min != 1 else ''}",
                             ),
                             level,
@@ -929,7 +929,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
                     func.body.extend(
                         indent(
                             _check_error(
-                                f"{p.body.min_value} <= {get_param_or_die} <= {p.body.max_value}",
+                                f"not ({p.body.min_value} <= {get_param_or_die} <= {p.body.max_value})",
                                 f"Parameter `{p.base.name}` must be between {p.body.min_value} and {p.body.max_value} (inclusive)",
                             ),
                             level,
@@ -939,7 +939,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
                     func.body.extend(
                         indent(
                             _check_error(
-                                f"{get_param_or_die} >= {p.body.min_value}",
+                                f"{get_param_or_die} < {p.body.min_value}",
                                 f"Parameter `{p.base.name}` must be at least {p.body.min_value}",
                             ),
                             level,
@@ -949,7 +949,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
                     func.body.extend(
                         indent(
                             _check_error(
-                                f"{get_param_or_die} <= {p.body.max_value}",
+                                f"{get_param_or_die} > {p.body.max_value}",
                                 f"Parameter `{p.base.name}` must be at most {p.body.max_value}",
                             ),
                             level,
@@ -964,7 +964,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
                     func.body.extend(
                         indent(
                             _check_error(
-                                f"{p.body.min_value} <= {get_param_or_die} <= {p.body.max_value}",
+                                f"not ({p.body.min_value} <= {get_param_or_die} <= {p.body.max_value})",
                                 f"Parameter `{p.base.name}` must be between {p.body.min_value} and {p.body.max_value} (inclusive)",
                             ),
                             level,
@@ -974,7 +974,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
                     func.body.extend(
                         indent(
                             _check_error(
-                                f"{get_param_or_die} >= {p.body.min_value}",
+                                f"{get_param_or_die} < {p.body.min_value}",
                                 f"Parameter `{p.base.name}` must be at least {p.body.min_value}",
                             ),
                             level,
@@ -984,7 +984,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
                     func.body.extend(
                         indent(
                             _check_error(
-                                f"{get_param_or_die} <= {p.body.max_value}",
+                                f"{get_param_or_die} > {p.body.max_value}",
                                 f"Parameter `{p.base.name}` must be at most {p.body.max_value}",
                             ),
                             level,
