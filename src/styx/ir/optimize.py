@@ -1,4 +1,4 @@
-import typing
+from dataclasses import dataclass
 from typing import Generator, Callable, Iterable, NamedTuple
 
 import styx.ir.core as ir
@@ -111,10 +111,7 @@ def _param_parent_location(param: ir.Param) -> _ParentLocation | None:
     return None
 
 
-T = typing.TypeVar("T")
-
-
-def _join_optionals(a: T | None, b: T | None, join: Callable[[T, T], T]) -> T | None:
+def _join_optionals[T](a: T | None, b: T | None, join: Callable[[T, T], T]) -> T | None:
     if a is None:
         if b is None:
             return None
@@ -136,68 +133,104 @@ def _merge_docs(a: ir.Documentation, b: ir.Documentation) -> ir.Documentation:
 
 def _flatten_single_param_structs_into_groups(app: ir.App) -> ir.App:
     """
-    If a subcommand has a single param it should be merged into the parent.
-    If both are nullable this does not always work.
-
-    Quite tricky - Really hope to never have to touch this again.
+    Flatten structs that contain only a single parameter into their parent group.
     """
 
-    needs_rerun = True
-    while needs_rerun:
-        needs_rerun = False
+    @dataclass
+    class TokenLocation:
+        """Location of a param within the tree."""
+
+        parent_struct: ir.Param[ir.Param.Struct]
+        group_idx: int
+        cmdarg_idx: int
+        token_idx: int
+
+        @property
+        def group(self) -> ir.ConditionalGroup:
+            return self.parent_struct.body.groups[self.group_idx]
+
+        @property
+        def cmdarg(self) -> ir.CmdArg:
+            return self.group.cargs[self.cmdarg_idx]
+
+    def find_token_location(target: ir.Param) -> TokenLocation | None:
+        """Find where a param lives in its parent's token list."""
+        parent = target.parent
+        if parent is None or not isinstance(parent.body, ir.Param.Struct):
+            return None
+
+        for group_idx, group in enumerate(parent.body.groups):
+            for cmdarg_idx, cmdarg in enumerate(group.cargs):
+                for token_idx, token in enumerate(cmdarg.tokens):
+                    if token is target:
+                        return TokenLocation(parent, group_idx, cmdarg_idx, token_idx)
+        return None
+
+    def get_single_param(struct_body: ir.Param.Struct) -> ir.Param | None:
+        """Get the single param if struct has exactly one, else None."""
+        params = list(struct_body.iter_params_shallow())
+        return params[0] if len(params) == 1 else None
+
+    def find_flattening_candidate() -> tuple[ir.Param[ir.Param.Struct], ir.Param, TokenLocation] | None:
+        """Find a struct that can be safely flattened."""
         for struct in app.command.iter_structs_deep():
+            if struct.parent is None:
+                continue
             if isinstance(struct.parent.body, ir.Param.StructUnion):
                 continue
-            if struct.list_:
+            if struct.list_ is not None:
                 continue
-            if _count(struct.body.iter_params_shallow()) != 1:
+            if struct.base.outputs:
                 continue
-            single_param = struct.body.iter_params_shallow().__next__()
+
+            single_param = get_single_param(struct.body)
+            if single_param is None:
+                continue
+
             if struct.nullable and single_param.nullable:
                 continue
 
-            location = _param_parent_location(struct)
-            assert location is not None
+            location = find_token_location(struct)
+            if location is None:
+                continue
 
-            if struct.nullable:
-                # merge all groups and use a single group with the param now nullable
+            return struct, single_param, location
 
-                single_param.nullable = True
-                single_param.default_value = ir.Param.SetToNone
-                new_cargs: list[ir.CmdArg] = []
-                for g in struct.body.groups:
-                    for cmdarg in g.cargs:
-                        new_cargs.append(cmdarg)
-                struct.body.groups = [ir.ConditionalGroup(cargs=new_cargs)]
-                # todo: handle joins?
+        return None
 
-            single_param.base.docs = _merge_docs(struct.base.docs, single_param.base.docs)
-
-            # replace the cmdarg containing the struct with all cmdargs from the struct
-            # get all structs cmdargs (after flattening if nullable)
-            struct_cmdargs = []
-            for g in struct.body.groups:
-                struct_cmdargs.extend(g.cargs)
-
-            # build new cmdargs list: before + struct's cmdargs + after
-            new_cargs = (
-                location.group.cargs[: location.cmdarg_idx]  # cmdargs before the one with struct
-                + struct_cmdargs  # all cmdargs from inside the struct
-                + location.group.cargs[(location.cmdarg_idx + 1) :]  # cmdargs after
-            )
-
-            # replace the group with the new cmdargs
-            new_groups = (
-                location.parent.body.groups[: location.group_idx]
-                + [ir.ConditionalGroup(cargs=new_cargs, join=location.group.join)]  # preserve join
-                + location.parent.body.groups[(location.group_idx + 1) :]
-            )
-
-            location.parent.body.groups = new_groups
-
-            app.command.setup_parent_references()
-            needs_rerun = True
+    while True:
+        candidate = find_flattening_candidate()
+        if candidate is None:
             break
+
+        struct, single_param, location = candidate
+
+        # Transfer nullability if needed
+        if struct.nullable and not single_param.nullable:
+            single_param.nullable = True
+            single_param.default_value = ir.Param.SetToNone
+
+        # Merge docs
+        single_param.base.docs = _merge_docs(struct.base.docs, single_param.base.docs)
+
+        # Collect all tokens from the struct's cmdargs (flattening the struct's internal structure)
+        replacement_tokens: list[ir.Param | str] = []
+        for group in struct.body.groups:
+            for cmdarg in group.cargs:
+                replacement_tokens.extend(cmdarg.tokens)
+
+        # Splice at the TOKEN level: replace the struct param with its internal tokens
+        old_tokens = location.cmdarg.tokens
+        new_tokens = (
+            old_tokens[: location.token_idx]  # tokens before the struct
+            + replacement_tokens  # struct's internal tokens
+            + old_tokens[location.token_idx + 1 :]  # tokens after the struct
+        )
+
+        # Update the cmdarg's tokens in place
+        location.cmdarg.tokens = new_tokens
+
+        app.command.setup_parent_references()
 
     return app
 
