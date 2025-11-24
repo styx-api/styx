@@ -134,6 +134,9 @@ def _merge_docs(a: ir.Documentation, b: ir.Documentation) -> ir.Documentation:
 def _flatten_single_param_structs_into_groups(app: ir.App) -> ir.App:
     """
     Flatten structs that contain only a single parameter into their parent group.
+
+    Only flattens when the struct has a simple internal structure (single group, single cmdarg)
+    to avoid complex cmdarg boundary issues.
     """
 
     @dataclass
@@ -171,6 +174,14 @@ def _flatten_single_param_structs_into_groups(app: ir.App) -> ir.App:
         params = list(struct_body.iter_params_shallow())
         return params[0] if len(params) == 1 else None
 
+    def has_simple_structure(struct_body: ir.Param.Struct) -> bool:
+        """Check if struct has exactly one group with exactly one cmdarg."""
+        if len(struct_body.groups) != 1:
+            return False
+        if len(struct_body.groups[0].cargs) != 1:
+            return False
+        return True
+
     def find_flattening_candidate() -> tuple[ir.Param[ir.Param.Struct], ir.Param, TokenLocation] | None:
         """Find a struct that can be safely flattened."""
         for struct in app.command.iter_structs_deep():
@@ -181,6 +192,10 @@ def _flatten_single_param_structs_into_groups(app: ir.App) -> ir.App:
             if struct.list_ is not None:
                 continue
             if struct.base.outputs:
+                continue
+
+            # Only flatten simple structures to avoid cmdarg boundary issues
+            if not has_simple_structure(struct.body):
                 continue
 
             single_param = get_single_param(struct.body)
@@ -213,21 +228,13 @@ def _flatten_single_param_structs_into_groups(app: ir.App) -> ir.App:
         # Merge docs
         single_param.base.docs = _merge_docs(struct.base.docs, single_param.base.docs)
 
-        # Collect all tokens from the struct's cmdargs (flattening the struct's internal structure)
-        replacement_tokens: list[ir.Param | str] = []
-        for group in struct.body.groups:
-            for cmdarg in group.cargs:
-                replacement_tokens.extend(cmdarg.tokens)
+        # Since we verified simple structure, there's exactly one cmdarg
+        struct_tokens = struct.body.groups[0].cargs[0].tokens
 
-        # Splice at the TOKEN level: replace the struct param with its internal tokens
+        # Splice at the token level
         old_tokens = location.cmdarg.tokens
-        new_tokens = (
-            old_tokens[: location.token_idx]  # tokens before the struct
-            + replacement_tokens  # struct's internal tokens
-            + old_tokens[location.token_idx + 1 :]  # tokens after the struct
-        )
+        new_tokens = old_tokens[: location.token_idx] + struct_tokens + old_tokens[location.token_idx + 1 :]
 
-        # Update the cmdarg's tokens in place
         location.cmdarg.tokens = new_tokens
 
         app.command.setup_parent_references()
