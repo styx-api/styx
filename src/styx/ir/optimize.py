@@ -176,8 +176,20 @@ def _flatten_single_param_structs_into_groups(app: ir.App) -> ir.App:
         return params[0] if len(params) == 1 else None
 
     def has_simple_structure(struct_body: ir.Param.Struct) -> bool:
-        """Check if struct has exactly one group with exactly one cmdarg."""
-        return len(struct_body.groups) == 1 and len(struct_body.groups[0].cargs) == 1
+        """Only static groups and no static tokens in carg next to param."""
+
+        for group in struct_body.groups:
+            for carg in group.cargs:
+                tokens = 0
+                params = 0
+                for token in carg.tokens:
+                    if not isinstance(token, ir.Param):
+                        tokens += 1
+                    else:
+                        params += 1
+                if params >= 1 and tokens > 1:
+                    return False
+        return True
 
     def find_flattening_candidate() -> tuple[ir.Param[ir.Param.Struct], ir.Param, TokenLocation] | None:
         """Find a struct that can be safely flattened."""
@@ -205,7 +217,7 @@ def _flatten_single_param_structs_into_groups(app: ir.App) -> ir.App:
             # Can flatten if:
             # 1. Parent cmdarg contains ONLY this struct (can splice cmdargs), OR
             # 2. Struct has simple structure (can splice tokens safely)
-            if not location.cmdarg_has_only_struct() and not has_simple_structure(struct.body):
+            if not location.cmdarg_has_only_struct() or not has_simple_structure(struct.body):
                 continue
 
             return struct, single_param, location
