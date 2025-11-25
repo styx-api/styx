@@ -101,6 +101,8 @@ def _compile_build_cargs(
         cargs_exprs: list[MStr] = []  # string expressions for building cargs
         cargs_exprs_maybe_null: list[MStr] = []  # string expressions for building cargs if parameters may be null
 
+        always_emit = False
+
         for carg in group.cargs:
             carg_exprs: list[MStr] = []  # string expressions for building a single carg
             carg_exprs_maybe_null: list[MStr] = []
@@ -131,6 +133,7 @@ def _compile_build_cargs(
                         )
                     )
                 else:
+                    always_emit = True
                     carg_exprs_maybe_null.append(param_as_mstr)
 
             # collapse and add single carg to cargs expressions
@@ -144,13 +147,13 @@ def _compile_build_cargs(
         # Append to cargs buffer
         buf_appending: LineBuffer = []
         if len(cargs_exprs) == 1:
-            for str_symbol in cargs_exprs_maybe_null if len(group_conditions_py) > 1 else cargs_exprs:
+            for str_symbol in cargs_exprs_maybe_null if (len(group_conditions_py) > 1 and not always_emit) else cargs_exprs:
                 buf_appending.extend(lang.mstr_cargs_add("cargs", str_symbol))
         else:
-            x = cargs_exprs_maybe_null if len(group_conditions_py) > 1 else cargs_exprs
+            x = cargs_exprs_maybe_null if (len(group_conditions_py) > 1 and not always_emit) else cargs_exprs
             buf_appending.extend(lang.mstr_cargs_add("cargs", x))
 
-        if len(group_conditions_py) > 0:
+        if len(group_conditions_py) > 0 and not always_emit:
             func.body.extend(
                 lang.if_else_block(
                     condition=lang.expr_conditions_join_or(group_conditions_py),
