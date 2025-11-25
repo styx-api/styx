@@ -292,6 +292,10 @@ class PythonLanguageIrProvider(LanguageIrProvider):
                 if enbrace_statement:
                     return f"(not {symbol})"
                 return f"not {symbol}"
+            if len(param.body.value_false) == 0 and len(param.body.value_true) == 0:
+                return "False"  # Never emits anything (useless param)
+            if len(param.body.value_false) > 0 and len(param.body.value_true) > 0:
+                return None
         return None
 
     def param_is_set_by_user(self, param: ir.Param, symbol: str, enbrace_statement: bool = False) -> str | None:
