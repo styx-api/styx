@@ -147,13 +147,13 @@ def _compile_build_cargs(
         # Append to cargs buffer
         buf_appending: LineBuffer = []
         if len(cargs_exprs) == 1:
-            for str_symbol in cargs_exprs_maybe_null if (len(group_conditions_py) > 1 and not always_emit) else cargs_exprs:
+            for str_symbol in cargs_exprs_maybe_null if (always_emit or len(group_conditions_py) > 1) else cargs_exprs:
                 buf_appending.extend(lang.mstr_cargs_add("cargs", str_symbol))
         else:
-            x = cargs_exprs_maybe_null if (len(group_conditions_py) > 1 and not always_emit) else cargs_exprs
+            x = cargs_exprs_maybe_null if (always_emit or len(group_conditions_py) > 1) else cargs_exprs
             buf_appending.extend(lang.mstr_cargs_add("cargs", x))
 
-        if len(group_conditions_py) > 0 and not always_emit:
+        if not always_emit and len(group_conditions_py) > 0:
             func.body.extend(
                 lang.if_else_block(
                     condition=lang.expr_conditions_join_or(group_conditions_py),
