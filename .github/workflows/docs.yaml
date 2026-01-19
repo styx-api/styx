@@ -7,29 +7,37 @@ on:
   workflow_run:
     workflows: [Python Tests]
     types:
-    - completed
+      - completed
     branches:
-    - main
+      - main
 
 jobs:
   build-and-publish-docs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Setup uv
-      uses: astral-sh/setup-uv@v6
-      with:
-        enable-cache: true
-        pyproject-file: pyproject.toml
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          pyproject-file: pyproject.toml
 
-    - name: Build docs
-      run: |
-        APP_MODULE_NAME=$(ls src -U | head -1)  # Get the first module name in the src directory
-        uv run --frozen --extra docs pdoc src/"$APP_MODULE_NAME" -o docs_build -t docs/pdoc-theme --docformat google
-        touch docs_build/.nojekyll
+      - name: Build docs
+        run: |
+          APP_MODULE_NAME=$(ls src -U | head -1)  # Get the first module name in the src directory
+          uv run --frozen --extra docs pdoc src/"$APP_MODULE_NAME" -o docs_build -t docs/pdoc-theme --docformat google
+          touch docs_build/.nojekyll
 
-    - uses: JamesIves/github-pages-deploy-action@v4
-      with:
-        folder: docs_build
+      - uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: docs_build
+
+      - name: Deploy to Cloudflare Pages
+        id: cloudflare-deployment
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy docs_build/ --project-name=styx --branch=main
