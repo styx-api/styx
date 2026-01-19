@@ -44,32 +44,65 @@ def _constant_optional_structs(app: ir.App) -> ir.App:
     All structs that are nullable but themselves don't have any parameters can be converted to bools.
     """
 
-    for struct in app.command.iter_structs_deep():
-        if isinstance(struct.parent.body, ir.Param.StructUnion):
-            continue
-        if not struct.nullable or struct.list_:
-            continue
-        if _count(struct.iter_params_deep()) != 0:
-            continue
+    def find_and_convert() -> bool:
+        """Find and convert one struct. Returns True if a conversion was made."""
+        for struct in app.command.iter_structs_deep():
+            if isinstance(struct.parent.body, ir.Param.StructUnion):
+                continue
+            if not struct.nullable or struct.list_:
+                continue
+            if _count(struct.iter_params_deep()) != 0:
+                continue
 
-        old_body: ir.Param.Struct = struct.body
+            old_body: ir.Param.Struct = struct.body
 
-        value_true = []
+            value_true = []
+            for g in old_body.groups:
+                for c in g.cargs:
+                    arg = ""
+                    for t in c.tokens:
+                        assert isinstance(t, str)
+                        arg += t
+                    value_true.append(arg)
 
-        for g in old_body.groups:
-            for c in g.cargs:
-                arg = ""
-                for t in c.tokens:
-                    assert isinstance(t, str)  # no params -> all strings
-                    arg += t
-                value_true.append(arg)
+            struct.body = ir.Param.Bool(value_true=value_true, value_false=[])
+            struct.nullable = False
+            struct.default_value = False
 
-        struct.body = ir.Param.Bool(
-            value_true=value_true,
-        )
+            # Now extract into its own ConditionalGroup
+            location = _param_parent_location(struct)
+            if location is None:
+                continue
 
-        struct.nullable = False
-        struct.default_value = False
+            # Create new cmdarg with the bool param
+            new_cmdarg = ir.CmdArg(tokens=[struct], join=location.cmdarg.join)
+            new_group = ir.ConditionalGroup(cargs=[new_cmdarg], join=None)
+
+            # Remove from original group
+            new_cargs = location.group.cargs[: location.cmdarg_idx] + location.group.cargs[location.cmdarg_idx + 1 :]
+
+            parent_struct = location.parent
+            if new_cargs:
+                modified_group = ir.ConditionalGroup(cargs=new_cargs, join=location.group.join)
+                parent_struct.body.groups = (
+                    parent_struct.body.groups[: location.group_idx]
+                    + [modified_group, new_group]
+                    + parent_struct.body.groups[location.group_idx + 1 :]
+                )
+            else:
+                parent_struct.body.groups = (
+                    parent_struct.body.groups[: location.group_idx]
+                    + [new_group]
+                    + parent_struct.body.groups[location.group_idx + 1 :]
+                )
+
+            app.command.setup_parent_references()
+            return True
+
+        return False
+
+    while find_and_convert():
+        pass
 
     return app
 
@@ -139,6 +172,7 @@ def _flatten_single_param_structs_into_groups(app: ir.App) -> ir.App:
     @dataclass
     class TokenLocation:
         """Location of a param within the tree."""
+
         parent_struct: ir.Param[ir.Param.Struct]
         group_idx: int
         cmdarg_idx: int
@@ -175,21 +209,25 @@ def _flatten_single_param_structs_into_groups(app: ir.App) -> ir.App:
         params = list(struct_body.iter_params_shallow())
         return params[0] if len(params) == 1 else None
 
-    def has_simple_structure(struct_body: ir.Param.Struct) -> bool:
-        """Only static groups and no static tokens in carg next to param."""
-
+    def has_only_static_tokens_and_one_param(struct_body: ir.Param.Struct) -> bool:
+        """Check if struct has only string tokens plus exactly one param across all cmdargs."""
+        param_count = 0
         for group in struct_body.groups:
             for carg in group.cargs:
-                tokens = 0
-                params = 0
                 for token in carg.tokens:
-                    if not isinstance(token, ir.Param):
-                        tokens += 1
-                    else:
-                        params += 1
-                if params >= 1 and tokens > 1:
-                    return False
-        return True
+                    if isinstance(token, ir.Param):
+                        param_count += 1
+                        if param_count > 1:
+                            return False
+        return param_count == 1
+
+    def collect_all_tokens(struct_body: ir.Param.Struct) -> list[ir.Param | str]:
+        """Collect all tokens from all cmdargs in order."""
+        tokens: list[ir.Param | str] = []
+        for group in struct_body.groups:
+            for carg in group.cargs:
+                tokens.extend(carg.tokens)
+        return tokens
 
     def find_flattening_candidate() -> tuple[ir.Param[ir.Param.Struct], ir.Param, TokenLocation] | None:
         """Find a struct that can be safely flattened."""
@@ -215,52 +253,50 @@ def _flatten_single_param_structs_into_groups(app: ir.App) -> ir.App:
                 continue
 
             # Can flatten if:
-            # 1. Parent cmdarg contains ONLY this struct (can splice cmdargs), OR
-            # 2. Struct has simple structure (can splice tokens safely)
-            if not location.cmdarg_has_only_struct() or not has_simple_structure(struct.body):
+            # 1. Parent cmdarg contains ONLY this struct, AND
+            # 2. Struct has only static tokens plus one param
+            if not location.cmdarg_has_only_struct():
+                continue
+            if not has_only_static_tokens_and_one_param(struct.body):
                 continue
 
             return struct, single_param, location
 
         return None
 
-    def flatten_by_replacing_cmdarg(
-            struct: ir.Param[ir.Param.Struct],
-            location: TokenLocation,
+    def flatten_struct(
+        struct: ir.Param[ir.Param.Struct],
+        single_param: ir.Param,
+        location: TokenLocation,
     ) -> None:
-        """Replace parent cmdarg with struct's cmdargs."""
+        """Flatten struct by creating a new ConditionalGroup for its cmdargs."""
+        # Collect all cmdargs from the struct
         struct_cmdargs: list[ir.CmdArg] = []
         for group in struct.body.groups:
             struct_cmdargs.extend(group.cargs)
 
-        new_cargs = (
-                location.group.cargs[:location.cmdarg_idx]
-                + struct_cmdargs
-                + location.group.cargs[location.cmdarg_idx + 1:]
-        )
+        # Create a new ConditionalGroup for the struct's cmdargs
+        new_struct_group = ir.ConditionalGroup(cargs=struct_cmdargs, join=None)
 
-        new_group = ir.ConditionalGroup(cargs=new_cargs, join=location.group.join)
-        location.parent_struct.body.groups = (
-                location.parent_struct.body.groups[:location.group_idx]
-                + [new_group]
-                + location.parent_struct.body.groups[location.group_idx + 1:]
-        )
+        # Remove the struct's cmdarg from the original group
+        new_cargs = location.group.cargs[: location.cmdarg_idx] + location.group.cargs[location.cmdarg_idx + 1 :]
 
-    def flatten_by_splicing_tokens(
-            struct: ir.Param[ir.Param.Struct],
-            location: TokenLocation,
-    ) -> None:
-        """Splice struct's tokens into parent cmdarg."""
-        # Safe because we verified simple structure
-        struct_tokens = struct.body.groups[0].cargs[0].tokens
+        # Update the original group (or remove if empty)
+        if new_cargs:
+            modified_group = ir.ConditionalGroup(cargs=new_cargs, join=location.group.join)
+            new_groups = (
+                location.parent_struct.body.groups[: location.group_idx]
+                + [modified_group, new_struct_group]
+                + location.parent_struct.body.groups[location.group_idx + 1 :]
+            )
+        else:
+            new_groups = (
+                location.parent_struct.body.groups[: location.group_idx]
+                + [new_struct_group]
+                + location.parent_struct.body.groups[location.group_idx + 1 :]
+            )
 
-        old_tokens = location.cmdarg.tokens
-        new_tokens = (
-                old_tokens[:location.token_idx]
-                + struct_tokens
-                + old_tokens[location.token_idx + 1:]
-        )
-        location.cmdarg.tokens = new_tokens
+        location.parent_struct.body.groups = new_groups
 
     while True:
         candidate = find_flattening_candidate()
@@ -277,11 +313,8 @@ def _flatten_single_param_structs_into_groups(app: ir.App) -> ir.App:
         # Merge docs
         single_param.base.docs = _merge_docs(struct.base.docs, single_param.base.docs)
 
-        # Choose flattening strategy
-        if location.cmdarg_has_only_struct():
-            flatten_by_replacing_cmdarg(struct, location)
-        else:
-            flatten_by_splicing_tokens(struct, location)
+        # Flatten the struct
+        flatten_struct(struct, single_param, location)
 
         app.command.setup_parent_references()
 
