@@ -393,7 +393,7 @@ class TypeScriptLanguageExprProvider(LanguageExprProvider):
         return result
 
     def expr_path_get_filename(self, path_expr: str) -> str:
-        return f"path.basename({path_expr})"
+        return f'({path_expr}.split(/[\\\\/]/).pop() ?? "")'
 
     def expr_conditions_join_and(self, condition_exprs: list[str]) -> str:
         return " && ".join(condition_exprs)
