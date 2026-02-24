@@ -20,6 +20,7 @@ authors = [{{ name = "{authors}" }}]
 requires-python = ">=3.10"
 dependencies = [
   "styxdocker",
+  "styxpodman",
   "styxsingularity",
   "styxgraph",{dependencies}
 ]
@@ -80,6 +81,7 @@ def template_root_init_py(project: ir.Project, package_names: list[str]) -> str:
     return f'''{reexports}
 from styxdefs import *  # Reexport styxdefs
 from styxdocker import DockerRunner
+from styxpodman import PodmanRunner
 from styxsingularity import SingularityRunner
 from styxgraph import GraphRunner
 
@@ -97,6 +99,11 @@ def use_dry(*args, **kwargs):
 def use_docker(*args, **kwargs):
     """Set the DockerRunner as the global runner."""
     set_global_runner(DockerRunner(*args, **kwargs))
+
+
+def use_podman(*args, **kwargs):
+    """Set the PodmanRunner as the global runner."""
+    set_global_runner(PodmanRunner(*args, **kwargs))
 
 
 def use_singularity(*args, **kwargs):
