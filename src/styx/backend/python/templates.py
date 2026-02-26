@@ -78,10 +78,22 @@ def template_root_init_py(project: ir.Project, package_names: list[str]) -> str:
     ])
 
     return f'''{reexports}
-from styxdefs import *  # Reexport styxdefs
-from styxdocker import DockerRunner
-from styxsingularity import SingularityRunner
-from styxgraph import GraphRunner
+from styxdefs import (
+    Execution as Execution,
+    InputPathType as InputPathType,
+    Metadata as Metadata,
+    OutputPathType as OutputPathType,
+    Runner as Runner,
+    LocalRunner as LocalRunner,
+    DryRunner as DryRunner,
+    get_global_runner as get_global_runner,
+    set_global_runner as set_global_runner,
+    StyxRuntimeError as StyxRuntimeError,
+    StyxValidationError as StyxValidationError,
+)
+from styxdocker import DockerRunner as DockerRunner
+from styxsingularity import SingularityRunner as SingularityRunner
+from styxgraph import GraphRunner as GraphRunner
 
 
 def use_local(*args, **kwargs):

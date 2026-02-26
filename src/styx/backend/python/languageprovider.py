@@ -1015,7 +1015,7 @@ class PythonLanguageHighLevelProvider(LanguageHighLevelProvider):
                             *_assert_dict(get_param_or_die),
                             *_assert_tagged(get_param_or_die),
                             *_check_error(
-                                f"{get_param_or_die}[\"@type\"] not in {self.expr_literal(valid_tags)}",
+                                f'{get_param_or_die}["@type"] not in {self.expr_literal(valid_tags)}',
                                 f"Parameter `{p.base.name}`s `@type` must be one of {self.expr_literal(valid_tags)}",
                             ),
                             expr_validate,
@@ -1154,10 +1154,18 @@ class PythonLanguageCompileProvider(Compilable):
                 path=python_package_path_src / f"{project.name}_{package.name}" / package_symbol / "__init__.py",
                 content=collapse(self.generate_module(package_module)),
             )
+            yield TextFile(
+                path=python_package_path_src / f"{project.name}_{package.name}" / "py.typed",
+                content="",
+            )
 
         yield TextFile(
             path=pathlib.Path(project.name) / f"src/{project.name}/__init__.py",
             content=template_root_init_py(project, package_names),
+        )
+        yield TextFile(
+            path=pathlib.Path(project.name) / f"src/{project.name}/py.typed",
+            content="",
         )
 
         yield TextFile(
