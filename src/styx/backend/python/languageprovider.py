@@ -1155,11 +1155,7 @@ class PythonLanguageCompileProvider(Compilable):
                 content=collapse(self.generate_module(package_module)),
             )
             yield TextFile(
-                path=python_package_path_src / f"{project.name}_{package.name}" / "__init__.py",
-                content="",
-            )
-            yield TextFile(
-                path=python_package_path_src / f"{project.name}_{package.name}" / "py.typed",
+                path=python_package_path_src / f"{project.name}_{package.name}" / package_symbol / "py.typed",
                 content="",
             )
 
