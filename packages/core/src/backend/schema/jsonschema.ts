@@ -2,6 +2,9 @@ import type { Binding, BoundType, BoundVariant } from "../../bindings/index.js";
 import type { Expr, ScalarKind } from "../../ir/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import type { Backend, EmitResult } from "../backend.js";
+import { findDoc } from "../find-doc.js";
+import { findStructNode } from "../find-struct-node.js";
+import { resolveFieldBinding } from "../resolve-field-binding.js";
 
 export interface JsonSchema {
   type?: string;
@@ -74,25 +77,6 @@ class SchemaBuilder {
     }
   }
 
-  /** Find the sequence node whose child bindings match the struct's field names. */
-  private findStructNode(
-    node: Expr,
-    type: Extract<BoundType, { kind: "struct" }>,
-  ): Extract<Expr, { kind: "sequence" }> | undefined {
-    if (node.kind !== "sequence") return undefined;
-    // Check if any child binding matches a field name
-    for (const child of node.attrs.nodes) {
-      const binding = this.ctx.resolve(child);
-      if (binding && binding.name in type.fields) return node;
-    }
-    // Recurse into child sequences (handles collapsed flag sequences)
-    for (const child of node.attrs.nodes) {
-      const result = this.findStructNode(child, type);
-      if (result) return result;
-    }
-    return undefined;
-  }
-
   private findTerminal(node: Expr): Expr {
     switch (node.kind) {
       case "optional":
@@ -130,17 +114,34 @@ class SchemaBuilder {
     const properties: Record<string, JsonSchema> = {};
     const required: string[] = [];
 
-    const structNode = node ? this.findStructNode(node, type) : undefined;
+    // Use shared findStructNode for correct traversal through opt/rep/alt wrappers
+    const structNode = node ? findStructNode(node, this.ctx, type) : undefined;
     if (structNode) {
       for (const child of structNode.attrs.nodes) {
-        const childBinding = this.ctx.resolve(child);
-        if (childBinding && childBinding.name in type.fields) {
-          properties[childBinding.name] = this.fromBinding(childBinding);
-          const fieldType = type.fields[childBinding.name];
-          const meta = childBinding.node.meta;
-          if (fieldType && fieldType.kind !== "optional" && meta?.defaultValue === undefined) {
-            required.push(childBinding.name);
-          }
+        // Use shared resolveFieldBinding for correct collapsed-sequence handling
+        const match = resolveFieldBinding(child, this.ctx, type);
+        if (!match) continue;
+        const { binding, wrapperNode } = match;
+
+        const schema = this.fromType(binding.type, binding.node);
+        const fieldType = type.fields[binding.name]!;
+
+        // Use shared findDoc for correct doc propagation through collapsed sequences
+        const doc =
+          findDoc(wrapperNode, fieldType) ??
+          findDoc(binding.node, fieldType) ??
+          wrapperNode.meta?.doc?.description;
+        if (doc) schema.description = doc;
+
+        const title = wrapperNode.meta?.doc?.title ?? binding.node.meta?.doc?.title;
+        if (title) schema.title = title;
+
+        const defaultValue = wrapperNode.meta?.defaultValue ?? binding.node.meta?.defaultValue;
+        if (defaultValue !== undefined) schema.default = defaultValue;
+
+        properties[binding.name] = schema;
+        if (fieldType.kind !== "optional" && defaultValue === undefined) {
+          required.push(binding.name);
         }
       }
     } else {

@@ -226,10 +226,7 @@ describe("TypeScript generation - JSDoc", () => {
       seq(
         lit("cmd"),
         opt(
-          seq(
-            lit("--transform"),
-            seq(lit("rigid"), str("config", "Transform configuration file")),
-          ),
+          seq(lit("--transform"), seq(lit("rigid"), str("config", "Transform configuration file"))),
           { name: "transform" },
         ),
       ),
