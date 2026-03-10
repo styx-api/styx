@@ -27,15 +27,9 @@ function appendLines(cb: CodeBuilder, code: string): void {
 
 // -- Type helpers --
 
-/** Whether a type was collapsed from a sequence (non-struct, non-scalar). */
-function hasCollapsedInner(type: BoundType): boolean {
-  return type.kind === "list" || type.kind === "count";
-}
-
 /**
  * Whether a BoundType contains a struct that requires scoping
  * paramsVar when entering its wrapper (optional, repeat).
- * Unions are excluded - the alternative handler manages its own scoping.
  */
 function hasStructScope(type: BoundType): boolean {
   switch (type.kind) {
@@ -75,13 +69,30 @@ function toStringExpr(type: BoundType, expr: string): string {
 // -- Context passed down through recursion --
 
 interface ArgContext {
+  /** Base path for field access (e.g. "params", "params.range", "item0"). */
   paramsVar: string;
+  /** Join nesting depth (controls ternary vs if-statement for optionals). */
   joinDepth: number;
-  inScalarRepeat: boolean;
-  /** When set, the next repeat should use this access path (collapsed seq inside optional). */
-  collapsedAccess?: string;
-  /** The struct type at the current scope level (for detecting root vs nested structs). */
+  /**
+   * When set, the next binding's value is directly at this path
+   * rather than at `paramsVar.bindingName`.
+   *
+   * This handles solver sequence collapse: when `seq(lit, T)` collapses to just T,
+   * the parent wrapper (optional, repeat) holds the value at its own access path.
+   * The child binding still exists with its original name, but that name isn't a
+   * valid access path - the value lives at `directValue` instead.
+   *
+   * Consumed by the first binding that uses it. Reset when entering scoped
+   * contexts (struct sequences, complex union variants).
+   */
+  directValue?: string;
+  /** The struct type at the current scope level (prevents double-scoping). */
   currentStructType?: BoundType;
+}
+
+/** Resolve the access path for a binding in the current context. */
+function resolveAccess(arg: ArgContext, bindingName: string): string {
+  return arg.directValue ?? `${arg.paramsVar}.${bindingName}`;
 }
 
 // -- Recursive descent --
@@ -99,7 +110,6 @@ export function buildArgs(rootExpr: Expr, ctx: CodegenContext, rootType?: BoundT
   const initialCtx: ArgContext = {
     paramsVar: "params",
     joinDepth: 0,
-    inScalarRepeat: false,
     currentStructType: rootType,
   };
   return walk(rootExpr, ctx, initialCtx);
@@ -133,7 +143,7 @@ function walk(node: Expr, ctx: CodegenContext, arg: ArgContext): ArgResult {
 function walkTerminal(node: Expr, ctx: CodegenContext, arg: ArgContext): ArgResult {
   const binding = ctx.resolve(node);
   if (!binding) throw new Error(`Missing binding for terminal node: ${node.kind}`);
-  const access = arg.inScalarRepeat ? arg.paramsVar : `${arg.paramsVar}.${binding.name}`;
+  const access = resolveAccess(arg, binding.name);
   return { expr: toStringExpr(binding.type, access) };
 }
 
@@ -152,6 +162,7 @@ function walkSequence(
     ? {
         ...arg,
         paramsVar: `${arg.paramsVar}.${binding!.name}`,
+        directValue: undefined,
         currentStructType: binding!.type,
         joinDepth: join !== undefined ? arg.joinDepth + 1 : arg.joinDepth,
       }
@@ -178,19 +189,24 @@ function walkOptional(
   const binding = ctx.resolve(node);
   if (!binding) throw new Error("Missing binding for optional node");
   const access = `${arg.paramsVar}.${binding.name}`;
-  const nested = hasStructScope(binding.type);
 
-  // Compute child context
+  // Compute child context based on the inner type
   let childArg: ArgContext;
-  if (nested) {
+  if (hasStructScope(binding.type)) {
+    // Struct inside optional: scope paramsVar so children access fields directly
     const inner = unwrapToStruct(binding.type);
     childArg = {
       ...arg,
       paramsVar: access,
+      directValue: undefined,
       currentStructType: inner ?? arg.currentStructType,
     };
-  } else if (binding.type.kind === "optional" && hasCollapsedInner(binding.type.inner)) {
-    childArg = { ...arg, collapsedAccess: access };
+  } else if (binding.type.kind === "optional" || binding.type.kind === "bool") {
+    // Collapsed non-struct: the value is at the optional's access path.
+    // The inner binding (scalar, union, list, count) was folded into the optional
+    // by the solver, so its name is a phantom - directValue tells the inner
+    // walker to use this path instead of paramsVar.bindingName.
+    childArg = { ...arg, directValue: access };
   } else {
     childArg = arg;
   }
@@ -227,12 +243,12 @@ function walkRepeat(
   const binding = ctx.resolve(node);
   if (!binding) throw new Error("Missing binding for repeat node");
   const join = node.attrs.join;
+  const access = resolveAccess(arg, binding.name);
 
   // Count repeat: emit a counted for-loop
   if (binding.type.kind === "count") {
     const inner = walk(node.attrs.node, ctx, arg);
     const v = `i${loopVarCounter++}`;
-    const access = `${arg.paramsVar}.${binding.name}`;
     const cb = new CodeBuilder("  ");
     cb.line(`for (let ${v} = 0; ${v} < ${access}; ${v}++) {`);
     cb.indent(() => appendLines(cb, resultToStmt(inner)));
@@ -248,13 +264,11 @@ function walkRepeat(
   const childArg: ArgContext = {
     ...arg,
     paramsVar: loopVar,
-    inScalarRepeat: isScalar,
-    collapsedAccess: undefined,
+    directValue: isScalar ? loopVar : undefined,
     currentStructType: !isScalar && itemType?.kind === "struct" ? itemType : arg.currentStructType,
   };
 
   const inner = walk(node.attrs.node, ctx, childArg);
-  const access = arg.collapsedAccess ?? `${arg.paramsVar}.${binding.name}`;
 
   if (join !== undefined && isExpr(inner)) {
     return { expr: `${access}.map((${loopVar}) => ${inner.expr}).join(${JSON.stringify(join)})` };
@@ -274,7 +288,7 @@ function walkAlternative(
 ): ArgResult {
   const binding = ctx.resolve(node);
   if (!binding) throw new Error("Missing binding for alternative node");
-  const access = `${arg.paramsVar}.${binding.name}`;
+  const access = resolveAccess(arg, binding.name);
 
   // For complex unions (struct variants), scope paramsVar into the union's
   // access path so variant children resolve fields correctly (e.g. params.source.file)
@@ -288,6 +302,7 @@ function walkAlternative(
       return walk(alt, ctx, {
         ...arg,
         paramsVar: access,
+        directValue: undefined,
         currentStructType: variantType?.kind === "struct" ? variantType : arg.currentStructType,
       });
     }

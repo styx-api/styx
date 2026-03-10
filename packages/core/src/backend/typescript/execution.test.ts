@@ -886,3 +886,310 @@ describe("execution - complex combinations", () => {
     expect(args).toEqual(["cmd", "copy", "a", "b", "--", "x", "y", "z"]);
   });
 });
+
+// -- Deep nesting: alt combinations --
+
+describe("execution - deep alt nesting", () => {
+  it("alt inside rep (list of discriminated unions)", () => {
+    const args = execute(
+      seq(
+        lit("cmd"),
+        rep(
+          namedAlt("step", seq(lit("--copy"), path("src")), seq(lit("--move"), path("src"))),
+          "steps",
+        ),
+      ),
+      {
+        steps: [
+          { "@type": "variant_0", src: "/a" },
+          { "@type": "variant_1", src: "/b" },
+          { "@type": "variant_0", src: "/c" },
+        ],
+      },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd", "--copy", "/a", "--move", "/b", "--copy", "/c"]);
+  });
+
+  it("alt inside rep with empty array", () => {
+    const args = execute(
+      seq(
+        lit("cmd"),
+        rep(
+          namedAlt("step", seq(lit("--copy"), path("src")), seq(lit("--rm"), str("target"))),
+          "steps",
+        ),
+      ),
+      { steps: [] },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd"]);
+  });
+
+  it("rep inside alt variant (variant with repeated field)", () => {
+    const args = execute(
+      seq(
+        lit("cmd"),
+        namedAlt(
+          "input",
+          seq(lit("--file"), path("file")),
+          seq(lit("--batch"), rep(path("f"), "files")),
+        ),
+      ),
+      { input: { "@type": "variant_1", files: ["/a", "/b", "/c"] } },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd", "--batch", "/a", "/b", "/c"]);
+  });
+
+  it("rep inside alt variant (first variant selected)", () => {
+    const args = execute(
+      seq(
+        lit("cmd"),
+        namedAlt(
+          "input",
+          seq(lit("--file"), path("file")),
+          seq(lit("--batch"), rep(path("f"), "files")),
+        ),
+      ),
+      { input: { "@type": "variant_0", file: "/single" } },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd", "--file", "/single"]);
+  });
+
+  it("opt inside alt variant (variant with optional field)", () => {
+    const args = execute(
+      seq(
+        lit("cmd"),
+        namedAlt(
+          "source",
+          seq(
+            lit("--local"),
+            path("file"),
+            opt(seq(lit("--compress")), { name: "compress", defaultValue: false }),
+          ),
+          seq(lit("--remote"), str("url")),
+        ),
+      ),
+      { source: { "@type": "variant_0", file: "/data", compress: true } },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd", "--local", "/data", "--compress"]);
+  });
+
+  it("opt inside alt variant (optional absent)", () => {
+    const args = execute(
+      seq(
+        lit("cmd"),
+        namedAlt(
+          "source",
+          seq(
+            lit("--local"),
+            path("file"),
+            opt(seq(lit("--compress")), { name: "compress", defaultValue: false }),
+          ),
+          seq(lit("--remote"), str("url")),
+        ),
+      ),
+      { source: { "@type": "variant_0", file: "/data", compress: false } },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd", "--local", "/data"]);
+  });
+
+  it("optional discriminated union (present)", () => {
+    const args = execute(
+      seq(
+        lit("cmd"),
+        opt(namedAlt("source", seq(lit("--file"), path("file")), seq(lit("--url"), str("url")))),
+      ),
+      { source: { "@type": "variant_0", file: "/data" } },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd", "--file", "/data"]);
+  });
+
+  it("optional discriminated union (absent)", () => {
+    const args = execute(
+      seq(
+        lit("cmd"),
+        opt(namedAlt("source", seq(lit("--file"), path("file")), seq(lit("--url"), str("url")))),
+      ),
+      { source: null },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd"]);
+  });
+
+  it("rep > seq > alt (repeat of struct containing union)", () => {
+    const args = execute(
+      seq(
+        lit("cmd"),
+        rep(seq(str("name"), namedAlt("kind", lit("read"), lit("write"), lit("exec"))), "perms"),
+      ),
+      {
+        perms: [
+          { name: "user", kind: "read" },
+          { name: "group", kind: "exec" },
+        ],
+      },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd", "user", "read", "group", "exec"]);
+  });
+
+  it("rep > seq > alt with discriminated union variants", () => {
+    const args = execute(
+      seq(
+        lit("cmd"),
+        rep(
+          seq(
+            str("label"),
+            namedAlt(
+              "action",
+              seq(lit("--copy"), path("src")),
+              seq(lit("--delete"), str("target")),
+            ),
+          ),
+          "ops",
+        ),
+      ),
+      {
+        ops: [
+          { label: "first", action: { "@type": "variant_0", src: "/a" } },
+          { label: "second", action: { "@type": "variant_1", target: "old" } },
+        ],
+      },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd", "first", "--copy", "/a", "second", "--delete", "old"]);
+  });
+
+  it("opt > seq > alt > seq > rep (four levels deep)", () => {
+    const args = execute(
+      seq(
+        lit("cmd"),
+        opt(
+          seq(
+            lit("--transform"),
+            namedAlt(
+              "xform",
+              seq(lit("rotate"), repJoin(",", float("angle"), "angles")),
+              seq(lit("scale"), float("factor")),
+            ),
+          ),
+          { name: "transform" },
+        ),
+      ),
+      { transform: { "@type": "variant_0", angles: [90.0, 45.0] } },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd", "--transform", "rotate", "90,45"]);
+  });
+
+  it("opt > seq > alt > seq > rep (second variant)", () => {
+    const args = execute(
+      seq(
+        lit("cmd"),
+        opt(
+          seq(
+            lit("--transform"),
+            namedAlt(
+              "xform",
+              seq(lit("rotate"), repJoin(",", float("angle"), "angles")),
+              seq(lit("scale"), float("factor")),
+            ),
+          ),
+          { name: "transform" },
+        ),
+      ),
+      { transform: { "@type": "variant_1", factor: 2.5 } },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd", "--transform", "scale", "2.5"]);
+  });
+
+  it("opt > seq > alt > seq > rep (absent)", () => {
+    const args = execute(
+      seq(
+        lit("cmd"),
+        opt(
+          seq(
+            lit("--transform"),
+            namedAlt(
+              "xform",
+              seq(lit("rotate"), repJoin(",", float("angle"), "angles")),
+              seq(lit("scale"), float("factor")),
+            ),
+          ),
+          { name: "transform" },
+        ),
+      ),
+      { transform: null },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd"]);
+  });
+
+  it("alt with three complex variants (struct, scalar, repeat)", () => {
+    const args = execute(
+      seq(
+        lit("cmd"),
+        namedAlt(
+          "output",
+          seq(lit("--split"), str("prefix"), int("chunks")),
+          seq(lit("--single"), path("file")),
+          seq(lit("--multi"), rep(path("f"), "files")),
+        ),
+      ),
+      { output: { "@type": "variant_2", files: ["/x", "/y"] } },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd", "--multi", "/x", "/y"]);
+  });
+
+  it("alt with three complex variants (first variant - struct)", () => {
+    const args = execute(
+      seq(
+        lit("cmd"),
+        namedAlt(
+          "output",
+          seq(lit("--split"), str("prefix"), int("chunks")),
+          seq(lit("--single"), path("file")),
+          seq(lit("--multi"), rep(path("f"), "files")),
+        ),
+      ),
+      { output: { "@type": "variant_0", prefix: "out_", chunks: 4 } },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd", "--split", "out_", "4"]);
+  });
+
+  it("multiple alts in same struct", () => {
+    const args = execute(
+      seq(
+        lit("cmd"),
+        namedAlt("mode", lit("fast"), lit("slow")),
+        namedAlt("format", lit("json"), lit("csv"), lit("xml")),
+      ),
+      { mode: "fast", format: "csv" },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd", "fast", "csv"]);
+  });
+
+  it("alt + rep + opt all siblings in one struct", () => {
+    const args = execute(
+      seq(
+        lit("cmd"),
+        namedAlt("mode", lit("train"), lit("eval")),
+        rep(path("f"), "inputs"),
+        opt(seq(lit("--lr"), float("lr"))),
+      ),
+      { mode: "train", inputs: ["/data/a", "/data/b"], lr: 0.001 },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd", "train", "/data/a", "/data/b", "--lr", "0.001"]);
+  });
+});
