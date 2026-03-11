@@ -1,0 +1,1058 @@
+{
+  "$schema": "https://niwrap.dev/argdump/schema-v1.json",
+  "$env": {
+    "python_version": "3.12.11",
+    "python_implementation": "CPython",
+    "platform_system": "Linux",
+    "platform_release": "6.6.87.2-microsoft-standard-WSL2",
+    "platform_machine": "x86_64",
+    "argdump_version": "0.1.2"
+  },
+  "prog": "",
+  "description": "fMRIPrep: fMRI PREProcessing workflows v25.2.3",
+  "formatter_class": "ArgumentDefaultsHelpFormatter",
+  "actions": [
+    {
+      "option_strings": [
+        "-h",
+        "--help"
+      ],
+      "dest": "help",
+      "action_type": "help",
+      "nargs": 0,
+      "default": {
+        "__argparse__": "SUPPRESS"
+      },
+      "help": "show this help message and exit"
+    },
+    {
+      "option_strings": [],
+      "dest": "bids_dir",
+      "action_type": "store",
+      "type_info": {
+        "name": "functools.partial(<function _build_parser.<locals>._path_exists at 0x7373c978d940>, parser=ArgumentParser(prog='', usage=None, description='fMRIPrep: fMRI PREProcessing workflows v25.2.3', formatter_class=<class 'argparse.ArgumentDefaultsHelpFormatter'>, conflict_handler='error', add_help=True))",
+        "module": "functools",
+        "serializable": false
+      },
+      "required": true,
+      "help": "The root folder of a BIDS valid dataset (sub-XXXXX folders should be found at the top level in this folder)."
+    },
+    {
+      "option_strings": [],
+      "dest": "output_dir",
+      "action_type": "store",
+      "type_info": {
+        "name": "Path",
+        "module": "pathlib"
+      },
+      "required": true,
+      "help": "The output path for the outcomes of preprocessing and visual reports"
+    },
+    {
+      "option_strings": [],
+      "dest": "analysis_level",
+      "action_type": "store",
+      "choices": [
+        "participant"
+      ],
+      "required": true,
+      "help": "Processing stage to be run, only \"participant\" in the case of fMRIPrep (see BIDS-Apps specification)."
+    },
+    {
+      "option_strings": [
+        "--skip_bids_validation",
+        "--skip-bids-validation"
+      ],
+      "dest": "skip_bids_validation",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Assume the input dataset is BIDS compliant and skip the validation"
+    },
+    {
+      "option_strings": [
+        "--participant-label",
+        "--participant_label"
+      ],
+      "dest": "participant_label",
+      "action_type": "store",
+      "nargs": "+",
+      "type_info": {
+        "name": "<lambda>",
+        "module": "fmriprep.cli.parser",
+        "serializable": false
+      },
+      "help": "A space delimited list of participant identifiers or a single identifier (the sub- prefix can be removed)"
+    },
+    {
+      "option_strings": [
+        "--session-label"
+      ],
+      "dest": "session_label",
+      "action_type": "store",
+      "nargs": "+",
+      "type_info": {
+        "name": "<lambda>",
+        "module": "fmriprep.cli.parser",
+        "serializable": false
+      },
+      "help": "A space delimited list of session identifiers or a single identifier (the ses- prefix can be removed)"
+    },
+    {
+      "option_strings": [
+        "-t",
+        "--task-id"
+      ],
+      "dest": "task_id",
+      "action_type": "store",
+      "help": "Select a specific task to be processed"
+    },
+    {
+      "option_strings": [
+        "--echo-idx"
+      ],
+      "dest": "echo_idx",
+      "action_type": "store",
+      "type_info": {
+        "name": "int",
+        "builtin": true
+      },
+      "help": "Select a specific echo to be processed in a multiecho series"
+    },
+    {
+      "option_strings": [
+        "--subject-anatomical-reference"
+      ],
+      "dest": "subject_anatomical_reference",
+      "action_type": "store",
+      "default": "first-lex",
+      "choices": [
+        "first-lex",
+        "unbiased",
+        "sessionwise"
+      ],
+      "help": "Method to produce the reference anatomical space:\n\t\"first-lex\" will use the first image in lexicographical order\n\t\"unbiased\" will construct an unbiased template from all images (previously \"--longitudinal\")\n\t\"sessionwise\" will independently process each session. If multiple runs are found, the behavior will be similar to \"first-lex\" for each session."
+    },
+    {
+      "option_strings": [
+        "--bids-filter-file"
+      ],
+      "dest": "bids_filters",
+      "action_type": "store",
+      "type_info": {
+        "name": "functools.partial(<function _build_parser.<locals>._bids_filter at 0x7373b6e16200>, parser=ArgumentParser(prog='', usage=None, description='fMRIPrep: fMRI PREProcessing workflows v25.2.3', formatter_class=<class 'argparse.ArgumentDefaultsHelpFormatter'>, conflict_handler='error', add_help=True))",
+        "module": "functools",
+        "serializable": false
+      },
+      "help": "A JSON file describing custom BIDS input filters using PyBIDS. For further details, please check out https://fmriprep.readthedocs.io/en/25.2.3/faq.html#how-do-I-select-only-certain-files-to-be-input-to-fMRIPrep",
+      "metavar": "FILE"
+    },
+    {
+      "option_strings": [
+        "-d",
+        "--derivatives"
+      ],
+      "dest": "derivatives",
+      "action_type": "unknown",
+      "nargs": "+",
+      "type_info": {
+        "name": "str",
+        "builtin": true
+      },
+      "help": "Search PATH(s) for pre-computed derivatives. These may be provided as named folders (e.g., `--derivatives smriprep=/path/to/smriprep`).",
+      "metavar": "PACKAGE=PATH",
+      "custom_action_class": "ToDict"
+    },
+    {
+      "option_strings": [
+        "--bids-database-dir"
+      ],
+      "dest": "bids_database_dir",
+      "action_type": "store",
+      "type_info": {
+        "name": "Path",
+        "module": "pathlib"
+      },
+      "help": "Path to a PyBIDS database folder, for faster indexing (especially useful for large datasets). Will be created if not present.",
+      "metavar": "PATH"
+    },
+    {
+      "option_strings": [
+        "--nprocs",
+        "--nthreads",
+        "--n_cpus",
+        "--n-cpus"
+      ],
+      "dest": "nprocs",
+      "action_type": "store",
+      "type_info": {
+        "name": "functools.partial(<function _build_parser.<locals>._min_one at 0x7373b6e15f80>, parser=ArgumentParser(prog='', usage=None, description='fMRIPrep: fMRI PREProcessing workflows v25.2.3', formatter_class=<class 'argparse.ArgumentDefaultsHelpFormatter'>, conflict_handler='error', add_help=True))",
+        "module": "functools",
+        "serializable": false
+      },
+      "help": "Maximum number of threads across all processes"
+    },
+    {
+      "option_strings": [
+        "--omp-nthreads"
+      ],
+      "dest": "omp_nthreads",
+      "action_type": "store",
+      "type_info": {
+        "name": "functools.partial(<function _build_parser.<locals>._min_one at 0x7373b6e15f80>, parser=ArgumentParser(prog='', usage=None, description='fMRIPrep: fMRI PREProcessing workflows v25.2.3', formatter_class=<class 'argparse.ArgumentDefaultsHelpFormatter'>, conflict_handler='error', add_help=True))",
+        "module": "functools",
+        "serializable": false
+      },
+      "help": "Maximum number of threads per-process"
+    },
+    {
+      "option_strings": [
+        "--mem",
+        "--mem_mb",
+        "--mem-mb"
+      ],
+      "dest": "memory_gb",
+      "action_type": "store",
+      "type_info": {
+        "name": "_to_gb",
+        "module": "fmriprep.cli.parser"
+      },
+      "help": "Upper bound memory limit for fMRIPrep processes",
+      "metavar": "MEMORY_MB"
+    },
+    {
+      "option_strings": [
+        "--low-mem"
+      ],
+      "dest": "low_mem",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Attempt to reduce memory usage (will increase disk usage in working directory)"
+    },
+    {
+      "option_strings": [
+        "--use-plugin",
+        "--nipype-plugin-file"
+      ],
+      "dest": "use_plugin",
+      "action_type": "store",
+      "type_info": {
+        "name": "functools.partial(<function _build_parser.<locals>._is_file at 0x7373b6e15ee0>, parser=ArgumentParser(prog='', usage=None, description='fMRIPrep: fMRI PREProcessing workflows v25.2.3', formatter_class=<class 'argparse.ArgumentDefaultsHelpFormatter'>, conflict_handler='error', add_help=True))",
+        "module": "functools",
+        "serializable": false
+      },
+      "help": "Nipype plugin configuration file",
+      "metavar": "FILE"
+    },
+    {
+      "option_strings": [
+        "--sloppy"
+      ],
+      "dest": "sloppy",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Use low-quality tools for speed - TESTING ONLY"
+    },
+    {
+      "option_strings": [
+        "--anat-only"
+      ],
+      "dest": "anat_only",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Run anatomical workflows only"
+    },
+    {
+      "option_strings": [
+        "--level"
+      ],
+      "dest": "level",
+      "action_type": "store",
+      "default": "full",
+      "choices": [
+        "minimal",
+        "resampling",
+        "full"
+      ],
+      "help": "Processing level; may be 'minimal' (nothing that can be recomputed), 'resampling' (recomputable targets that aid in resampling) or 'full' (all target outputs)."
+    },
+    {
+      "option_strings": [
+        "--boilerplate-only",
+        "--boilerplate_only"
+      ],
+      "dest": "boilerplate_only",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Generate boilerplate only"
+    },
+    {
+      "option_strings": [
+        "--reports-only"
+      ],
+      "dest": "reports_only",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Only generate reports, don't run workflows. This will only rerun report aggregation, not reportlet generation for specific nodes."
+    },
+    {
+      "option_strings": [
+        "--ignore"
+      ],
+      "dest": "ignore",
+      "action_type": "store",
+      "nargs": "+",
+      "default": [],
+      "choices": [
+        "fieldmaps",
+        "slicetiming",
+        "sbref",
+        "t2w",
+        "flair",
+        "fmap-jacobian"
+      ],
+      "help": "Ignore selected aspects of the input dataset to disable corresponding parts of the workflow (a space delimited list)"
+    },
+    {
+      "option_strings": [
+        "--force"
+      ],
+      "dest": "force",
+      "action_type": "store",
+      "nargs": "+",
+      "default": [],
+      "choices": [
+        "bbr",
+        "no-bbr",
+        "syn-sdc",
+        "fmap-jacobian"
+      ],
+      "help": "Force selected processing choices, overriding automatic selections (a space delimited list).\n * [no-]bbr: Use/disable boundary-based registration for BOLD-to-T1w coregistration\n             (No goodness-of-fit checks)\n * syn-sdc: Calculate SyN-SDC correction *in addition* to other fieldmaps\n"
+    },
+    {
+      "option_strings": [
+        "--output-spaces"
+      ],
+      "dest": "output_spaces",
+      "action_type": "unknown",
+      "nargs": "*",
+      "help": "Standard and non-standard spaces to resample anatomical and functional images to. Standard spaces may be specified by the form ``<SPACE>[:cohort-<label>][:res-<resolution>][...]``, where ``<SPACE>`` is a keyword designating a spatial reference, and may be followed by optional, colon-separated parameters. Non-standard spaces imply specific orientations and sampling grids. Important to note, the ``res-*`` modifier does not define the resolution used for the spatial normalization. To generate no BOLD outputs, use this option without specifying any spatial references. For further details, please check out https://fmriprep.readthedocs.io/en/25.2.3/spaces.html",
+      "custom_action_class": "OutputReferencesAction"
+    },
+    {
+      "option_strings": [
+        "--longitudinal"
+      ],
+      "dest": "longitudinal",
+      "action_type": "unknown",
+      "help": "Deprecated - use `--subject-anatomical-reference unbiased` instead",
+      "custom_action_class": "DeprecatedAction"
+    },
+    {
+      "option_strings": [
+        "--bold2anat-init"
+      ],
+      "dest": "bold2anat_init",
+      "action_type": "store",
+      "default": "auto",
+      "choices": [
+        "auto",
+        "t1w",
+        "t2w",
+        "header"
+      ],
+      "help": "Method of initial BOLD to anatomical coregistration. If `auto`, a T2w image is used if available, otherwise the T1w image. `t1w` forces use of the T1w, `t2w` forces use of the T2w, and `header` uses the BOLD header information without an initial registration."
+    },
+    {
+      "option_strings": [
+        "--bold2anat-dof"
+      ],
+      "dest": "bold2anat_dof",
+      "action_type": "store",
+      "default": 6,
+      "type_info": {
+        "name": "int",
+        "builtin": true
+      },
+      "choices": [
+        6,
+        9,
+        12
+      ],
+      "help": "Degrees of freedom when registering BOLD to anatomical images. 6 degrees (rotation and translation) are used by default."
+    },
+    {
+      "option_strings": [
+        "--force-bbr"
+      ],
+      "dest": "force_bbr",
+      "action_type": "unknown",
+      "help": "Deprecated - use `--force bbr` instead.",
+      "custom_action_class": "DeprecatedAction"
+    },
+    {
+      "option_strings": [
+        "--force-no-bbr"
+      ],
+      "dest": "force_no_bbr",
+      "action_type": "unknown",
+      "help": "Deprecated - use `--force no-bbr` instead.",
+      "custom_action_class": "DeprecatedAction"
+    },
+    {
+      "option_strings": [
+        "--slice-time-ref"
+      ],
+      "dest": "slice_time_ref",
+      "action_type": "store",
+      "default": 0.5,
+      "type_info": {
+        "name": "functools.partial(<function _build_parser.<locals>._slice_time_ref at 0x7373b6e162a0>, parser=ArgumentParser(prog='', usage=None, description='fMRIPrep: fMRI PREProcessing workflows v25.2.3', formatter_class=<class 'argparse.ArgumentDefaultsHelpFormatter'>, conflict_handler='error', add_help=True))",
+        "module": "functools",
+        "serializable": false
+      },
+      "help": "The time of the reference slice to correct BOLD values to, as a fraction acquisition time. 0 indicates the start, 0.5 the midpoint, and 1 the end of acquisition. The alias `start` corresponds to 0, and `middle` to 0.5. The default value is 0.5."
+    },
+    {
+      "option_strings": [
+        "--dummy-scans"
+      ],
+      "dest": "dummy_scans",
+      "action_type": "store",
+      "type_info": {
+        "name": "int",
+        "builtin": true
+      },
+      "help": "Number of nonsteady-state volumes. Overrides automatic detection."
+    },
+    {
+      "option_strings": [
+        "--fallback-total-readout-time"
+      ],
+      "dest": "fallback_total_readout_time",
+      "action_type": "store",
+      "type_info": {
+        "name": "functools.partial(<function _build_parser.<locals>._fallback_trt at 0x7373b6e16340>, parser=ArgumentParser(prog='', usage=None, description='fMRIPrep: fMRI PREProcessing workflows v25.2.3', formatter_class=<class 'argparse.ArgumentDefaultsHelpFormatter'>, conflict_handler='error', add_help=True))",
+        "module": "functools",
+        "serializable": false
+      },
+      "help": "Fallback value for Total Readout Time (TRT) calculation. May be a number or \"estimated\"."
+    },
+    {
+      "option_strings": [
+        "--random-seed"
+      ],
+      "dest": "_random_seed",
+      "action_type": "store",
+      "type_info": {
+        "name": "int",
+        "builtin": true
+      },
+      "help": "Initialize the random seed for the workflow"
+    },
+    {
+      "option_strings": [
+        "--me-t2s-fit-method"
+      ],
+      "dest": "me_t2s_fit_method",
+      "action_type": "store",
+      "default": "curvefit",
+      "choices": [
+        "curvefit",
+        "loglin"
+      ],
+      "help": "The method by which to estimate T2* and S0 for multi-echo data. 'curvefit' uses nonlinear regression. It is more memory intensive, but also may be more accurate, than 'loglin'. 'loglin' uses log-linear regression. It is faster and less memory intensive, but may be less accurate."
+    },
+    {
+      "option_strings": [
+        "--output-layout"
+      ],
+      "dest": "output_layout",
+      "action_type": "store",
+      "default": "bids",
+      "choices": [
+        "bids",
+        "legacy"
+      ],
+      "help": "Organization of outputs. \"bids\" (default) places fMRIPrep derivatives directly in the output directory, and defaults to placing FreeSurfer derivatives in <output-dir>/sourcedata/freesurfer. \"legacy\" creates derivative datasets as subdirectories of outputs."
+    },
+    {
+      "option_strings": [
+        "--me-output-echos"
+      ],
+      "dest": "me_output_echos",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Output individual echo time series with slice, motion and susceptibility correction. Useful for further Tedana processing post-fMRIPrep."
+    },
+    {
+      "option_strings": [
+        "--aggregate-session-reports"
+      ],
+      "dest": "aggr_ses_reports",
+      "action_type": "store",
+      "default": 4,
+      "type_info": {
+        "name": "functools.partial(<function _build_parser.<locals>._min_one at 0x7373b6e15f80>, parser=ArgumentParser(prog='', usage=None, description='fMRIPrep: fMRI PREProcessing workflows v25.2.3', formatter_class=<class 'argparse.ArgumentDefaultsHelpFormatter'>, conflict_handler='error', add_help=True))",
+        "module": "functools",
+        "serializable": false
+      },
+      "help": "Maximum number of sessions aggregated in one subject's visual report. If exceeded, visual reports are split by session."
+    },
+    {
+      "option_strings": [
+        "--medial-surface-nan"
+      ],
+      "dest": "medial_surface_nan",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Replace medial wall values with NaNs on functional GIFTI files. Only performed for GIFTI files mapped to a freesurfer subject (fsaverage or fsnative)."
+    },
+    {
+      "option_strings": [
+        "--project-goodvoxels"
+      ],
+      "dest": "project_goodvoxels",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Exclude voxels whose timeseries have locally high coefficient of variation from surface resampling. Only performed for GIFTI files mapped to a freesurfer subject (fsaverage or fsnative)."
+    },
+    {
+      "option_strings": [
+        "--md-only-boilerplate"
+      ],
+      "dest": "md_only_boilerplate",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Skip generation of HTML and LaTeX formatted citation with pandoc"
+    },
+    {
+      "option_strings": [
+        "--cifti-output"
+      ],
+      "dest": "cifti_output",
+      "action_type": "store",
+      "nargs": "?",
+      "const": "91k",
+      "default": false,
+      "type_info": {
+        "name": "str",
+        "builtin": true
+      },
+      "choices": [
+        "91k",
+        "170k"
+      ],
+      "help": "Output preprocessed BOLD as a CIFTI dense timeseries. Optionally, the number of grayordinate can be specified (default is 91k, which equates to 2mm resolution)"
+    },
+    {
+      "option_strings": [
+        "--msm",
+        "--no-msm"
+      ],
+      "dest": "run_msmsulc",
+      "action_type": "boolean_optional",
+      "nargs": 0,
+      "default": true,
+      "help": "Enable or disable Multimodal Surface Matching surface registration."
+    },
+    {
+      "option_strings": [
+        "--return-all-components"
+      ],
+      "dest": "regressors_all_comps",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Include all components estimated in CompCor decomposition in the confounds file instead of only the components sufficient to explain 50 percent of BOLD variance in each CompCor mask"
+    },
+    {
+      "option_strings": [
+        "--fd-spike-threshold"
+      ],
+      "dest": "regressors_fd_th",
+      "action_type": "store",
+      "default": 0.5,
+      "type_info": {
+        "name": "float",
+        "builtin": true
+      },
+      "help": "Threshold for flagging a frame as an outlier on the basis of framewise displacement"
+    },
+    {
+      "option_strings": [
+        "--dvars-spike-threshold"
+      ],
+      "dest": "regressors_dvars_th",
+      "action_type": "store",
+      "default": 1.5,
+      "type_info": {
+        "name": "float",
+        "builtin": true
+      },
+      "help": "Threshold for flagging a frame as an outlier on the basis of standardised DVARS"
+    },
+    {
+      "option_strings": [
+        "--skull-strip-template"
+      ],
+      "dest": "skull_strip_template",
+      "action_type": "store",
+      "default": "OASIS30ANTs",
+      "type_info": {
+        "name": "from_string",
+        "module": "niworkflows.utils.spaces"
+      },
+      "help": "Select a template for skull-stripping with antsBrainExtraction (OASIS30ANTs, by default)"
+    },
+    {
+      "option_strings": [
+        "--skull-strip-fixed-seed"
+      ],
+      "dest": "skull_strip_fixed_seed",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Do not use a random seed for skull-stripping - will ensure run-to-run replicability when used with --omp-nthreads 1 and matching --random-seed <int>"
+    },
+    {
+      "option_strings": [
+        "--skull-strip-t1w"
+      ],
+      "dest": "skull_strip_t1w",
+      "action_type": "store",
+      "default": "force",
+      "choices": [
+        "auto",
+        "skip",
+        "force"
+      ],
+      "help": "Perform T1-weighted skull stripping ('force' ensures skull stripping, 'skip' ignores skull stripping, and 'auto' applies brain extraction based on the outcome of a heuristic to check whether the brain is already masked)."
+    },
+    {
+      "option_strings": [
+        "--fmap-bspline"
+      ],
+      "dest": "fmap_bspline",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Fit a B-Spline field using least-squares (experimental)"
+    },
+    {
+      "option_strings": [
+        "--fmap-no-demean"
+      ],
+      "dest": "fmap_no_demean",
+      "action_type": "store_false",
+      "nargs": 0,
+      "const": false,
+      "default": true,
+      "help": "Do not remove median (within mask) from fieldmap"
+    },
+    {
+      "option_strings": [
+        "--use-syn-sdc"
+      ],
+      "dest": "use_syn_sdc",
+      "action_type": "store",
+      "nargs": "?",
+      "const": "error",
+      "default": false,
+      "choices": [
+        "warn",
+        "error"
+      ],
+      "help": "Use fieldmap-less distortion correction based on anatomical image; if unable, error (default) or warn based on optional argument."
+    },
+    {
+      "option_strings": [
+        "--force-syn"
+      ],
+      "dest": "force_syn",
+      "action_type": "unknown",
+      "default": false,
+      "help": "Deprecated - use `--force syn-sdc` instead.",
+      "custom_action_class": "DeprecatedAction"
+    },
+    {
+      "option_strings": [
+        "--fs-license-file"
+      ],
+      "dest": "fs_license_file",
+      "action_type": "store",
+      "type_info": {
+        "name": "functools.partial(<function _build_parser.<locals>._is_file at 0x7373b6e15ee0>, parser=ArgumentParser(prog='', usage=None, description='fMRIPrep: fMRI PREProcessing workflows v25.2.3', formatter_class=<class 'argparse.ArgumentDefaultsHelpFormatter'>, conflict_handler='error', add_help=True))",
+        "module": "functools",
+        "serializable": false
+      },
+      "help": "Path to FreeSurfer license key file. Get it (for free) by registering at https://surfer.nmr.mgh.harvard.edu/registration.html",
+      "metavar": "FILE"
+    },
+    {
+      "option_strings": [
+        "--fs-subjects-dir"
+      ],
+      "dest": "fs_subjects_dir",
+      "action_type": "store",
+      "type_info": {
+        "name": "Path",
+        "module": "pathlib"
+      },
+      "help": "Path to existing FreeSurfer subjects directory to reuse. (default: OUTPUT_DIR/freesurfer)",
+      "metavar": "PATH"
+    },
+    {
+      "option_strings": [
+        "--submm-recon",
+        "--no-submm-recon"
+      ],
+      "dest": "hires",
+      "action_type": "boolean_optional",
+      "nargs": 0,
+      "default": true,
+      "help": "Enable or disable sub-millimeter (hi-res) reconstruction."
+    },
+    {
+      "option_strings": [
+        "--fs-no-reconall"
+      ],
+      "dest": "run_reconall",
+      "action_type": "store_false",
+      "nargs": 0,
+      "const": false,
+      "default": true,
+      "help": "Disable FreeSurfer surface preprocessing."
+    },
+    {
+      "option_strings": [
+        "--fs-no-resume"
+      ],
+      "dest": "fs_no_resume",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "EXPERT: Import pre-computed FreeSurfer reconstruction without resuming. The user is responsible for ensuring that all necessary files are present."
+    },
+    {
+      "option_strings": [
+        "--track-carbon"
+      ],
+      "dest": "track_carbon",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Tracks power draws using CodeCarbon package"
+    },
+    {
+      "option_strings": [
+        "--country-code"
+      ],
+      "dest": "country_code",
+      "action_type": "store",
+      "default": "CAN",
+      "type_info": {
+        "name": "str",
+        "builtin": true
+      },
+      "help": "Country ISO code used by carbon trackers"
+    },
+    {
+      "option_strings": [
+        "--version"
+      ],
+      "dest": "version",
+      "action_type": "version",
+      "nargs": 0,
+      "default": {
+        "__argparse__": "SUPPRESS"
+      },
+      "help": "show program's version number and exit",
+      "version": "fMRIPrep v25.2.3"
+    },
+    {
+      "option_strings": [
+        "-v",
+        "--verbose"
+      ],
+      "dest": "verbose_count",
+      "action_type": "count",
+      "nargs": 0,
+      "default": 0,
+      "help": "Increases log verbosity for each occurrence, debug level is -vvv"
+    },
+    {
+      "option_strings": [
+        "-w",
+        "--work-dir"
+      ],
+      "dest": "work_dir",
+      "action_type": "store",
+      "type_info": {
+        "name": "Path",
+        "module": "pathlib"
+      },
+      "help": "Path where intermediate results should be stored"
+    },
+    {
+      "option_strings": [
+        "--clean-workdir"
+      ],
+      "dest": "clean_workdir",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Clears working directory of contents. Use of this flag is not recommended when running concurrent processes of fMRIPrep."
+    },
+    {
+      "option_strings": [
+        "--resource-monitor"
+      ],
+      "dest": "resource_monitor",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Enable Nipype's resource monitoring to keep track of memory and CPU usage"
+    },
+    {
+      "option_strings": [
+        "--config-file"
+      ],
+      "dest": "config_file",
+      "action_type": "store",
+      "help": "Use pre-generated configuration file. Values in file will be overridden by command-line arguments.",
+      "metavar": "FILE"
+    },
+    {
+      "option_strings": [
+        "--write-graph"
+      ],
+      "dest": "write_graph",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Write workflow graph."
+    },
+    {
+      "option_strings": [
+        "--stop-on-first-crash"
+      ],
+      "dest": "stop_on_first_crash",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Force stopping on first crash, even if a work directory was specified."
+    },
+    {
+      "option_strings": [
+        "--notrack"
+      ],
+      "dest": "notrack",
+      "action_type": "store_true",
+      "nargs": 0,
+      "const": true,
+      "default": false,
+      "help": "Opt-out of sending tracking information of this run to the FMRIPREP developers. This information helps to improve FMRIPREP and provides an indicator of real world usage crucial for obtaining funding."
+    },
+    {
+      "option_strings": [
+        "--debug"
+      ],
+      "dest": "debug",
+      "action_type": "store",
+      "nargs": "+",
+      "choices": [
+        "compcor",
+        "fieldmaps",
+        "pdb",
+        "all"
+      ],
+      "help": "Debug mode(s) to enable. 'all' is alias for all available modes."
+    }
+  ],
+  "argument_groups": [
+    {
+      "title": "positional arguments",
+      "description": null,
+      "actions": [
+        "bids_dir",
+        "output_dir",
+        "analysis_level"
+      ]
+    },
+    {
+      "title": "options",
+      "description": null,
+      "actions": [
+        "help"
+      ]
+    },
+    {
+      "title": "Options for filtering BIDS queries",
+      "description": null,
+      "actions": [
+        "skip_bids_validation",
+        "participant_label",
+        "session_label",
+        "task_id",
+        "echo_idx",
+        "subject_anatomical_reference",
+        "bids_filters",
+        "derivatives",
+        "bids_database_dir"
+      ]
+    },
+    {
+      "title": "Options to handle performance",
+      "description": null,
+      "actions": [
+        "nprocs",
+        "omp_nthreads",
+        "memory_gb",
+        "low_mem",
+        "use_plugin",
+        "sloppy"
+      ]
+    },
+    {
+      "title": "Options for performing only a subset of the workflow",
+      "description": null,
+      "actions": [
+        "anat_only",
+        "level",
+        "boilerplate_only",
+        "reports_only"
+      ]
+    },
+    {
+      "title": "Workflow configuration",
+      "description": null,
+      "actions": [
+        "ignore",
+        "force",
+        "output_spaces",
+        "longitudinal",
+        "bold2anat_init",
+        "bold2anat_dof",
+        "force_bbr",
+        "force_no_bbr",
+        "slice_time_ref",
+        "dummy_scans",
+        "fallback_total_readout_time",
+        "_random_seed",
+        "me_t2s_fit_method",
+        "project_goodvoxels"
+      ]
+    },
+    {
+      "title": "Options for modulating outputs",
+      "description": null,
+      "actions": [
+        "output_layout",
+        "me_output_echos",
+        "aggr_ses_reports",
+        "medial_surface_nan",
+        "md_only_boilerplate",
+        "cifti_output",
+        "run_msmsulc"
+      ]
+    },
+    {
+      "title": "Options relating to confounds",
+      "description": null,
+      "actions": [
+        "regressors_all_comps",
+        "regressors_fd_th",
+        "regressors_dvars_th"
+      ]
+    },
+    {
+      "title": "Specific options for ANTs registrations",
+      "description": null,
+      "actions": [
+        "skull_strip_template",
+        "skull_strip_fixed_seed",
+        "skull_strip_t1w"
+      ]
+    },
+    {
+      "title": "Specific options for handling fieldmaps",
+      "description": null,
+      "actions": [
+        "fmap_bspline",
+        "fmap_no_demean"
+      ]
+    },
+    {
+      "title": "Specific options for SyN distortion correction",
+      "description": null,
+      "actions": [
+        "use_syn_sdc",
+        "force_syn"
+      ]
+    },
+    {
+      "title": "Specific options for FreeSurfer preprocessing",
+      "description": null,
+      "actions": [
+        "fs_license_file",
+        "fs_subjects_dir",
+        "hires",
+        "run_reconall",
+        "fs_no_resume"
+      ]
+    },
+    {
+      "title": "Options for carbon usage tracking",
+      "description": null,
+      "actions": [
+        "track_carbon",
+        "country_code"
+      ]
+    },
+    {
+      "title": "Other options",
+      "description": null,
+      "actions": [
+        "version",
+        "verbose_count",
+        "work_dir",
+        "clean_workdir",
+        "resource_monitor",
+        "config_file",
+        "write_graph",
+        "stop_on_first_crash",
+        "notrack",
+        "debug"
+      ]
+    }
+  ]
+}

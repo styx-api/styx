@@ -33,12 +33,8 @@ export const exampleGroups: ExampleGroup[] = [
     label: "Argdump",
     examples: [
       {
-        name: "fmriprep",
-        url: "https://raw.githubusercontent.com/styx-api/argdump/main/examples/fmriprep.json",
-      },
-      {
-        name: "mriqc",
-        url: "https://raw.githubusercontent.com/styx-api/argdump/main/examples/mriqc.json",
+        name: "fMRIPrep",
+        url: import.meta.env.BASE_URL + "examples/fmriprep_25.2.3_dump.json",
       },
     ],
   },
