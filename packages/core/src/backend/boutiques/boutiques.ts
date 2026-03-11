@@ -379,14 +379,13 @@ class BoutiquesEmitter {
       "value-key": valueKey,
     };
 
-    // Name and description
-    const title =
-      binding.node.meta?.doc?.title ??
-      findDoc(binding.node, fieldType) ??
-      info?.doc;
+    // Name (short label) - only from explicit title, not description
+    const title = binding.node.meta?.doc?.title;
     if (title) input.name = title;
 
-    const description = info?.doc ?? binding.node.meta?.doc?.description;
+    // Description (longer help text)
+    const description =
+      info?.doc ?? binding.node.meta?.doc?.description ?? findDoc(binding.node, fieldType);
     if (description) input.description = description;
 
     // Optional
