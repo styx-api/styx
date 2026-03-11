@@ -5,3 +5,5 @@ export type {
   ParseWarning,
   SourceLocation,
 } from "./frontend.js";
+export { detectFormat } from "./detect-format.js";
+export type { FormatName } from "./detect-format.js";

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { compile, format, solve, formatSolveResult } from "@styx/core";
+  import { compile, format, solve, formatSolveResult, detectFormat } from "@styx/core";
+  import type { FormatName } from "@styx/core";
   import { createPipeline, flatten, simplify, removeEmpty, canonicalize } from "@styx/core";
   import InputPanel from "./lib/InputPanel.svelte";
   import OutputPanel from "./lib/OutputPanel.svelte";
@@ -12,6 +13,8 @@
     removeEmpty: true,
     canonicalize: false,
   });
+
+  const detectedFormat = $derived<FormatName | null>(input ? detectFormat(input) : null);
 
   const result = $derived.by(() => {
     try {
@@ -43,7 +46,12 @@
 
 <div class="container">
   <header>
-    <h1>Styx Compiler Explorer</h1>
+    <div class="title-row">
+      <h1>Styx Compiler Explorer</h1>
+      {#if detectedFormat}
+        <span class="format-badge">{detectedFormat}</span>
+      {/if}
+    </div>
     <PassToggles bind:passes />
   </header>
 
@@ -104,9 +112,29 @@
     margin-bottom: 1rem;
   }
 
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+
   h1 {
-    margin: 0 0 0.75rem;
+    margin: 0;
     font-size: 1.5rem;
+  }
+
+  .format-badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-radius: 4px;
+    background: #2a2a3a;
+    color: #8b8bff;
+    border: 1px solid #3a3a5a;
   }
 
   .panels {

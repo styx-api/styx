@@ -56,12 +56,16 @@
   {#if result.ok}
     {@const { expr, errors, warnings } = result.value}
 
-    {#if errors.length > 0}
-      <Messages type="errors" messages={errors} />
-    {/if}
+    {#if errors.length > 0 || warnings.length > 0}
+      <div class="messages-container">
+        {#if errors.length > 0}
+          <Messages type="errors" messages={errors} />
+        {/if}
 
-    {#if warnings.length > 0}
-      <Messages type="warnings" messages={warnings} />
+        {#if warnings.length > 0}
+          <Messages type="warnings" messages={warnings} />
+        {/if}
+      </div>
     {/if}
 
     <div class="tab-bar">
@@ -122,8 +126,14 @@
     display: flex;
     flex-direction: column;
     gap: 0;
-    overflow-y: auto;
     min-height: 0;
+    height: 100%;
+  }
+
+  .messages-container {
+    flex-shrink: 0;
+    max-height: 30%;
+    overflow-y: auto;
   }
 
   .tab-bar {
