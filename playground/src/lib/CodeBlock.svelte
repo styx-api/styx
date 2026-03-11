@@ -1,7 +1,7 @@
-<!-- components/CodeBlock.svelte -->
 <script lang="ts">
   import { createHighlighter, type Highlighter, type BundledLanguage } from "shiki";
   import { onMount } from "svelte";
+  import { irGrammar, bindingsGrammar } from "./grammars.js";
 
   interface Props {
     code: string;
@@ -13,108 +13,13 @@
   let grammarsLoaded = $state(false);
   let html = $state("");
 
-  const irGrammar = {
-    name: "ir",
-    scopeName: "source.ir",
-    patterns: [
-      // Metadata in brackets [name]
-      {
-        name: "entity.name.tag.ir",
-        match: "\\[[^\\]]+\\]",
-      },
-      // Attributes in braces {key=value}
-      {
-        name: "meta.block.ir",
-        begin: "\\{",
-        end: "\\}",
-        patterns: [
-          {
-            name: "variable.parameter.ir",
-            match: "\\b[a-z_]+(?==)",
-          },
-          {
-            name: "keyword.operator.ir",
-            match: "=",
-          },
-          {
-            name: "constant.numeric.ir",
-            match: "\\b\\d+\\b",
-          },
-        ],
-      },
-      // Range constraints (0..1)
-      {
-        name: "meta.range.ir",
-        match: "\\(([\\d.-]+)\\.\\.([\\d.-]+|∞)\\)",
-      },
-      // String literals
-      {
-        name: "string.quoted.double.ir",
-        match: '"[^"]*"',
-      },
-      // Node kinds
-      {
-        name: "keyword.control.ir",
-        match: "\\b(sequence|alternative|optional|repeat|literal|int|float|str|path)\\b",
-      },
-      // Join keyword
-      {
-        name: "variable.parameter.ir",
-        match: "\\bjoin\\b",
-      },
-      // Numbers
-      {
-        name: "constant.numeric.ir",
-        match: "\\b-?\\d+(?:\\.\\d+)?\\b",
-      },
-    ],
-  };
-
-  const bindingsGrammar = {
-    name: "bindings",
-    scopeName: "source.bindings",
-    patterns: [
-      // Type keywords
-      {
-        name: "storage.type.bindings",
-        match: "\\b(struct|union|optional|list|bool|count|literal|int|float|str|path)\\b",
-      },
-      // Field names before colon
-      {
-        name: "variable.other.property.bindings",
-        match: "\\b[a-zA-Z_]\\w*(?=:)",
-      },
-      // String literals
-      {
-        name: "string.quoted.double.bindings",
-        match: '"[^"]*"',
-      },
-      // Numbers
-      {
-        name: "constant.numeric.bindings",
-        match: "\\b\\d+\\b",
-      },
-      // Union pipe
-      {
-        name: "keyword.operator.bindings",
-        match: "\\|",
-      },
-      // Angle brackets
-      {
-        name: "punctuation.definition.typeparameters.bindings",
-        match: "[<>]",
-      },
-    ],
-  };
-
   onMount(async () => {
     try {
       highlighter = await createHighlighter({
         themes: ["github-dark"],
-        langs: ["json"],
+        langs: ["json", "typescript"],
       });
 
-      // Load custom grammars
       await highlighter.loadLanguage(irGrammar as any);
       await highlighter.loadLanguage(bindingsGrammar as any);
 
@@ -131,12 +36,10 @@
           lang: lang as any,
           theme: "github-dark",
         });
-      } catch (e) {
-        console.error("Highlighting failed:", e);
+      } catch (_e) {
         html = `<pre><code>${escapeHtml(code)}</code></pre>`;
       }
     } else if (code) {
-      // Fallback while loading
       html = `<pre><code>${escapeHtml(code)}</code></pre>`;
     }
   });
@@ -154,7 +57,6 @@
   <pre><code>{code}</code></pre>
 {/if}
 
-<!-- components/CodeBlock.svelte -->
 <style>
   .code-block {
     height: 100%;
@@ -163,9 +65,10 @@
 
   .code-block :global(pre) {
     margin: 0;
-    padding: 1rem;
-    font-family: "JetBrains Mono", "Fira Code", monospace;
-    font-size: 13px;
+    padding: 0.75rem 1rem;
+    font-family: var(--font-mono);
+    font-size: var(--font-size-mono);
+    line-height: 1.6;
     background: transparent !important;
     min-height: 100%;
   }
@@ -176,10 +79,11 @@
 
   pre {
     margin: 0;
-    padding: 1rem;
-    font-family: "JetBrains Mono", "Fira Code", monospace;
-    font-size: 13px;
-    color: #ddd;
+    padding: 0.75rem 1rem;
+    font-family: var(--font-mono);
+    font-size: var(--font-size-mono);
+    line-height: 1.6;
+    color: var(--text-secondary);
     min-height: 100%;
   }
 </style>

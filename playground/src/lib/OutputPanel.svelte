@@ -1,131 +1,86 @@
-<!-- components/OutputPanel.svelte -->
 <script lang="ts">
-  import {
-    format,
-    solve,
-    formatSolveResult,
-    BoutiquesBackend,
-    JsonSchemaBackend,
-    TypeScriptBackend,
-    createContext,
-  } from "@styx/core";
-  import type { ParseResult } from "@styx/core";
+  import { solve, createContext, type ParseResult } from "@styx/core";
+  import { tabs, type SolvedParseResult } from "./tabs.js";
   import Messages from "./Messages.svelte";
   import CodeBlock from "./CodeBlock.svelte";
 
   interface Props {
-    result: { ok: true; value: ParseResult } | { ok: false; error: string };
+    result:
+      | { ok: true; value: ParseResult; timeMs: number }
+      | { ok: false; error: string; timeMs: number };
   }
 
   let { result }: Props = $props();
-  let activeTab = $state<"ir" | "bindings" | "schema" | "typescript" | "boutiques">("ir");
+  let activeTab = $state(tabs[0].id);
 
-  const boutiquesBackend = new BoutiquesBackend();
-  const jsonSchemaBackend = new JsonSchemaBackend();
-  const typescriptBackend = new TypeScriptBackend();
+  const activeTabDef = $derived(tabs.find((t) => t.id === activeTab) ?? tabs[0]);
 
-  function getSchemaJson(parseResult: ParseResult): string {
+  // Solve once per input change, not per tab switch
+  const solved: SolvedParseResult | null = $derived.by(() => {
+    if (!result.ok) return null;
+    const parseResult = result.value;
     const solveResult = solve(parseResult.expr);
-    const ctx = createContext(parseResult.expr, solveResult, {
-      app: parseResult.meta,
-    });
-    const emitResult = jsonSchemaBackend.emit(ctx);
-    return emitResult.files.get("schema.json") ?? "{}";
-  }
+    const ctx = createContext(parseResult.expr, solveResult, { app: parseResult.meta });
+    return { parseResult, solveResult, ctx };
+  });
 
-  function getBoutiques(parseResult: ParseResult): string {
-    const solveResult = solve(parseResult.expr);
-    const ctx = createContext(parseResult.expr, solveResult, {
-      app: parseResult.meta,
-    });
-    const emitResult = boutiquesBackend.emit(ctx);
-    return emitResult.files.get("descriptor.json") ?? "{}";
-  }
-
-  function getTypeScript(parseResult: ParseResult): string {
-    const solveResult = solve(parseResult.expr);
-    const ctx = createContext(parseResult.expr, solveResult, {
-      app: parseResult.meta,
-    });
-    const emitResult = typescriptBackend.emit(ctx);
-    return [...emitResult.files.values()][0] ?? "";
-  }
+  const output = $derived.by(() => {
+    if (!solved) return null;
+    try {
+      return { ok: true as const, code: activeTabDef.compute(solved) };
+    } catch (e) {
+      return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
 </script>
 
 <div class="output">
   {#if result.ok}
-    {@const { expr, errors, warnings } = result.value}
+    {@const { errors, warnings } = result.value}
 
     {#if errors.length > 0 || warnings.length > 0}
       <div class="messages-container">
         {#if errors.length > 0}
           <Messages type="errors" messages={errors} />
         {/if}
-
         {#if warnings.length > 0}
           <Messages type="warnings" messages={warnings} />
         {/if}
       </div>
     {/if}
-
-    <div class="tab-bar">
-      <button class="tab" class:active={activeTab === "ir"} onclick={() => (activeTab = "ir")}>
-        IR
-      </button>
-      <button
-        class="tab"
-        class:active={activeTab === "bindings"}
-        onclick={() => (activeTab = "bindings")}
-      >
-        Bindings
-      </button>
-      <button
-        class="tab"
-        class:active={activeTab === "schema"}
-        onclick={() => (activeTab = "schema")}
-      >
-        JSON Schema
-      </button>
-      <button
-        class="tab"
-        class:active={activeTab === "typescript"}
-        onclick={() => (activeTab = "typescript")}
-      >
-        TypeScript
-      </button>
-      <button
-        class="tab"
-        class:active={activeTab === "boutiques"}
-        onclick={() => (activeTab = "boutiques")}
-      >
-        Boutiques
-      </button>
-    </div>
-
-    <section class="panel">
-      {#if activeTab === "ir"}
-        <CodeBlock code={format(expr)} lang="ir" />
-      {:else if activeTab === "bindings"}
-        <CodeBlock code={formatSolveResult(solve(expr), expr)} lang="bindings" />
-      {:else if activeTab === "schema"}
-        <CodeBlock code={getSchemaJson(result.value)} lang="json" />
-      {:else if activeTab === "typescript"}
-        <CodeBlock code={getTypeScript(result.value)} lang="typescript" />
-      {:else}
-        <CodeBlock code={getBoutiques(result.value)} lang="json" />
-      {/if}
-    </section>
-  {:else}
-    <Messages type="errors" messages={[{ message: result.error }]} />
   {/if}
+
+  <div class="tab-bar">
+    {#each tabs as tab}
+      <button
+        class="tab"
+        class:active={activeTab === tab.id}
+        onclick={() => (activeTab = tab.id)}
+      >
+        {tab.label}
+      </button>
+    {/each}
+  </div>
+
+  <div class="content">
+    {#if !result.ok}
+      {#if result.error}
+        <Messages type="errors" messages={[{ message: result.error }]} />
+      {:else}
+        <div class="empty">Load an example or paste a descriptor to begin.</div>
+      {/if}
+    {:else if output?.ok}
+      <CodeBlock code={output.code} lang={activeTabDef.lang} />
+    {:else if output && !output.ok}
+      <Messages type="errors" messages={[{ message: output.error }]} />
+    {/if}
+  </div>
 </div>
 
-<!-- components/OutputPanel.svelte -->
 <style>
   .output {
     display: flex;
     flex-direction: column;
-    gap: 0;
     min-height: 0;
     height: 100%;
   }
@@ -134,46 +89,55 @@
     flex-shrink: 0;
     max-height: 30%;
     overflow-y: auto;
+    border-bottom: 1px solid var(--border);
   }
 
   .tab-bar {
     display: flex;
-    gap: 0;
-    border-bottom: 1px solid #333;
     flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 0 0.25rem;
+    gap: 0;
   }
 
   .tab {
     background: transparent;
     border: none;
     border-bottom: 2px solid transparent;
-    color: #888;
+    color: var(--text-muted);
     cursor: pointer;
-    padding: 0.5rem 1rem;
-    font-size: 0.8rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.7rem;
+    font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    transition: all 0.15s;
+    transition: all var(--transition);
   }
 
   .tab:hover {
-    color: #ccc;
+    color: var(--text-secondary);
   }
 
   .tab.active {
-    color: #fff;
-    border-bottom-color: #58a6ff;
+    color: var(--text);
+    border-bottom-color: var(--accent);
   }
 
-  .panel {
+  .content {
     flex: 1;
     min-height: 0;
-    border: 1px solid #333;
-    border-top: none;
-    border-radius: 0 0 4px 4px;
-    background: #0d0d0d;
+    background: var(--bg-inset);
     display: flex;
     flex-direction: column;
     overflow: auto;
+  }
+
+  .empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    font-size: 0.85rem;
   }
 </style>

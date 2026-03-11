@@ -1,10 +1,10 @@
-<!-- components/InputPanel.svelte -->
 <script lang="ts">
   import { onMount } from "svelte";
   import { EditorView, minimalSetup } from "codemirror";
   import { EditorState } from "@codemirror/state";
   import { json } from "@codemirror/lang-json";
   import { oneDark } from "@codemirror/theme-one-dark";
+  import { exampleGroups } from "./examples.js";
 
   interface Props {
     input: string;
@@ -14,52 +14,6 @@
   let loading = $state<string | null>(null);
   let editorContainer: HTMLDivElement;
   let editorView: EditorView;
-
-  interface ExampleGroup {
-    label: string;
-    examples: { name: string; url: string }[];
-  }
-
-  const exampleGroups: ExampleGroup[] = [
-    {
-      label: "Boutiques",
-      examples: [
-        {
-          name: "FSL bet",
-          url: "https://raw.githubusercontent.com/styx-api/niwrap/main/src/niwrap/fsl/6.0.4/bet/boutiques.json",
-        },
-        {
-          name: "FSL flirt",
-          url: "https://raw.githubusercontent.com/styx-api/niwrap/main/src/niwrap/fsl/6.0.4/flirt/boutiques.json",
-        },
-        {
-          name: "FSL fast",
-          url: "https://raw.githubusercontent.com/styx-api/niwrap/main/src/niwrap/fsl/6.0.4/fast/boutiques.json",
-        },
-        {
-          name: "FreeSurfer recon-all",
-          url: "https://raw.githubusercontent.com/styx-api/niwrap/main/src/niwrap/freesurfer/7.4.1/recon-all/boutiques.json",
-        },
-        {
-          name: "ANTs antsRegistration",
-          url: "https://raw.githubusercontent.com/styx-api/niwrap/main/src/niwrap/ants/2.5.3/antsRegistration/boutiques.json",
-        },
-      ],
-    },
-    {
-      label: "Argdump",
-      examples: [
-        {
-          name: "fmriprep",
-          url: "https://raw.githubusercontent.com/styx-api/argdump/main/examples/fmriprep.json",
-        },
-        {
-          name: "mriqc",
-          url: "https://raw.githubusercontent.com/styx-api/argdump/main/examples/mriqc.json",
-        },
-      ],
-    },
-  ];
 
   async function loadExample(url: string) {
     loading = url;
@@ -92,6 +46,10 @@
             input = update.state.doc.toString();
           }
         }),
+        EditorView.theme({
+          "&": { backgroundColor: "transparent" },
+          ".cm-gutters": { backgroundColor: "transparent", borderRight: "none" },
+        }),
       ],
     });
 
@@ -105,7 +63,6 @@
     };
   });
 
-  // Update editor when input changes externally
   $effect(() => {
     if (editorView && editorView.state.doc.toString() !== input) {
       editorView.dispatch({
@@ -115,8 +72,7 @@
   });
 </script>
 
-<div class="header">
-  <h2>Input</h2>
+<div class="toolbar">
   <select
     onchange={(e) => {
       const url = e.currentTarget.value;
@@ -127,7 +83,7 @@
     }}
     disabled={loading !== null}
   >
-    <option value="">{loading ? "Loading..." : "Load example..."}</option>
+    <option value="">{loading ? "Loading..." : "Load example"}</option>
     {#each exampleGroups as group}
       <optgroup label={group.label}>
         {#each group.examples as ex}
@@ -141,46 +97,38 @@
 <div class="editor" bind:this={editorContainer}></div>
 
 <style>
-  .header {
+  .toolbar {
+    flex-shrink: 0;
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: 0.5rem;
-  }
-
-  h2 {
-    margin: 0;
-    font-size: 0.875rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: #888;
+    padding: 0.375rem 0.75rem;
+    border-bottom: 1px solid var(--border);
   }
 
   select {
-    padding: 0.35rem 0.5rem;
-    border: 1px solid #333;
-    border-radius: 4px;
-    background: #0d0d0d;
-    color: #eee;
-    font-size: 13px;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-size: 0.75rem;
     cursor: pointer;
+    transition: border-color var(--transition);
   }
 
   select:hover:not(:disabled) {
-    border-color: #555;
+    border-color: var(--text-muted);
   }
 
   select:disabled {
-    opacity: 0.6;
+    opacity: 0.5;
     cursor: wait;
   }
 
   .editor {
     flex: 1;
-    border: 1px solid #333;
-    border-radius: 4px;
-    overflow: hidden;
     min-height: 0;
+    overflow: hidden;
   }
 
   .editor :global(.cm-editor) {
@@ -188,7 +136,7 @@
   }
 
   .editor :global(.cm-scroller) {
-    font-family: "JetBrains Mono", "Fira Code", monospace;
-    font-size: 14px;
+    font-family: var(--font-mono);
+    font-size: var(--font-size-mono);
   }
 </style>

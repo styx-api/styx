@@ -1,4 +1,3 @@
-<!-- components/Messages.svelte -->
 <script lang="ts">
   interface Message {
     message: string;
@@ -19,8 +18,11 @@
   }
 </script>
 
-<section class="messages {type}">
-  <h2>{type === "errors" ? "Errors" : "Warnings"} ({messages.length})</h2>
+<section class="messages" class:errors={type === "errors"} class:warnings={type === "warnings"}>
+  <header>
+    <span class="label">{type === "errors" ? "Errors" : "Warnings"}</span>
+    <span class="count">{messages.length}</span>
+  </header>
   {#each messages as msg}
     <div class="message">
       <span class="msg-text">{msg.message}</span>
@@ -32,55 +34,74 @@
 </section>
 
 <style>
-  section {
-    border: 1px solid #333;
-    border-radius: 4px;
-    background: #0d0d0d;
+  .messages {
+    border-bottom: 1px solid var(--border);
   }
 
-  h2 {
-    margin: 0;
-    padding: 0.5rem 1rem;
-    border-bottom: 1px solid #333;
-    background: #151515;
-    border-radius: 4px 4px 0 0;
-    font-size: 0.875rem;
+  header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0.75rem;
+    background: var(--bg-elevated);
+  }
+
+  .label {
+    font-size: 0.7rem;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #888;
   }
 
-  .errors h2 {
-    color: #f66;
+  .count {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    padding: 0.05rem 0.3rem;
+    border-radius: var(--radius);
   }
 
-  .warnings h2 {
-    color: #fa0;
+  .errors .label {
+    color: var(--error);
+  }
+
+  .errors .count {
+    color: var(--error);
+    background: var(--error-subtle);
+  }
+
+  .warnings .label {
+    color: var(--warning);
+  }
+
+  .warnings .count {
+    color: var(--warning);
+    background: var(--warning-subtle);
   }
 
   .message {
-    padding: 0.5rem 1rem;
+    padding: 0.375rem 0.75rem;
     display: flex;
     justify-content: space-between;
     gap: 1rem;
-    font-family: "JetBrains Mono", "Fira Code", monospace;
-    font-size: 13px;
+    font-family: var(--font-mono);
+    font-size: var(--font-size-mono);
   }
 
   .message + .message {
-    border-top: 1px solid #222;
+    border-top: 1px solid var(--border-subtle);
   }
 
   .errors .msg-text {
-    color: #f66;
+    color: var(--error);
   }
 
   .warnings .msg-text {
-    color: #fa0;
+    color: var(--warning);
   }
 
   .msg-loc {
-    color: #666;
+    color: var(--text-muted);
     white-space: nowrap;
+    font-size: 0.75rem;
   }
 </style>

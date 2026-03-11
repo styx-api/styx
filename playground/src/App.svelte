@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { compile, format, solve, formatSolveResult, detectFormat } from "@styx/core";
-  import type { FormatName } from "@styx/core";
+  import { compile, detectFormat } from "@styx/core";
+  import type { FormatName, ParseResult } from "@styx/core";
   import { createPipeline, flatten, simplify, removeEmpty, canonicalize } from "@styx/core";
+  import { onMount } from "svelte";
   import InputPanel from "./lib/InputPanel.svelte";
   import OutputPanel from "./lib/OutputPanel.svelte";
   import PassToggles from "./lib/PassToggles.svelte";
+  import { defaultExample } from "./lib/examples.js";
 
   let input = $state<string>("");
   let passes = $state({
@@ -16,11 +18,17 @@
 
   const detectedFormat = $derived<FormatName | null>(input ? detectFormat(input) : null);
 
-  const result = $derived.by(() => {
+  type CompileResult =
+    | { ok: true; value: ParseResult; timeMs: number }
+    | { ok: false; error: string; timeMs: number };
+
+  const result: CompileResult = $derived.by(() => {
+    if (!input) return { ok: false, error: "", timeMs: 0 };
+
+    const start = performance.now();
     try {
       const parseResult = compile(input);
 
-      // Apply selected optimization passes
       const availablePasses = [];
       if (passes.flatten) availablePasses.push(flatten);
       if (passes.simplify) availablePasses.push(simplify);
@@ -37,111 +45,191 @@
         }
       }
 
-      return { ok: true as const, value: parseResult };
+      const timeMs = performance.now() - start;
+      return { ok: true as const, value: parseResult, timeMs };
     } catch (e) {
-      return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
+      const timeMs = performance.now() - start;
+      return { ok: false as const, error: e instanceof Error ? e.message : String(e), timeMs };
+    }
+  });
+
+  onMount(async () => {
+    try {
+      const res = await fetch(defaultExample.url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const jsonData = await res.json();
+      input = JSON.stringify(jsonData, null, 2);
+    } catch (_e) {
+      // User can still load manually
     }
   });
 </script>
 
-<div class="container">
+<div class="app">
   <header>
     <div class="title-row">
-      <h1>Styx Compiler Explorer</h1>
+      <h1>styx<span class="version">2</span></h1>
+      <span class="subtitle">compiler explorer</span>
       {#if detectedFormat}
         <span class="format-badge">{detectedFormat}</span>
+      {/if}
+      {#if result.ok && result.timeMs > 0}
+        <span class="timing">{result.timeMs.toFixed(0)}ms</span>
       {/if}
     </div>
     <PassToggles bind:passes />
   </header>
 
-  <div class="panels">
-    <div class="panel">
+  <main>
+    <section class="panel">
+      <div class="panel-header">
+        <span class="panel-label">Input</span>
+      </div>
       <InputPanel bind:input />
-    </div>
-    <div class="panel">
+    </section>
+    <section class="panel">
       <OutputPanel {result} />
-    </div>
-  </div>
+    </section>
+  </main>
 </div>
 
 <style>
-  :global(body) {
+  :global(*) {
     margin: 0;
-    font-family: system-ui, sans-serif;
-    background: #1a1a1a;
-    color: #eee;
+    box-sizing: border-box;
+  }
+
+  :global(body) {
+    font-family:
+      "Inter",
+      -apple-system,
+      BlinkMacSystemFont,
+      system-ui,
+      sans-serif;
+    background: var(--bg-base);
+    color: var(--text);
     overflow: hidden;
   }
 
+  :global(:root) {
+    --bg-base: #111113;
+    --bg-surface: #18181b;
+    --bg-elevated: #1e1e22;
+    --bg-inset: #0c0c0e;
+    --border: #27272a;
+    --border-subtle: #1f1f23;
+    --text: #e4e4e7;
+    --text-secondary: #a1a1aa;
+    --text-muted: #71717a;
+    --accent: #6366f1;
+    --accent-dim: #4f46e5;
+    --accent-subtle: rgba(99, 102, 241, 0.12);
+    --error: #ef4444;
+    --error-subtle: rgba(239, 68, 68, 0.12);
+    --warning: #f59e0b;
+    --warning-subtle: rgba(245, 158, 11, 0.12);
+    --radius: 6px;
+    --radius-lg: 8px;
+    --font-mono:
+      "JetBrains Mono",
+      "Fira Code",
+      "Cascadia Code",
+      monospace;
+    --font-size-mono: 13px;
+    --transition: 150ms ease;
+  }
+
   :global(*::-webkit-scrollbar) {
-    width: 10px;
-    height: 10px;
+    width: 6px;
+    height: 6px;
   }
 
   :global(*::-webkit-scrollbar-track) {
-    background: #0d0d0d;
+    background: transparent;
   }
 
   :global(*::-webkit-scrollbar-thumb) {
-    background: #333;
-    border-radius: 5px;
+    background: var(--border);
+    border-radius: 3px;
   }
 
   :global(*::-webkit-scrollbar-thumb:hover) {
-    background: #444;
+    background: var(--text-muted);
   }
 
   :global(*) {
     scrollbar-width: thin;
-    scrollbar-color: #333 #0d0d0d;
+    scrollbar-color: var(--border) transparent;
   }
 
-  .container {
+  .app {
     display: flex;
     flex-direction: column;
     height: 100vh;
-    max-width: 1600px;
+    max-width: 1800px;
     margin: 0 auto;
-    padding: 1.5rem;
-    box-sizing: border-box;
+    padding: 1rem 1.25rem;
+    gap: 0.75rem;
   }
 
   header {
     flex-shrink: 0;
-    margin-bottom: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
   }
 
   .title-row {
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    margin-bottom: 0.75rem;
+    align-items: baseline;
+    gap: 0.5rem;
   }
 
   h1 {
-    margin: 0;
-    font-size: 1.5rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text);
+  }
+
+  .version {
+    color: var(--accent);
+    font-weight: 300;
+  }
+
+  .subtitle {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-weight: 400;
+    letter-spacing: 0.02em;
   }
 
   .format-badge {
-    display: inline-block;
-    padding: 0.15rem 0.5rem;
-    font-size: 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.45rem;
+    font-size: 0.65rem;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    border-radius: 4px;
-    background: #2a2a3a;
-    color: #8b8bff;
-    border: 1px solid #3a3a5a;
+    letter-spacing: 0.06em;
+    border-radius: var(--radius);
+    background: var(--accent-subtle);
+    color: var(--accent);
+    margin-left: 0.25rem;
   }
 
-  .panels {
+  .timing {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-left: auto;
+  }
+
+  main {
     flex: 1;
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 1rem;
+    gap: 0.75rem;
     min-height: 0;
   }
 
@@ -149,6 +237,23 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
     overflow: hidden;
+  }
+
+  .panel-header {
+    flex-shrink: 0;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .panel-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
   }
 </style>

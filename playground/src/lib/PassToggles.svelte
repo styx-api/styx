@@ -1,4 +1,3 @@
-<!-- components/PassToggles.svelte -->
 <script lang="ts">
   interface Props {
     passes: {
@@ -10,71 +9,57 @@
   }
 
   let { passes = $bindable() }: Props = $props();
+
+  const passLabels: { key: keyof typeof passes; label: string }[] = [
+    { key: "flatten", label: "Flatten" },
+    { key: "simplify", label: "Simplify" },
+    { key: "removeEmpty", label: "Remove Empty" },
+    { key: "canonicalize", label: "Canonicalize" },
+  ];
 </script>
 
-<div class="pass-toggles">
-  <h3>Optimization Passes</h3>
-  <div class="toggles">
-    <label>
-      <input type="checkbox" bind:checked={passes.flatten} />
-      <span>Flatten</span>
+<div class="passes">
+  {#each passLabels as { key, label }}
+    <label class:active={passes[key]}>
+      <input type="checkbox" bind:checked={passes[key]} />
+      <span>{label}</span>
     </label>
-    <label>
-      <input type="checkbox" bind:checked={passes.simplify} />
-      <span>Simplify</span>
-    </label>
-    <label>
-      <input type="checkbox" bind:checked={passes.removeEmpty} />
-      <span>Remove Empty</span>
-    </label>
-    <label>
-      <input type="checkbox" bind:checked={passes.canonicalize} />
-      <span>Canonicalize</span>
-    </label>
-  </div>
+  {/each}
 </div>
 
 <style>
-  .pass-toggles {
-    padding: 1rem;
-    border: 1px solid #333;
-    border-radius: 4px;
-    background: #0d0d0d;
-    margin-bottom: 1rem;
-  }
-
-  h3 {
-    margin: 0 0 0.75rem;
-    font-size: 0.875rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: #888;
-  }
-
-  .toggles {
+  .passes {
     display: flex;
-    gap: 1.5rem;
+    gap: 0.25rem;
     flex-wrap: wrap;
   }
 
   label {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.375rem;
     cursor: pointer;
-    font-size: 14px;
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--radius);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    transition: all var(--transition);
+    user-select: none;
   }
 
-  label:hover span {
-    color: #fff;
+  label:hover {
+    color: var(--text-secondary);
+    background: var(--bg-elevated);
+  }
+
+  label.active {
+    color: var(--text-secondary);
   }
 
   input[type="checkbox"] {
     cursor: pointer;
-  }
-
-  span {
-    color: #ccc;
-    transition: color 0.15s;
+    accent-color: var(--accent);
+    width: 12px;
+    height: 12px;
   }
 </style>
