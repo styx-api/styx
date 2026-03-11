@@ -4,6 +4,7 @@
     format,
     solve,
     formatSolveResult,
+    BoutiquesBackend,
     JsonSchemaBackend,
     TypeScriptBackend,
     createContext,
@@ -17,8 +18,9 @@
   }
 
   let { result }: Props = $props();
-  let activeTab = $state<"ir" | "bindings" | "schema" | "typescript">("ir");
+  let activeTab = $state<"ir" | "bindings" | "schema" | "typescript" | "boutiques">("ir");
 
+  const boutiquesBackend = new BoutiquesBackend();
   const jsonSchemaBackend = new JsonSchemaBackend();
   const typescriptBackend = new TypeScriptBackend();
 
@@ -29,6 +31,15 @@
     });
     const emitResult = jsonSchemaBackend.emit(ctx);
     return emitResult.files.get("schema.json") ?? "{}";
+  }
+
+  function getBoutiques(parseResult: ParseResult): string {
+    const solveResult = solve(parseResult.expr);
+    const ctx = createContext(parseResult.expr, solveResult, {
+      app: parseResult.meta,
+    });
+    const emitResult = boutiquesBackend.emit(ctx);
+    return emitResult.files.get("descriptor.json") ?? "{}";
   }
 
   function getTypeScript(parseResult: ParseResult): string {
@@ -78,6 +89,13 @@
       >
         TypeScript
       </button>
+      <button
+        class="tab"
+        class:active={activeTab === "boutiques"}
+        onclick={() => (activeTab = "boutiques")}
+      >
+        Boutiques
+      </button>
     </div>
 
     <section class="panel">
@@ -87,8 +105,10 @@
         <CodeBlock code={formatSolveResult(solve(expr), expr)} lang="bindings" />
       {:else if activeTab === "schema"}
         <CodeBlock code={getSchemaJson(result.value)} lang="json" />
-      {:else}
+      {:else if activeTab === "typescript"}
         <CodeBlock code={getTypeScript(result.value)} lang="typescript" />
+      {:else}
+        <CodeBlock code={getBoutiques(result.value)} lang="json" />
       {/if}
     </section>
   {:else}

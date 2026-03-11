@@ -1,4 +1,5 @@
 export type { Backend, EmitError, EmitResult, EmitWarning, TypeMap } from "./backend.js";
+export { BoutiquesBackend, generateBoutiques } from "./boutiques/index.js";
 export { CodeBuilder } from "./code-builder.js";
 export type { FieldInfo } from "./collect-field-info.js";
 export { collectFieldInfo } from "./collect-field-info.js";
