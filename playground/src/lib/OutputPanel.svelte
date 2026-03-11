@@ -97,9 +97,10 @@
 
   .tab-bar {
     display: flex;
+    align-items: center;
     flex-shrink: 0;
     border-bottom: 1px solid var(--border);
-    padding: 0 0.25rem;
+    padding: 0 0.5rem;
     gap: 0;
   }
 
@@ -109,7 +110,7 @@
     border-bottom: 2px solid transparent;
     color: var(--text-muted);
     cursor: pointer;
-    padding: 0.5rem 0.75rem;
+    padding: 0.6rem 0.75rem;
     font-size: 0.7rem;
     font-weight: 500;
     text-transform: uppercase;

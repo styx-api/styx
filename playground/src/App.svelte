@@ -75,10 +75,8 @@
 
 <div class="app">
   <header>
-    <div class="title-row">
-      <h1>styx<span class="version">2</span></h1>
-      <span class="subtitle">compiler explorer</span>
-    </div>
+    <h1>styx<span class="version">2</span></h1>
+    <span class="subtitle">compiler explorer</span>
     <PassToggles bind:passes />
   </header>
 
@@ -147,7 +145,6 @@
     --text-secondary: #a1a1aa;
     --text-muted: #71717a;
     --accent: #6366f1;
-    --accent-dim: #4f46e5;
     --accent-subtle: rgba(99, 102, 241, 0.12);
     --error: #ef4444;
     --error-subtle: rgba(239, 68, 68, 0.12);
@@ -199,12 +196,6 @@
 
   header {
     flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .title-row {
     display: flex;
     align-items: baseline;
     gap: 0.5rem;

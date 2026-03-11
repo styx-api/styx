@@ -32,6 +32,7 @@
     display: flex;
     gap: 0.25rem;
     flex-wrap: wrap;
+    margin-left: auto;
   }
 
   label {

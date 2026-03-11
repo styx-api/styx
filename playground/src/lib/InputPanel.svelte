@@ -25,10 +25,6 @@
             input = update.state.doc.toString();
           }
         }),
-        EditorView.theme({
-          "&": { backgroundColor: "transparent" },
-          ".cm-gutters": { backgroundColor: "transparent", borderRight: "none" },
-        }),
       ],
     });
 
@@ -62,6 +58,32 @@
 
   .editor :global(.cm-editor) {
     height: 100%;
+    background: transparent !important;
+  }
+
+  .editor :global(.cm-gutters) {
+    background: transparent !important;
+    border-right: none !important;
+  }
+
+  .editor :global(.cm-selectionBackground) {
+    background: rgba(99, 102, 241, 0.15) !important;
+  }
+
+  .editor :global(.cm-focused .cm-selectionBackground) {
+    background: rgba(99, 102, 241, 0.25) !important;
+  }
+
+  .editor :global(.cm-cursor) {
+    border-left-color: var(--accent) !important;
+  }
+
+  .editor :global(.cm-activeLine) {
+    background: rgba(255, 255, 255, 0.03) !important;
+  }
+
+  .editor :global(.cm-activeLineGutter) {
+    background: rgba(255, 255, 255, 0.03) !important;
   }
 
   .editor :global(.cm-scroller) {
