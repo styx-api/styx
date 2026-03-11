@@ -6,9 +6,10 @@
   import InputPanel from "./lib/InputPanel.svelte";
   import OutputPanel from "./lib/OutputPanel.svelte";
   import PassToggles from "./lib/PassToggles.svelte";
-  import { defaultExample } from "./lib/examples.js";
+  import { defaultExample, exampleGroups } from "./lib/examples.js";
 
   let input = $state<string>("");
+  let loading = $state<string | null>(null);
   let passes = $state({
     flatten: true,
     simplify: true,
@@ -53,15 +54,22 @@
     }
   });
 
-  onMount(async () => {
+  async function loadExample(url: string) {
+    loading = url;
     try {
-      const res = await fetch(defaultExample.url);
+      const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const jsonData = await res.json();
       input = JSON.stringify(jsonData, null, 2);
-    } catch (_e) {
-      // User can still load manually
+    } catch (e) {
+      input = `// Failed to load: ${e instanceof Error ? e.message : e}`;
+    } finally {
+      loading = null;
     }
+  }
+
+  onMount(() => {
+    loadExample(defaultExample.url);
   });
 </script>
 
@@ -70,12 +78,6 @@
     <div class="title-row">
       <h1>styx<span class="version">2</span></h1>
       <span class="subtitle">compiler explorer</span>
-      {#if detectedFormat}
-        <span class="format-badge">{detectedFormat}</span>
-      {/if}
-      {#if result.ok && result.timeMs > 0}
-        <span class="timing">{result.timeMs.toFixed(0)}ms</span>
-      {/if}
     </div>
     <PassToggles bind:passes />
   </header>
@@ -84,6 +86,29 @@
     <section class="panel">
       <div class="panel-header">
         <span class="panel-label">Input</span>
+        {#if detectedFormat}
+          <span class="format-badge">{detectedFormat}</span>
+        {/if}
+        <select
+          class="example-select"
+          onchange={(e) => {
+            const url = e.currentTarget.value;
+            if (url) {
+              loadExample(url);
+              e.currentTarget.value = "";
+            }
+          }}
+          disabled={loading !== null}
+        >
+          <option value="">{loading ? "Loading..." : "Load example"}</option>
+          {#each exampleGroups as group}
+            <optgroup label={group.label}>
+              {#each group.examples as ex}
+                <option value={ex.url}>{ex.name}</option>
+              {/each}
+            </optgroup>
+          {/each}
+        </select>
       </div>
       <InputPanel bind:input />
     </section>
@@ -215,14 +240,6 @@
     border-radius: var(--radius);
     background: var(--accent-subtle);
     color: var(--accent);
-    margin-left: 0.25rem;
-  }
-
-  .timing {
-    font-family: var(--font-mono);
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    margin-left: auto;
   }
 
   main {
@@ -245,6 +262,9 @@
 
   .panel-header {
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
     padding: 0.5rem 0.75rem;
     border-bottom: 1px solid var(--border);
   }
@@ -255,5 +275,26 @@
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--text-muted);
+  }
+
+  .example-select {
+    margin-left: auto;
+    padding: 0.2rem 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+    cursor: pointer;
+    transition: border-color var(--transition);
+  }
+
+  .example-select:hover:not(:disabled) {
+    border-color: var(--text-muted);
+  }
+
+  .example-select:disabled {
+    opacity: 0.5;
+    cursor: wait;
   }
 </style>

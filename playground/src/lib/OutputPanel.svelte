@@ -60,6 +60,9 @@
         {tab.label}
       </button>
     {/each}
+    {#if result.timeMs > 0}
+      <span class="timing">{result.timeMs.toFixed(0)}ms</span>
+    {/if}
   </div>
 
   <div class="content">
@@ -121,6 +124,15 @@
   .tab.active {
     color: var(--text);
     border-bottom-color: var(--accent);
+  }
+
+  .timing {
+    margin-left: auto;
+    padding: 0 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    align-self: center;
   }
 
   .content {
