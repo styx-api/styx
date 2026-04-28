@@ -98,8 +98,9 @@ class BoutiquesEmitter {
   }
 
   private applyAppMeta(bt: BtDescriptor, app: AppMeta): void {
-    if (app.doc?.title) bt.name = app.doc.title;
-    if (app.id) bt.id = app.id;
+    // Boutiques requires `name` at the top level and disallows `id` there.
+    const rootName = app.doc?.title ?? app.id;
+    if (rootName) bt.name = rootName;
     if (app.doc?.description) bt.description = app.doc.description;
     if (app.version) bt["tool-version"] = app.version;
     if (app.authors?.[0]) bt.author = app.authors[0];
@@ -183,6 +184,7 @@ class BoutiquesEmitter {
             type: subBt,
             "value-key": valueKeyStr,
           };
+          this.finalizeInput(input);
           commandParts.push(valueKeyStr);
           inputs.push(input);
         } else {
@@ -273,6 +275,7 @@ class BoutiquesEmitter {
     const defaultValue = binding.node.meta?.defaultValue;
     if (defaultValue !== undefined) input["default-value"] = defaultValue;
 
+    this.finalizeInput(input);
     return input;
   }
 
@@ -417,7 +420,67 @@ class BoutiquesEmitter {
     const defaultValue = info?.defaultValue ?? binding.node.meta?.defaultValue;
     if (defaultValue !== undefined) input["default-value"] = defaultValue;
 
+    this.finalizeInput(input);
     return input;
+  }
+
+  // Normalize an input so the emitted Boutiques descriptor is valid even when
+  // the upstream source has dynamic types (functools.partial, custom action
+  // classes, etc.) that the parser had to fall back to "String" for.
+  private finalizeInput(input: BtInput): void {
+    // Every Boutiques input must have a `name`; default to id.
+    if (input.name === undefined) input.name = input.id;
+
+    // A "String" input with a boolean default and no value-choices is really
+    // a flag (e.g. an unrecognized custom action class with default=False).
+    // When choices are present, the bool default is just spurious metadata
+    // and will be dropped below.
+    if (
+      input.type === "String" &&
+      typeof input["default-value"] === "boolean" &&
+      input["value-choices"] === undefined
+    ) {
+      input.type = "Flag";
+    }
+
+    if (input.type === "Flag") {
+      // Boutiques flags can't carry default-value, value-choices, or list:true.
+      delete input["default-value"];
+      delete input["value-choices"];
+      delete input.list;
+      delete input["list-separator"];
+      delete input["min-list-entries"];
+      delete input["max-list-entries"];
+    } else if (input.type === "String") {
+      // Coerce numeric defaults/choices to strings (e.g. argparse `type=int`
+      // with explicit choices, or partial/serializable=false types).
+      const dv = input["default-value"];
+      if (dv !== undefined && typeof dv !== "string") {
+        input["default-value"] = String(dv);
+      }
+      const choices = input["value-choices"];
+      if (Array.isArray(choices)) {
+        input["value-choices"] = choices.map((c) => (typeof c === "string" ? c : String(c)));
+      }
+    } else if (input.type === "Number") {
+      const dv = input["default-value"];
+      if (dv !== undefined && typeof dv !== "number") {
+        const num = Number(dv);
+        if (Number.isFinite(num)) {
+          input["default-value"] = num;
+        } else {
+          delete input["default-value"];
+        }
+      }
+    }
+
+    // If both default-value and value-choices are set, the default must be
+    // one of the choices; otherwise drop the default.
+    const choices = input["value-choices"];
+    const dv = input["default-value"];
+    if (Array.isArray(choices) && dv !== undefined && !choices.some((c) => c === dv)) {
+      delete input["default-value"];
+    }
   }
 
   // Peel wrapper layers from an IR node to extract Boutiques input properties.
@@ -693,6 +756,8 @@ class BoutiquesEmitter {
     if (mapped.integer) input.integer = true;
     if (mapped.minimum !== undefined) input.minimum = mapped.minimum;
     if (mapped.maximum !== undefined) input.maximum = mapped.maximum;
+
+    this.finalizeInput(input);
 
     return {
       name,

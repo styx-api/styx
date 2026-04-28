@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { solve } from "../../solver/solver.js";
 import { defaultPipeline } from "../../ir/index.js";
 import { BoutiquesParser } from "../../frontend/boutiques/parser.js";
+import { ArgdumpParser } from "../../frontend/argdump/parser.js";
 import { createContext } from "../../manifest/context.js";
 import { generateBoutiques, BoutiquesBackend } from "./boutiques.js";
 
@@ -454,5 +455,166 @@ describe("BoutiquesBackend", () => {
     // Re-parse with BoutiquesParser - should succeed
     const reparse = parser.parse(json);
     expect(reparse.errors).toHaveLength(0);
+  });
+});
+
+// Regression tests for issues styx-api/styx-ts#1-#5: argdump -> Boutiques
+// must produce a descriptor that passes `bosh validate`, even when the source
+// argparse parser uses dynamic types (functools.partial, custom action classes).
+describe("argdump -> Boutiques validity", () => {
+  const argdumpParser = new ArgdumpParser();
+
+  function emitFromArgdump(dump: Record<string, unknown>): Record<string, unknown> {
+    const { expr, meta } = argdumpParser.parse(JSON.stringify(dump));
+    const optimized = defaultPipeline.apply(expr).expr;
+    const solveResult = solve(optimized);
+    const ctx = createContext(optimized, solveResult, { app: meta });
+    const { descriptor: bt } = generateBoutiques(ctx);
+    return bt as Record<string, unknown>;
+  }
+
+  it("emits `name` (not `id`) at the top level", () => {
+    const bt = emitFromArgdump({
+      prog: "mytool",
+      description: "A tool",
+      actions: [],
+    });
+    expect(bt.name).toBeDefined();
+    expect(bt.id).toBeUndefined();
+  });
+
+  it("emits `name` on every input, defaulting to id", () => {
+    const bt = emitFromArgdump({
+      prog: "mytool",
+      actions: [
+        {
+          option_strings: [],
+          dest: "src",
+          action_type: "store",
+          type_info: { name: "str", builtin: true },
+        },
+        {
+          option_strings: ["-v", "--verbose"],
+          dest: "verbose",
+          action_type: "store_true",
+        },
+      ],
+    });
+    const inputs = bt.inputs as Record<string, unknown>[];
+    expect(inputs.length).toBeGreaterThan(0);
+    for (const input of inputs) {
+      expect(input.name).toBeDefined();
+    }
+  });
+
+  it("does not emit `list:true` on Flag inputs (argparse count action)", () => {
+    const bt = emitFromArgdump({
+      prog: "mytool",
+      actions: [
+        {
+          option_strings: ["-v", "--verbose"],
+          dest: "verbose",
+          action_type: "count",
+          default: 0,
+        },
+      ],
+    });
+    const inputs = bt.inputs as Record<string, unknown>[];
+    const flag = inputs.find((i) => i.id === "verbose");
+    expect(flag).toBeDefined();
+    expect(flag!.type).toBe("Flag");
+    expect(flag!.list).toBeUndefined();
+    expect(flag!["default-value"]).toBeUndefined();
+  });
+
+  it("drops default-value when not in value-choices", () => {
+    // store with bool default + string choices (e.g. --cifti-output)
+    const bt = emitFromArgdump({
+      prog: "mytool",
+      actions: [
+        {
+          option_strings: ["--cifti-output"],
+          dest: "cifti_output",
+          action_type: "store",
+          nargs: "?",
+          default: false,
+          type_info: { name: "str", builtin: true },
+          choices: ["91k", "170k"],
+        },
+      ],
+    });
+    const inputs = bt.inputs as Record<string, unknown>[];
+    const inp = inputs.find((i) => i.id === "cifti_output");
+    expect(inp).toBeDefined();
+    expect(inp!["value-choices"]).toEqual(["91k", "170k"]);
+    expect(inp!["default-value"]).toBeUndefined();
+  });
+
+  it("coerces String defaults & choices to strings (numeric type with explicit choices)", () => {
+    // bold2anat_dof: type=int, choices=[6,9,12], default=6 - parser produces
+    // a String alternative, but choices/default round-trip as numbers without
+    // coercion.
+    const bt = emitFromArgdump({
+      prog: "mytool",
+      actions: [
+        {
+          option_strings: ["--bold2anat-dof"],
+          dest: "bold2anat_dof",
+          action_type: "store",
+          default: 6,
+          type_info: { name: "int", builtin: true },
+          choices: [6, 9, 12],
+        },
+      ],
+    });
+    const inputs = bt.inputs as Record<string, unknown>[];
+    const inp = inputs.find((i) => i.id === "bold2anat_dof");
+    expect(inp).toBeDefined();
+    expect(inp!.type).toBe("String");
+    expect(inp!["value-choices"]).toEqual(["6", "9", "12"]);
+    expect(inp!["default-value"]).toBe("6");
+  });
+
+  it("upgrades String inputs with bool default to Flag (custom action class)", () => {
+    // force_syn: action_type=unknown (DeprecatedAction), default=false
+    const bt = emitFromArgdump({
+      prog: "mytool",
+      actions: [
+        {
+          option_strings: ["--force-syn"],
+          dest: "force_syn",
+          action_type: "unknown",
+          default: false,
+          custom_action_class: "DeprecatedAction",
+        },
+      ],
+    });
+    const inputs = bt.inputs as Record<string, unknown>[];
+    const inp = inputs.find((i) => i.id === "force_syn");
+    expect(inp).toBeDefined();
+    expect(inp!.type).toBe("Flag");
+    expect(inp!["default-value"]).toBeUndefined();
+    expect(inp!["command-line-flag"]).toBe("--force-syn");
+  });
+
+  it("coerces non-string defaults on String inputs (functools.partial type)", () => {
+    // slice_time_ref: type=functools.partial (serializable=false), default=0.5
+    const bt = emitFromArgdump({
+      prog: "mytool",
+      actions: [
+        {
+          option_strings: ["--slice-time-ref"],
+          dest: "slice_time_ref",
+          action_type: "store",
+          default: 0.5,
+          type_info: { name: "functools.partial", module: "functools", serializable: false },
+        },
+      ],
+    });
+    const inputs = bt.inputs as Record<string, unknown>[];
+    const inp = inputs.find((i) => i.id === "slice_time_ref");
+    expect(inp).toBeDefined();
+    expect(inp!.type).toBe("String");
+    expect(inp!["default-value"]).toBe("0.5");
   });
 });
