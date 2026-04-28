@@ -611,6 +611,37 @@ describe("argdump -> Boutiques validity", () => {
     expect(inp!["command-line-flag"]).toBe("--force-syn");
   });
 
+  it("mutex group variants keep their own names, not the group name", () => {
+    const bt = emitFromArgdump({
+      prog: "mytool",
+      actions: [
+        {
+          option_strings: ["--input-file"],
+          dest: "input_file",
+          action_type: "store",
+          type_info: { name: "Path", module: "pathlib" },
+        },
+        {
+          option_strings: ["--no-input"],
+          dest: "no_input",
+          action_type: "store_true",
+        },
+      ],
+      mutually_exclusive_groups: [
+        { required: false, actions: ["input_file", "no_input"] },
+      ],
+    });
+    const inputs = bt.inputs as Record<string, unknown>[];
+    const parent = inputs.find((i) => i.id === "input_file_or_no_input");
+    expect(parent).toBeDefined();
+    const variants = parent!.type as Record<string, unknown>[];
+    expect(variants).toHaveLength(2);
+    // Each variant must carry its own dest-derived name, not the group name.
+    const variantNames = variants.map((v) => v.id).sort();
+    expect(variantNames).not.toContain("input_file_or_no_input");
+    expect(variantNames).toContain("input_file");
+  });
+
   it("sanitizes ids when source names contain illegal characters", () => {
     // Boutiques requires id ~ /^[0-9A-Za-z_]+$/. Argparse subparser command
     // names commonly contain hyphens (e.g. `do-thing`).

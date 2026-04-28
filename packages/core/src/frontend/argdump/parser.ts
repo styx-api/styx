@@ -679,16 +679,26 @@ export class ArgdumpParser implements Frontend {
 
       if (memberDests.length < 2) continue;
 
-      // Build alt from member nodes
+      // Build alt from member nodes. Unwrapping the optional drops its meta
+      // (doc/default), so merge it onto the inner node and tag the inner
+      // with the dest so backends can derive a per-variant name.
       const altMembers: Expr[] = [];
       for (const dest of memberDests) {
         const node = nodesByDest.get(dest)!;
-        // Unwrap optional if present (will re-wrap the alt if needed)
+        let inner: Expr;
+        let outerMeta: NodeMeta | undefined;
         if (node.kind === "optional") {
-          altMembers.push(node.attrs.node);
+          inner = node.attrs.node;
+          outerMeta = node.meta;
         } else {
-          altMembers.push(node);
+          inner = node;
         }
+        inner.meta = {
+          ...outerMeta,
+          ...inner.meta,
+          name: inner.meta?.name ?? dest,
+        };
+        altMembers.push(inner);
         excluded.add(dest);
       }
 

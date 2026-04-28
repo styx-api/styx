@@ -718,7 +718,9 @@ class BoutiquesEmitter {
       const altNode = alts[i] ?? node;
       if (variant.type.kind === "struct") {
         const bt = this.buildSubCommand(variant.type, altNode);
-        if (variant.name && !bt.name) {
+        // The variant has its own name; the wrapperNode's name is the
+        // parent (mutex group) name and would otherwise leak down.
+        if (variant.name) {
           bt.name = variant.name;
           bt.id = this.sanitizeId(variant.name);
         }
@@ -738,7 +740,9 @@ class BoutiquesEmitter {
       const altNode = alts[i] ?? node;
       if (variant.type.kind === "struct") {
         const bt = this.buildSubCommand(variant.type, altNode);
-        if (variant.name && !bt.name) {
+        // The variant has its own name; the wrapperNode's name is the
+        // parent (mutex group) name and would otherwise leak down.
+        if (variant.name) {
           bt.name = variant.name;
           bt.id = this.sanitizeId(variant.name);
         }
