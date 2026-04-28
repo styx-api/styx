@@ -98,7 +98,7 @@ class BoutiquesEmitter {
   }
 
   private applyAppMeta(bt: BtDescriptor, app: AppMeta): void {
-    // Boutiques requires `name` at the top level and disallows `id` there.
+    // Boutiques requires `name` at root and disallows `id` there.
     const rootName = app.doc?.title ?? app.id;
     if (rootName) bt.name = rootName;
     if (app.doc?.description) bt.description = app.doc.description;
@@ -254,11 +254,14 @@ class BoutiquesEmitter {
     if (binding.node.meta?.doc?.title) input.name = binding.node.meta.doc.title;
     if (binding.node.meta?.doc?.description) input.description = binding.node.meta.doc.description;
 
-    if (peeled.isOptional) input.optional = true;
-    if (peeled.isList) {
+    if (peeled.isOptional || mapped.optional) input.optional = true;
+    const isList = peeled.isList || mapped.list === true;
+    if (isList) {
       input.list = true;
-      if (peeled.listSeparator !== undefined) input["list-separator"] = peeled.listSeparator;
-      if (peeled.minListEntries !== undefined) input["min-list-entries"] = peeled.minListEntries;
+      const listSep = peeled.listSeparator ?? mapped.listSeparator;
+      const minEntries = peeled.minListEntries ?? mapped.minListEntries;
+      if (listSep !== undefined) input["list-separator"] = listSep;
+      if (minEntries !== undefined) input["min-list-entries"] = minEntries;
       if (peeled.maxListEntries !== undefined) input["max-list-entries"] = peeled.maxListEntries;
     }
     if (peeled.flag) {
@@ -272,8 +275,10 @@ class BoutiquesEmitter {
     if (mapped.resolveParent) input["resolve-parent"] = true;
     if (mapped.mutable) input["mutable"] = true;
 
-    const defaultValue = binding.node.meta?.defaultValue;
-    if (defaultValue !== undefined) input["default-value"] = defaultValue;
+    if (innerType.kind !== "count") {
+      const defaultValue = binding.node.meta?.defaultValue;
+      if (defaultValue !== undefined) input["default-value"] = defaultValue;
+    }
 
     this.finalizeInput(input);
     return input;
@@ -391,14 +396,15 @@ class BoutiquesEmitter {
       info?.doc ?? binding.node.meta?.doc?.description ?? findDoc(binding.node, fieldType);
     if (description) input.description = description;
 
-    // Optional
-    if (peeled.isOptional) input.optional = true;
+    if (peeled.isOptional || mapped.optional) input.optional = true;
 
-    // List
-    if (peeled.isList) {
+    const isList = peeled.isList || mapped.list === true;
+    if (isList) {
       input.list = true;
-      if (peeled.listSeparator !== undefined) input["list-separator"] = peeled.listSeparator;
-      if (peeled.minListEntries !== undefined) input["min-list-entries"] = peeled.minListEntries;
+      const listSep = peeled.listSeparator ?? mapped.listSeparator;
+      const minEntries = peeled.minListEntries ?? mapped.minListEntries;
+      if (listSep !== undefined) input["list-separator"] = listSep;
+      if (minEntries !== undefined) input["min-list-entries"] = minEntries;
       if (peeled.maxListEntries !== undefined) input["max-list-entries"] = peeled.maxListEntries;
     }
 
@@ -416,25 +422,23 @@ class BoutiquesEmitter {
     if (mapped.resolveParent) input["resolve-parent"] = true;
     if (mapped.mutable) input["mutable"] = true;
 
-    // Default value
-    const defaultValue = info?.defaultValue ?? binding.node.meta?.defaultValue;
-    if (defaultValue !== undefined) input["default-value"] = defaultValue;
+    // count's "default" is implicit via min-list-entries:0; skip emitting it.
+    if (innerType.kind !== "count") {
+      const defaultValue = info?.defaultValue ?? binding.node.meta?.defaultValue;
+      if (defaultValue !== undefined) input["default-value"] = defaultValue;
+    }
 
     this.finalizeInput(input);
     return input;
   }
 
-  // Normalize an input so the emitted Boutiques descriptor is valid even when
-  // the upstream source has dynamic types (functools.partial, custom action
-  // classes, etc.) that the parser had to fall back to "String" for.
+  // Normalize an input so the descriptor is valid even when upstream types
+  // are dynamic (functools.partial, custom action classes) and the parser
+  // had to fall back to String.
   private finalizeInput(input: BtInput): void {
-    // Every Boutiques input must have a `name`; default to id.
     if (input.name === undefined) input.name = input.id;
 
-    // A "String" input with a boolean default and no value-choices is really
-    // a flag (e.g. an unrecognized custom action class with default=False).
-    // When choices are present, the bool default is just spurious metadata
-    // and will be dropped below.
+    // A String with a bool default and no choices is really a Flag.
     if (
       input.type === "String" &&
       typeof input["default-value"] === "boolean" &&
@@ -444,7 +448,6 @@ class BoutiquesEmitter {
     }
 
     if (input.type === "Flag") {
-      // Boutiques flags can't carry default-value, value-choices, or list:true.
       delete input["default-value"];
       delete input["value-choices"];
       delete input.list;
@@ -452,8 +455,6 @@ class BoutiquesEmitter {
       delete input["min-list-entries"];
       delete input["max-list-entries"];
     } else if (input.type === "String") {
-      // Coerce numeric defaults/choices to strings (e.g. argparse `type=int`
-      // with explicit choices, or partial/serializable=false types).
       const dv = input["default-value"];
       if (dv !== undefined && typeof dv !== "string") {
         input["default-value"] = String(dv);
@@ -466,16 +467,12 @@ class BoutiquesEmitter {
       const dv = input["default-value"];
       if (dv !== undefined && typeof dv !== "number") {
         const num = Number(dv);
-        if (Number.isFinite(num)) {
-          input["default-value"] = num;
-        } else {
-          delete input["default-value"];
-        }
+        if (Number.isFinite(num)) input["default-value"] = num;
+        else delete input["default-value"];
       }
     }
 
-    // If both default-value and value-choices are set, the default must be
-    // one of the choices; otherwise drop the default.
+    // Default must be one of the choices, or dropped.
     const choices = input["value-choices"];
     const dv = input["default-value"];
     if (Array.isArray(choices) && dv !== undefined && !choices.some((c) => c === dv)) {
@@ -503,6 +500,10 @@ class BoutiquesEmitter {
         break;
 
       case "repeat":
+        // count's Repeat is the count, not a list - mapType handles it.
+        if (this.isCount(type)) {
+          break;
+        }
         result.isList = true;
         if (node.attrs.join !== undefined) result.listSeparator = node.attrs.join;
         if (node.attrs.countMin !== undefined) result.minListEntries = node.attrs.countMin;
@@ -557,7 +558,8 @@ class BoutiquesEmitter {
     return type;
   }
 
-  // Map a core BoundType to Boutiques type info
+  // Returned list/optional fields override peeled values (for `count`, whose
+  // IR Repeat does not correspond to a Boutiques list).
   private mapType(
     type: BoundType,
     node: Expr,
@@ -569,6 +571,10 @@ class BoutiquesEmitter {
     valueChoices?: (string | number)[];
     resolveParent?: boolean;
     mutable?: boolean;
+    list?: boolean;
+    listSeparator?: string;
+    minListEntries?: number;
+    optional?: boolean;
   } {
     switch (type.kind) {
       case "scalar":
@@ -578,9 +584,7 @@ class BoutiquesEmitter {
         return { type: "Flag" };
 
       case "count":
-        // Count = repeatable flag. Emit as Flag with list:true
-        // (peelNode will have already set isList from the Repeat wrapper)
-        return { type: "Flag" };
+        return this.mapCount(node);
 
       case "literal":
         // Single literal - emit as String with value-choices
@@ -796,6 +800,71 @@ class BoutiquesEmitter {
     if (type.kind === "bool") return true;
     if (type.kind === "optional") return this.isBool(type.inner);
     return false;
+  }
+
+  private isCount(type: BoundType): boolean {
+    if (type.kind === "count") return true;
+    if (type.kind === "optional") return this.isCount(type.inner);
+    return false;
+  }
+
+  private findCountRepeat(node: Expr): Extract<Expr, { kind: "repeat" }> | undefined {
+    switch (node.kind) {
+      case "repeat":
+        return node;
+      case "optional":
+        return this.findCountRepeat(node.attrs.node);
+      default:
+        return undefined;
+    }
+  }
+
+  // Bounded count -> String + enumerated value-choices.
+  // Unbounded count -> SubCommand + list:true (no list-separator: each
+  // occurrence must be a separate argv element for argparse to count it).
+  private mapCount(
+    node: Expr,
+  ): {
+    type: string | BtDescriptor;
+    valueChoices?: string[];
+    list?: boolean;
+    listSeparator?: string;
+    minListEntries?: number;
+    optional?: boolean;
+  } {
+    const repeat = this.findCountRepeat(node);
+    if (!repeat || repeat.attrs.node.kind !== "literal") {
+      return { type: "Flag" };
+    }
+    const flag = repeat.attrs.node.attrs.str;
+    const countMin = repeat.attrs.countMin ?? 0;
+    const countMax = repeat.attrs.countMax;
+
+    if (countMax !== undefined && countMax >= Math.max(countMin, 1)) {
+      const choices: string[] = [];
+      const start = Math.max(countMin, 1);
+      for (let i = start; i <= countMax; i++) choices.push(flag.repeat(i));
+      return {
+        type: "String",
+        valueChoices: choices,
+        ...(countMin === 0 && { optional: true }),
+      };
+    }
+
+    const dest = repeat.meta?.name;
+    const subId = dest ? `${dest}_token` : "count_token";
+    const subBt: BtDescriptor = {
+      name: subId,
+      id: subId,
+      "command-line": flag,
+      inputs: [],
+    };
+
+    return {
+      type: subBt,
+      list: true,
+      minListEntries: countMin,
+    };
   }
 }
 

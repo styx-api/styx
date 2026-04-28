@@ -507,7 +507,9 @@ describe("argdump -> Boutiques validity", () => {
     }
   });
 
-  it("does not emit `list:true` on Flag inputs (argparse count action)", () => {
+  it("encodes unbounded argparse count as a SubCommand with list:true", () => {
+    // Boutiques has no native count: must be either value-choices (bounded)
+    // or a SubCommand+list (unbounded). `Flag` with list:true is invalid.
     const bt = emitFromArgdump({
       prog: "mytool",
       actions: [
@@ -520,11 +522,23 @@ describe("argdump -> Boutiques validity", () => {
       ],
     });
     const inputs = bt.inputs as Record<string, unknown>[];
-    const flag = inputs.find((i) => i.id === "verbose");
-    expect(flag).toBeDefined();
-    expect(flag!.type).toBe("Flag");
-    expect(flag!.list).toBeUndefined();
-    expect(flag!["default-value"]).toBeUndefined();
+    const inp = inputs.find((i) => i.id === "verbose");
+    expect(inp).toBeDefined();
+    expect(inp!.list).toBe(true);
+    expect(inp!["min-list-entries"]).toBe(0);
+    // No list-separator: Boutiques must emit each list item as a separate
+    // argv element so argparse `count` reads them as N occurrences. A
+    // separator would collapse them into one space-joined argument.
+    expect(inp!["list-separator"]).toBeUndefined();
+    expect(inp!["default-value"]).toBeUndefined();
+
+    // The type must be a SubCommand (object), not "Flag". Three occurrences
+    // produce argv ["--verbose", "--verbose", "--verbose"], equivalent to
+    // argparse `-vvv`.
+    const sub = inp!.type as Record<string, unknown>;
+    expect(typeof sub).toBe("object");
+    expect(sub["command-line"]).toBe("--verbose");
+    expect(sub.inputs).toEqual([]);
   });
 
   it("drops default-value when not in value-choices", () => {
