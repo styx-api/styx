@@ -741,6 +741,51 @@ describe("ArgdumpParser", () => {
       expect(alt.attrs.alts).toHaveLength(2);
     });
 
+    it("synthesizes a name for two-member groups: ${a}_or_${b}", () => {
+      const result = parse(
+        minimalDescriptor({
+          actions: [
+            { dest: "json", action_type: "store_true", option_strings: ["--json"] },
+            { dest: "xml", action_type: "store_true", option_strings: ["--xml"] },
+          ],
+          mutually_exclusive_groups: [{ required: false, actions: ["json", "xml"] }],
+        }),
+      );
+      const nodes = actionNodes(result);
+      expect(nodes[0]?.meta?.name).toBe("json_or_xml");
+    });
+
+    it("synthesizes a name for groups of 3+: ${first}_choice", () => {
+      const result = parse(
+        minimalDescriptor({
+          actions: [
+            { dest: "a", action_type: "store_true", option_strings: ["--a"] },
+            { dest: "b", action_type: "store_true", option_strings: ["--b"] },
+            { dest: "c", action_type: "store_true", option_strings: ["--c"] },
+          ],
+          mutually_exclusive_groups: [{ required: false, actions: ["a", "b", "c"] }],
+        }),
+      );
+      const nodes = actionNodes(result);
+      expect(nodes[0]?.meta?.name).toBe("a_choice");
+    });
+
+    it("prefers explicit group title over the synthesized name", () => {
+      const result = parse(
+        minimalDescriptor({
+          actions: [
+            { dest: "json", action_type: "store_true", option_strings: ["--json"] },
+            { dest: "xml", action_type: "store_true", option_strings: ["--xml"] },
+          ],
+          mutually_exclusive_groups: [
+            { required: false, actions: ["json", "xml"], title: "output_format" },
+          ],
+        }),
+      );
+      const nodes = actionNodes(result);
+      expect(nodes[0]?.meta?.name).toBe("output_format");
+    });
+
     it("required group -> alt() without optional wrapper", () => {
       const result = parse(
         minimalDescriptor({

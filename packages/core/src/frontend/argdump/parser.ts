@@ -702,6 +702,18 @@ export class ArgdumpParser implements Frontend {
         groupNode = { kind: "optional", attrs: { node: alt } } satisfies Optional;
       }
 
+      // Synthesize a name so backends can derive a meaningful id instead of
+      // a Scope-generated placeholder. Prefer an explicit title if surfaced
+      // by argdump, otherwise concat dests for 2-member groups, fall back
+      // to a "_choice" suffix for larger groups.
+      const title = isString(group.title) ? group.title : undefined;
+      const groupName =
+        title ??
+        (memberDests.length === 2
+          ? `${memberDests[0]}_or_${memberDests[1]}`
+          : `${memberDests[0]}_choice`);
+      groupNode.meta = { ...groupNode.meta, name: groupName };
+
       // Insert at position of first member
       const firstDest = memberDests[0]!;
       const firstIdx = nodes.findIndex((n) => n === nodesByDest.get(firstDest));
