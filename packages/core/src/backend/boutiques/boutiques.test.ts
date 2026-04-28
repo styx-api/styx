@@ -611,6 +611,44 @@ describe("argdump -> Boutiques validity", () => {
     expect(inp!["command-line-flag"]).toBe("--force-syn");
   });
 
+  it("sanitizes ids when source names contain illegal characters", () => {
+    // Boutiques requires id ~ /^[0-9A-Za-z_]+$/. Argparse subparser command
+    // names commonly contain hyphens (e.g. `do-thing`).
+    const bt = emitFromArgdump({
+      prog: "mytool",
+      actions: [
+        {
+          option_strings: [],
+          dest: "cmd",
+          action_type: "parsers",
+          subparsers: {
+            "do-thing": { actions: [], description: "Do a thing" },
+            "other.cmd": { actions: [], description: "Other" },
+          },
+        },
+      ],
+    });
+    const inputs = bt.inputs as Record<string, unknown>[];
+    expect(inputs.length).toBeGreaterThan(0);
+    // Walk each input/sub-descriptor and assert no illegal id chars.
+    const idRe = /^[0-9A-Za-z_]+$/;
+    const checkBt = (d: Record<string, unknown>): void => {
+      if (typeof d.id === "string") expect(d.id).toMatch(idRe);
+      const ins = d.inputs as Record<string, unknown>[] | undefined;
+      if (Array.isArray(ins)) {
+        for (const i of ins) {
+          if (typeof i.id === "string") expect(i.id).toMatch(idRe);
+          if (typeof i.type === "object" && i.type !== null) {
+            checkBt(i.type as Record<string, unknown>);
+          } else if (Array.isArray(i.type)) {
+            for (const v of i.type) checkBt(v as Record<string, unknown>);
+          }
+        }
+      }
+    };
+    checkBt(bt);
+  });
+
   it("coerces non-string defaults on String inputs (functools.partial type)", () => {
     // slice_time_ref: type=functools.partial (serializable=false), default=0.5
     const bt = emitFromArgdump({

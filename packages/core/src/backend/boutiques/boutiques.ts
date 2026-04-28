@@ -147,6 +147,7 @@ class BoutiquesEmitter {
     }
 
     const scope = new Scope();
+    const idScope = new Scope();
     const commandParts: string[] = [];
     const inputs: BtInput[] = [];
 
@@ -159,14 +160,15 @@ class BoutiquesEmitter {
       const binding = this.ctx.resolve(child);
       if (binding) {
         // Direct binding on this child
-        const valueKey = scope.add(screamingSnakeCase(binding.name));
+        const id = idScope.add(this.sanitizeId(binding.name));
+        const valueKey = scope.add(screamingSnakeCase(id));
         const valueKeyStr = `[${valueKey}]`;
         const peeled = this.peelNode(child, binding.type);
         if (this.isBool(binding.type) && !peeled.flag) {
           const flagStr = this.extractBoolFlag(child);
           if (flagStr) peeled.flag = flagStr;
         }
-        const input = this.buildInputFromBinding(binding, valueKeyStr, peeled, child);
+        const input = this.buildInputFromBinding(binding, id, valueKeyStr, peeled, child);
         commandParts.push(valueKeyStr);
         inputs.push(input);
       } else {
@@ -174,13 +176,13 @@ class BoutiquesEmitter {
         // Try to find bindings deeper inside.
         const deepBinding = this.findDeepBinding(child);
         if (deepBinding) {
-          const name = child.meta?.name ?? deepBinding.name;
-          const valueKey = scope.add(screamingSnakeCase(name));
+          const rawName = child.meta?.name ?? deepBinding.name;
+          const id = idScope.add(this.sanitizeId(rawName));
+          const valueKey = scope.add(screamingSnakeCase(id));
           const valueKeyStr = `[${valueKey}]`;
-          // The child is effectively a subcommand
           const subBt = this.buildSubCommandFromUnbound(child);
           const input: BtInput = {
-            id: name,
+            id,
             type: subBt,
             "value-key": valueKeyStr,
           };
@@ -202,7 +204,7 @@ class BoutiquesEmitter {
     const bt: BtDescriptor = {};
     if (node.meta?.name) {
       bt.name = node.meta.name;
-      bt.id = node.meta.name;
+      bt.id = this.sanitizeId(node.meta.name);
     }
     this.buildFromUnboundSequence(bt, node);
     return bt;
@@ -238,6 +240,7 @@ class BoutiquesEmitter {
   // Build an input from a binding directly (without struct context)
   private buildInputFromBinding(
     binding: Binding,
+    id: string,
     valueKey: string,
     peeled: PeeledInput,
     wrapperNode: Expr,
@@ -246,7 +249,7 @@ class BoutiquesEmitter {
     const mapped = this.mapType(innerType, wrapperNode);
 
     const input: BtInput = {
-      id: binding.name,
+      id,
       type: mapped.type,
       "value-key": valueKey,
     };
@@ -297,6 +300,7 @@ class BoutiquesEmitter {
     }
 
     const scope = new Scope();
+    const idScope = new Scope();
     const commandParts: string[] = [];
     const inputs: BtInput[] = [];
     const fieldInfo = collectFieldInfo(this.ctx, structType);
@@ -325,22 +329,20 @@ class BoutiquesEmitter {
       // Skip literal fields (union discriminators, not user-facing)
       if (fieldType.kind === "literal") continue;
 
-      // Generate value-key
-      const valueKey = scope.add(screamingSnakeCase(binding.name));
+      const id = idScope.add(this.sanitizeId(binding.name));
+      const valueKey = scope.add(screamingSnakeCase(id));
       const valueKeyStr = `[${valueKey}]`;
 
       // Peel wrapper layers from the IR node
       const peeled = this.peelNode(wrapperNode, fieldType);
 
-      // For bool types, extract the flag literal from the IR node.
       // Bool IR pattern: optional(literal("-v")) - the literal IS the flag.
       if (this.isBool(fieldType) && !peeled.flag) {
         const flagStr = this.extractBoolFlag(wrapperNode);
         if (flagStr) peeled.flag = flagStr;
       }
 
-      // Build input entry
-      const input = this.buildInput(binding, fieldType, valueKeyStr, peeled, fieldInfo, wrapperNode);
+      const input = this.buildInput(binding, id, fieldType, valueKeyStr, peeled, fieldInfo, wrapperNode);
 
       // Add flag to command line if present, then value-key
       if (peeled.flag) {
@@ -371,6 +373,7 @@ class BoutiquesEmitter {
 
   private buildInput(
     binding: Binding,
+    id: string,
     fieldType: BoundType,
     valueKey: string,
     peeled: PeeledInput,
@@ -382,7 +385,7 @@ class BoutiquesEmitter {
     const mapped = this.mapType(innerType, wrapperNode);
 
     const input: BtInput = {
-      id: binding.name,
+      id,
       type: mapped.type,
       "value-key": valueKey,
     };
@@ -698,10 +701,9 @@ class BoutiquesEmitter {
       // Recursively serialize as nested descriptor
       this.buildFromStruct(bt, type, node);
     }
-    // Try to get name from node metadata
     if (node.meta?.name) {
       bt.name = node.meta.name;
-      bt.id = node.meta.name;
+      bt.id = this.sanitizeId(node.meta.name);
     }
     return bt;
   }
@@ -718,11 +720,10 @@ class BoutiquesEmitter {
         const bt = this.buildSubCommand(variant.type, altNode);
         if (variant.name && !bt.name) {
           bt.name = variant.name;
-          bt.id = variant.name;
+          bt.id = this.sanitizeId(variant.name);
         }
         return bt;
       }
-      // Non-struct variant in a "struct" union - wrap as trivial descriptor
       return this.wrapAsDescriptor(variant, altNode);
     });
   }
@@ -739,7 +740,7 @@ class BoutiquesEmitter {
         const bt = this.buildSubCommand(variant.type, altNode);
         if (variant.name && !bt.name) {
           bt.name = variant.name;
-          bt.id = variant.name;
+          bt.id = this.sanitizeId(variant.name);
         }
         return bt;
       }
@@ -750,11 +751,12 @@ class BoutiquesEmitter {
   // Wrap a non-struct variant as a trivial single-input descriptor
   private wrapAsDescriptor(variant: BoundVariant, node: Expr): BtDescriptor {
     const name = variant.name ?? "value";
+    const id = this.sanitizeId(name);
     const mapped = this.mapType(variant.type, node);
     const input: BtInput = {
-      id: name,
+      id,
       type: mapped.type,
-      "value-key": `[${screamingSnakeCase(name)}]`,
+      "value-key": `[${screamingSnakeCase(id)}]`,
     };
     if (mapped.valueChoices) input["value-choices"] = mapped.valueChoices;
     if (mapped.integer) input.integer = true;
@@ -765,8 +767,8 @@ class BoutiquesEmitter {
 
     return {
       name,
-      id: name,
-      "command-line": `[${screamingSnakeCase(name)}]`,
+      id,
+      "command-line": `[${screamingSnakeCase(id)}]`,
       inputs: [input],
     };
   }
@@ -806,6 +808,14 @@ class BoutiquesEmitter {
     if (type.kind === "count") return true;
     if (type.kind === "optional") return this.isCount(type.inner);
     return false;
+  }
+
+  // Boutiques `id` must match /^[0-9A-Za-z_]+$/ (input ids, sub-descriptor
+  // ids, value-keys after [ ] removal). Non-matching chars (e.g. argparse
+  // subparser names with hyphens) become underscores.
+  private sanitizeId(raw: string): string {
+    const cleaned = raw.replace(/[^0-9A-Za-z_]/g, "_");
+    return cleaned.length > 0 ? cleaned : "id";
   }
 
   private findCountRepeat(node: Expr): Extract<Expr, { kind: "repeat" }> | undefined {
@@ -852,7 +862,7 @@ class BoutiquesEmitter {
     }
 
     const dest = repeat.meta?.name;
-    const subId = dest ? `${dest}_token` : "count_token";
+    const subId = this.sanitizeId(dest ? `${dest}_token` : "count_token");
     const subBt: BtDescriptor = {
       name: subId,
       id: subId,
