@@ -680,8 +680,9 @@ describe("argdump -> Boutiques validity", () => {
     checkBt(bt);
   });
 
-  it("coerces non-string defaults on String inputs (functools.partial type)", () => {
+  it("infers Number type from default when type_info is non-serializable (functools.partial)", () => {
     // slice_time_ref: type=functools.partial (serializable=false), default=0.5
+    // Default is a finite non-integer number, so we infer float -> Boutiques Number.
     const bt = emitFromArgdump({
       prog: "mytool",
       actions: [
@@ -697,7 +698,7 @@ describe("argdump -> Boutiques validity", () => {
     const inputs = bt.inputs as Record<string, unknown>[];
     const inp = inputs.find((i) => i.id === "slice_time_ref");
     expect(inp).toBeDefined();
-    expect(inp!.type).toBe("String");
-    expect(inp!["default-value"]).toBe("0.5");
+    expect(inp!.type).toBe("Number");
+    expect(inp!["default-value"]).toBe(0.5);
   });
 });

@@ -574,6 +574,155 @@ describe("ArgdumpParser", () => {
       );
       expect(result.warnings).toHaveLength(0);
     });
+
+    it("non-serializable type with int default -> int", () => {
+      const result = parse(
+        minimalDescriptor({
+          actions: [
+            storeAction({
+              type_info: { name: "<lambda>", serializable: false },
+              default: 5,
+            }),
+          ],
+        }),
+      );
+      const nodes = actionNodes(result);
+      expect(nodes[0]).toMatchObject({ kind: "int" });
+    });
+
+    it("non-serializable type with float default -> float", () => {
+      const result = parse(
+        minimalDescriptor({
+          actions: [
+            storeAction({
+              type_info: { name: "functools.partial", module: "functools", serializable: false },
+              default: 0.5,
+            }),
+          ],
+        }),
+      );
+      const nodes = actionNodes(result);
+      expect(nodes[0]).toMatchObject({ kind: "float" });
+    });
+
+    it("unknown type with numeric default -> inferred numeric", () => {
+      const result = parse(
+        minimalDescriptor({
+          actions: [
+            storeAction({
+              type_info: { name: "MyCustomType", module: "mymodule" },
+              default: 42,
+            }),
+          ],
+        }),
+      );
+      const nodes = actionNodes(result);
+      expect(nodes[0]).toMatchObject({ kind: "int" });
+    });
+
+    it("PosixPath / WindowsPath -> path", () => {
+      for (const name of ["PosixPath", "WindowsPath"] as const) {
+        const result = parse(
+          minimalDescriptor({
+            actions: [storeAction({ type_info: { name, module: "pathlib" } })],
+          }),
+        );
+        const nodes = actionNodes(result);
+        expect(nodes[0]).toMatchObject({ kind: "path" });
+      }
+    });
+
+    it("os.path module -> path", () => {
+      const result = parse(
+        minimalDescriptor({
+          actions: [storeAction({ type_info: { name: "abspath", module: "os.path" } })],
+        }),
+      );
+      const nodes = actionNodes(result);
+      expect(nodes[0]).toMatchObject({ kind: "path" });
+    });
+
+    it("decimal module -> float", () => {
+      const result = parse(
+        minimalDescriptor({
+          actions: [storeAction({ type_info: { name: "Decimal", module: "decimal" } })],
+        }),
+      );
+      const nodes = actionNodes(result);
+      expect(nodes[0]).toMatchObject({ kind: "float" });
+    });
+
+    it("no type_info, list default with float elements -> float", () => {
+      const result = parse(
+        minimalDescriptor({
+          actions: [storeAction({ default: [0.1, 0.2, 0.3] })],
+        }),
+      );
+      const nodes = actionNodes(result);
+      expect(nodes[0]).toMatchObject({ kind: "float" });
+    });
+
+    it("no type_info, numeric const -> inferred numeric", () => {
+      const result = parse(
+        minimalDescriptor({
+          actions: [storeAction({ const: 7 })],
+        }),
+      );
+      const nodes = actionNodes(result);
+      expect(nodes[0]).toMatchObject({ kind: "int" });
+    });
+  });
+
+  describe("name preference", () => {
+    /** Reach the value terminal inside optional(seq(flag, value)). */
+    function optionTerminal(node: Expr): Expr {
+      if (node.kind !== "optional") return node;
+      const inner = node.attrs.node;
+      if (inner.kind !== "sequence") return inner;
+      return inner.attrs.nodes[1] ?? inner;
+    }
+
+    it("prefers first --long option flag over dest", () => {
+      const result = parse(
+        minimalDescriptor({
+          actions: [
+            {
+              dest: "internal_name",
+              action_type: "store",
+              option_strings: ["-x", "--user-facing-flag", "--alt"],
+            },
+          ],
+        }),
+      );
+      const nodes = actionNodes(result);
+      expect(optionTerminal(nodes[0]!).meta?.name).toBe("user-facing-flag");
+    });
+
+    it("falls back to dest when no --long flag present", () => {
+      const result = parse(
+        minimalDescriptor({
+          actions: [
+            {
+              dest: "input1",
+              action_type: "store",
+              option_strings: ["-x"],
+            },
+          ],
+        }),
+      );
+      const nodes = actionNodes(result);
+      expect(optionTerminal(nodes[0]!).meta?.name).toBe("input1");
+    });
+
+    it("uses dest for positionals (no option strings)", () => {
+      const result = parse(
+        minimalDescriptor({
+          actions: [storeAction({ dest: "my_pos" })],
+        }),
+      );
+      const nodes = actionNodes(result);
+      expect(nodes[0]?.meta?.name).toBe("my_pos");
+    });
   });
 
   describe("subparsers", () => {

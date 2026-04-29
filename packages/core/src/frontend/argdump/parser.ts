@@ -172,15 +172,17 @@ export class ArgdumpParser implements Frontend {
       const name = typeInfo.name;
 
       if (!isString(name)) {
-        return { kind: "str", attrs: {} } satisfies Str;
+        return this.inferFromSamples(action) ?? ({ kind: "str", attrs: {} } satisfies Str);
       }
 
-      // Non-serializable type -> str + warning
+      // Non-serializable type -> infer from samples, else str + warning
       if (typeInfo.serializable === false) {
+        const inferred = this.inferFromSamples(action);
+        const fallback = inferred ? inferred.kind : "string";
         this.warn(
-          `Non-serializable type '${name}' for '${action.dest}', treating as string`,
+          `Non-serializable type '${name}' for '${action.dest}', treating as ${fallback}`,
         );
-        return { kind: "str", attrs: {} } satisfies Str;
+        return inferred ?? ({ kind: "str", attrs: {} } satisfies Str);
       }
 
       switch (name) {
@@ -189,24 +191,57 @@ export class ArgdumpParser implements Frontend {
         case "float":
           return { kind: "float", attrs: {} } satisfies Float;
         case "Path":
+        case "PosixPath":
+        case "WindowsPath":
           return { kind: "path", attrs: {} } satisfies Path;
         default: {
-          // Check module for known path types
-          const mod = typeInfo.module;
-          if (isString(mod) && (mod === "pathlib" || mod.includes("path"))) {
-            return { kind: "path", attrs: {} } satisfies Path;
-          }
-          // Unknown type -> str
+          const moduleHit = this.resolveByModule(typeInfo.module);
+          if (moduleHit) return moduleHit;
+          // Unknown type -> infer from samples, else str
+          const inferred = this.inferFromSamples(action);
           if (name !== "str") {
-            this.warn(`Unknown type '${name}' for '${action.dest}', treating as string`);
+            const fallback = inferred ? inferred.kind : "string";
+            this.warn(`Unknown type '${name}' for '${action.dest}', treating as ${fallback}`);
           }
-          return { kind: "str", attrs: {} } satisfies Str;
+          return inferred ?? ({ kind: "str", attrs: {} } satisfies Str);
         }
       }
     }
 
-    // No type_info -> str (argparse default)
-    return { kind: "str", attrs: {} } satisfies Str;
+    // No type_info -> infer from samples, else str (argparse default)
+    return this.inferFromSamples(action) ?? ({ kind: "str", attrs: {} } satisfies Str);
+  }
+
+  private resolveByModule(mod: unknown): Path | Float | null {
+    if (!isString(mod)) return null;
+    if (mod === "pathlib" || mod === "os.path" || mod.includes("path")) {
+      return { kind: "path", attrs: {} } satisfies Path;
+    }
+    if (mod === "decimal" || mod === "fractions") {
+      return { kind: "float", attrs: {} } satisfies Float;
+    }
+    return null;
+  }
+
+  /** Infer numeric type from sample values: default (incl. list elements) or const. */
+  private inferFromSamples(action: AdAction): Int | Float | null {
+    const samples: unknown[] = [];
+    const def = action.default;
+    if (isArray(def)) samples.push(...def);
+    else samples.push(def);
+    samples.push(action.const);
+
+    let sawNumber = false;
+    let sawNonInteger = false;
+    for (const s of samples) {
+      if (typeof s !== "number" || !Number.isFinite(s)) continue;
+      sawNumber = true;
+      if (!Number.isInteger(s)) sawNonInteger = true;
+    }
+    if (!sawNumber) return null;
+    return sawNonInteger
+      ? ({ kind: "float", attrs: {} } satisfies Float)
+      : ({ kind: "int", attrs: {} } satisfies Int);
   }
 
   // Nargs wrapping
@@ -264,8 +299,9 @@ export class ArgdumpParser implements Frontend {
     const dest = action.dest;
     const help = action.help;
     const defaultVal = action.default;
+    const name = this.preferredName(action) ?? (isString(dest) ? dest : undefined);
 
-    const hasName = isString(dest);
+    const hasName = name !== undefined;
     const hasHelp = isString(help) && !isSuppressed(help);
     const hasDefault =
       (isString(defaultVal) || isNumber(defaultVal) || typeof defaultVal === "boolean") &&
@@ -274,7 +310,7 @@ export class ArgdumpParser implements Frontend {
     if (!hasName && !hasHelp && !hasDefault) return undefined;
 
     return {
-      ...(hasName && { name: dest }),
+      ...(hasName && { name }),
       ...(hasHelp && { doc: { description: help } }),
       ...(hasDefault && { defaultValue: defaultVal }),
     };
@@ -290,6 +326,18 @@ export class ArgdumpParser implements Frontend {
     }
     const first = optionStrings[0];
     return isString(first) ? first : null;
+  }
+
+  /** Prefer the first --long flag (without leading dashes) over dest. */
+  private preferredName(action: AdAction): string | undefined {
+    const optionStrings = action.option_strings;
+    if (!isArray(optionStrings)) return undefined;
+    for (const opt of optionStrings) {
+      if (isString(opt) && opt.startsWith("--") && opt.length > 2) {
+        return opt.slice(2);
+      }
+    }
+    return undefined;
   }
 
   private isPositional(action: AdAction): boolean {
