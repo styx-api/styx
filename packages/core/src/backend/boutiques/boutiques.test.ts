@@ -201,7 +201,7 @@ describe("Boutiques generation", () => {
     expect(inputs[0]!.maximum).toBe(100);
   });
 
-  it("propagates default values", () => {
+  it("merges default values into the description", () => {
     const bt = emitFor(
       minimalDescriptor({
         "command-line": "test [INPUT1]",
@@ -209,13 +209,15 @@ describe("Boutiques generation", () => {
           minimalInput({
             type: "String",
             optional: true,
+            description: "An input.",
             "default-value": "hello",
           }),
         ],
       }),
     );
     const inputs = bt.inputs as Record<string, unknown>[];
-    expect(inputs[0]!["default-value"]).toBe("hello");
+    expect(inputs[0]!["default-value"]).toBeUndefined();
+    expect(inputs[0]!.description).toContain('Default: "hello"');
   });
 
   it("handles command-line-flag with separator", () => {
@@ -586,7 +588,8 @@ describe("argdump -> Boutiques validity", () => {
     expect(inp).toBeDefined();
     expect(inp!.type).toBe("String");
     expect(inp!["value-choices"]).toEqual(["6", "9", "12"]);
-    expect(inp!["default-value"]).toBe("6");
+    expect(inp!["default-value"]).toBeUndefined();
+    expect(inp!.description).toContain('Default: "6"');
   });
 
   it("upgrades String inputs with bool default to Flag (custom action class)", () => {
@@ -699,6 +702,7 @@ describe("argdump -> Boutiques validity", () => {
     const inp = inputs.find((i) => i.id === "slice_time_ref");
     expect(inp).toBeDefined();
     expect(inp!.type).toBe("Number");
-    expect(inp!["default-value"]).toBe(0.5);
+    expect(inp!["default-value"]).toBeUndefined();
+    expect(inp!.description).toContain("Default: 0.5");
   });
 });

@@ -287,6 +287,20 @@ class BoutiquesEmitter {
     return input;
   }
 
+  // Boutiques' default-value substitutes when the user omits the input;
+  // argparse's default is the parser's internal fallback, not a CLI value
+  // to materialize. Surface it in the description instead.
+  private mergeDefaultIntoDescription(input: BtInput): void {
+    const dv = input["default-value"];
+    if (dv === undefined) return;
+    delete input["default-value"];
+    if (input.type === "Flag") return;
+    const formatted = typeof dv === "string" ? JSON.stringify(dv) : String(dv);
+    const suffix = `Default: ${formatted}`;
+    const desc = input.description;
+    input.description = desc ? `${desc.replace(/\s+$/, "")} (${suffix})` : suffix;
+  }
+
   private buildFromStruct(
     bt: BtDescriptor,
     structType: Extract<BoundType, { kind: "struct" }>,
@@ -481,6 +495,8 @@ class BoutiquesEmitter {
     if (Array.isArray(choices) && dv !== undefined && !choices.some((c) => c === dv)) {
       delete input["default-value"];
     }
+
+    this.mergeDefaultIntoDescription(input);
   }
 
   // Peel wrapper layers from an IR node to extract Boutiques input properties.
