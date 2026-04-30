@@ -645,6 +645,76 @@ describe("argdump -> Boutiques validity", () => {
     expect(variantNames).toContain("input_file");
   });
 
+  it("emits a populated descriptor for store-action variants in a mutex group", () => {
+    // Regression: when the mutex code synthesized seq.meta.name from `dest`
+    // (underscored), it diverged from the path terminal's name (hyphenated,
+    // from preferredName), so findStructNode could not match the binding and
+    // the variant emitted empty (just name+id, no command-line/inputs).
+    const bt = emitFromArgdump({
+      prog: "mytool",
+      actions: [
+        {
+          option_strings: ["--input-file"],
+          dest: "input_file",
+          action_type: "store",
+          type_info: { name: "Path", module: "pathlib" },
+        },
+        {
+          option_strings: ["--no-input"],
+          dest: "no_input",
+          action_type: "store_true",
+        },
+      ],
+      mutually_exclusive_groups: [
+        { required: false, actions: ["input_file", "no_input"] },
+      ],
+    });
+    const inputs = bt.inputs as Record<string, unknown>[];
+    const parent = inputs.find((i) => i.id === "input_file_or_no_input");
+    expect(parent).toBeDefined();
+    const variants = parent!.type as Record<string, unknown>[];
+    const storeVariant = variants.find((v) => v.id === "input_file");
+    expect(storeVariant).toBeDefined();
+    expect(storeVariant!["command-line"]).toBe("--input-file [INPUT_FILE]");
+    const subInputs = storeVariant!.inputs as Record<string, unknown>[];
+    expect(subInputs).toHaveLength(1);
+    expect(subInputs[0]?.id).toBe("input_file");
+    expect(subInputs[0]?.type).toBe("File");
+  });
+
+  it("uses meta.name for literal alternatives (e.g. mutex store_false dest)", () => {
+    // Regression: solver always stripped the literal value (`--fs-no-reconall`
+    // -> `fs-no-reconall`) and ignored alt.meta.name set by the mutex code,
+    // which caused value-key collisions when the dest differed from the flag.
+    const bt = emitFromArgdump({
+      prog: "petprep",
+      actions: [
+        {
+          option_strings: ["--fs-subjects-dir"],
+          dest: "fs_subjects_dir",
+          action_type: "store",
+          type_info: { name: "Path", module: "pathlib" },
+        },
+        {
+          option_strings: ["--fs-no-reconall"],
+          dest: "run_reconall",
+          action_type: "store_false",
+        },
+      ],
+      mutually_exclusive_groups: [
+        { required: false, actions: ["fs_subjects_dir", "run_reconall"] },
+      ],
+    });
+    const inputs = bt.inputs as Record<string, unknown>[];
+    const parent = inputs.find((i) => i.id === "fs_subjects_dir_or_run_reconall");
+    expect(parent).toBeDefined();
+    const variants = parent!.type as Record<string, unknown>[];
+    // The literal variant should use the dest from meta.name, not the
+    // stripped-flag fallback.
+    const variantIds = variants.map((v) => v.id).sort();
+    expect(variantIds).toEqual(["fs_subjects_dir", "run_reconall"]);
+  });
+
   it("sanitizes ids when source names contain illegal characters", () => {
     // Boutiques requires id ~ /^[0-9A-Za-z_]+$/. Argparse subparser command
     // names commonly contain hyphens (e.g. `do-thing`).

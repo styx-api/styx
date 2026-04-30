@@ -144,9 +144,10 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
             (alt.kind === "literal" ? literalFromNode(alt) : { kind: "bool" as const });
 
           const name =
-            alt.kind === "literal"
+            alt.meta?.name ??
+            (alt.kind === "literal"
               ? alt.attrs.str.replace(/^-+/, "")
-              : (alt.meta?.name ?? `variant_${i}`);
+              : `variant_${i}`);
 
           return { name, type: childType, node: alt };
         });

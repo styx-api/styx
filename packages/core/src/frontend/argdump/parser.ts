@@ -19,6 +19,24 @@ import type {
   SourceLocation,
 } from "../frontend.js";
 
+// Find the deepest existing name in a subtree, mirroring solver semantics.
+// Used by the mutex code so the synthesized inner name matches the binding
+// name the solver will produce for the same subtree.
+function findDeepName(node: Expr): string | undefined {
+  if (node.meta?.name) return node.meta.name;
+  if (node.kind === "optional" || node.kind === "repeat") {
+    return findDeepName(node.attrs.node);
+  }
+  if (node.kind === "sequence") {
+    for (const child of node.attrs.nodes) {
+      if (child.kind === "literal") continue;
+      const name = findDeepName(child);
+      if (name) return name;
+    }
+  }
+  return undefined;
+}
+
 // Type guards
 
 function isObject(x: unknown): x is Record<string, unknown> {
@@ -744,7 +762,11 @@ export class ArgdumpParser implements Frontend {
         inner.meta = {
           ...outerMeta,
           ...inner.meta,
-          name: inner.meta?.name ?? dest,
+          // Prefer the deepest existing name in the subtree so the synthesized
+          // name matches the binding the solver derives for the same node.
+          // Otherwise findDeepName short-circuits on the inner's new name and
+          // the variant struct's field key drifts from the binding name.
+          name: inner.meta?.name ?? findDeepName(inner) ?? dest,
         };
         altMembers.push(inner);
         excluded.add(dest);

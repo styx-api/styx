@@ -935,6 +935,60 @@ describe("ArgdumpParser", () => {
       expect(nodes[0]?.meta?.name).toBe("output_format");
     });
 
+    it("inner store action keeps the deep terminal name (matches solver binding)", () => {
+      // Regression: setting inner.meta.name to dest (underscored) instead of
+      // the existing terminal name (hyphenated, from preferredName) caused the
+      // variant struct field key to drift from the path binding's name, which
+      // broke findStructNode in the Boutiques backend (variants emitted empty).
+      const result = parse(
+        minimalDescriptor({
+          actions: [
+            {
+              dest: "fs_subjects_dir",
+              action_type: "store",
+              option_strings: ["--fs-subjects-dir"],
+              type_info: { name: "Path", module: "pathlib" },
+            },
+            {
+              dest: "run_reconall",
+              action_type: "store_false",
+              option_strings: ["--fs-no-reconall"],
+            },
+          ],
+          mutually_exclusive_groups: [
+            { required: false, actions: ["fs_subjects_dir", "run_reconall"] },
+          ],
+        }),
+      );
+      const opt = actionNodes(result)[0] as Optional;
+      const alt = opt.attrs.node as Alternative;
+      // First member is the seq for --fs-subjects-dir; its name should match
+      // the inner terminal's name ("fs-subjects-dir") rather than dest.
+      const seqAlt = alt.attrs.alts[0] as Sequence;
+      expect(seqAlt.kind).toBe("sequence");
+      expect(seqAlt.meta?.name).toBe("fs-subjects-dir");
+      const pathTerminal = seqAlt.attrs.nodes[1];
+      expect(pathTerminal?.meta?.name).toBe("fs-subjects-dir");
+    });
+
+    it("falls back to dest when no deep terminal name exists", () => {
+      // Two store_true alts: the inner is a bare literal, so there is no
+      // deeper name to inherit and we should still synthesize one from dest.
+      const result = parse(
+        minimalDescriptor({
+          actions: [
+            { dest: "json", action_type: "store_true", option_strings: ["--json"] },
+            { dest: "xml", action_type: "store_true", option_strings: ["--xml"] },
+          ],
+          mutually_exclusive_groups: [{ required: false, actions: ["json", "xml"] }],
+        }),
+      );
+      const opt = actionNodes(result)[0] as Optional;
+      const alt = opt.attrs.node as Alternative;
+      expect(alt.attrs.alts[0]?.meta?.name).toBe("json");
+      expect(alt.attrs.alts[1]?.meta?.name).toBe("xml");
+    });
+
     it("required group -> alt() without optional wrapper", () => {
       const result = parse(
         minimalDescriptor({
