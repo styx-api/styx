@@ -1,4 +1,10 @@
-import type { Binding, BoundType, BoundVariant } from "../../bindings/index.js";
+import type {
+  Binding,
+  BindingId,
+  BoundType,
+  BoundVariant,
+  ResolvedOutput,
+} from "../../bindings/index.js";
 import type { Expr, ScalarKind } from "../../ir/index.js";
 import type { AppMeta } from "../../ir/meta.js";
 import type { CodegenContext } from "../../manifest/index.js";
@@ -25,6 +31,17 @@ interface BtDescriptor {
   inputs?: BtInput[];
   "stdout-output"?: { id: string; name?: string; description?: string };
   "stderr-output"?: { id: string; name?: string; description?: string };
+  "output-files"?: BtOutputFile[];
+}
+
+interface BtOutputFile {
+  id: string;
+  name?: string;
+  description?: string;
+  "path-template": string;
+  optional?: boolean;
+  list?: boolean;
+  "path-template-stripped-extensions"?: string[];
 }
 
 interface BtInput {
@@ -63,6 +80,12 @@ interface PeeledInput {
 
 class BoutiquesEmitter {
   private warnings: EmitWarning[] = [];
+  // Parent map over ctx.expr - used to find each output host's owning scope.
+  private parents = new Map<Expr, Expr | null>();
+  // Owning descriptor scope -> outputs hosted somewhere in that scope. The
+  // scope key is either the root expr or an `alternative` arm node; outputs
+  // emit on the descriptor built from that node.
+  private outputsByScope = new Map<Expr, ResolvedOutput[]>();
 
   constructor(private ctx: CodegenContext) {}
 
@@ -71,8 +94,61 @@ class BoutiquesEmitter {
   }
 
   emit(): { descriptor: BtDescriptor; warnings: EmitWarning[] } {
+    this.indexOutputs();
     const descriptor = this.buildRootDescriptor();
     return { descriptor, warnings: this.warnings };
+  }
+
+  // Build the parent map and the per-scope output groups in one shot. The
+  // solver already exposes each output's host node (the IR node carrying it
+  // in NodeMeta.outputs); we just bucket outputs by owning descriptor scope.
+  private indexOutputs(): void {
+    this.buildParentMap(this.ctx.expr, null);
+    for (const output of this.ctx.outputs) {
+      const host = this.ctx.outputHosts.get(output);
+      if (!host) {
+        // Should not happen - the solver populates outputHosts for every
+        // resolved output - but degrade gracefully if it does.
+        this.warn(`Output '${output.name}' has no host node - skipping`);
+        continue;
+      }
+      const scope = this.findOwningScope(host);
+      let bucket = this.outputsByScope.get(scope);
+      if (!bucket) {
+        bucket = [];
+        this.outputsByScope.set(scope, bucket);
+      }
+      bucket.push(output);
+    }
+  }
+
+  private buildParentMap(node: Expr, parent: Expr | null): void {
+    this.parents.set(node, parent);
+    switch (node.kind) {
+      case "sequence":
+        for (const child of node.attrs.nodes) this.buildParentMap(child, node);
+        break;
+      case "optional":
+      case "repeat":
+        this.buildParentMap(node.attrs.node, node);
+        break;
+      case "alternative":
+        for (const alt of node.attrs.alts) this.buildParentMap(alt, node);
+        break;
+    }
+  }
+
+  // Walk from a host node toward the root. The first ancestor whose parent is
+  // an `alternative` is the owning arm; otherwise the root expr owns it.
+  private findOwningScope(host: Expr): Expr {
+    let node: Expr | null = host;
+    while (node) {
+      const parent: Expr | null = this.parents.get(node) ?? null;
+      if (parent === null) return this.ctx.expr;
+      if (parent.kind === "alternative") return node;
+      node = parent;
+    }
+    return this.ctx.expr;
   }
 
   private buildRootDescriptor(): BtDescriptor {
@@ -150,6 +226,7 @@ class BoutiquesEmitter {
     const idScope = new Scope();
     const commandParts: string[] = [];
     const inputs: BtInput[] = [];
+    const valueKeyByBinding = new Map<BindingId, string>();
 
     for (const child of expr.attrs.nodes) {
       if (child.kind === "literal") {
@@ -163,6 +240,7 @@ class BoutiquesEmitter {
         const id = idScope.add(this.sanitizeId(binding.name));
         const valueKey = scope.add(screamingSnakeCase(id));
         const valueKeyStr = `[${valueKey}]`;
+        valueKeyByBinding.set(binding.id, valueKeyStr);
         const peeled = this.peelNode(child, binding.type);
         if (this.isBool(binding.type) && !peeled.flag) {
           const flagStr = this.extractBoolFlag(child);
@@ -197,6 +275,7 @@ class BoutiquesEmitter {
 
     bt["command-line"] = commandParts.join(" ");
     bt.inputs = inputs;
+    this.emitOutputFiles(bt, expr, valueKeyByBinding, idScope);
   }
 
   // Build a subcommand descriptor from an unbound sequence node
@@ -317,6 +396,7 @@ class BoutiquesEmitter {
     const idScope = new Scope();
     const commandParts: string[] = [];
     const inputs: BtInput[] = [];
+    const valueKeyByBinding = new Map<BindingId, string>();
     const fieldInfo = collectFieldInfo(this.ctx, structType);
 
     for (const child of structNode.attrs.nodes) {
@@ -346,6 +426,7 @@ class BoutiquesEmitter {
       const id = idScope.add(this.sanitizeId(binding.name));
       const valueKey = scope.add(screamingSnakeCase(id));
       const valueKeyStr = `[${valueKey}]`;
+      valueKeyByBinding.set(binding.id, valueKeyStr);
 
       // Peel wrapper layers from the IR node
       const peeled = this.peelNode(wrapperNode, fieldType);
@@ -376,6 +457,72 @@ class BoutiquesEmitter {
 
     bt["command-line"] = commandParts.join(" ");
     bt.inputs = inputs;
+    this.emitOutputFiles(bt, expr, valueKeyByBinding, idScope);
+  }
+
+  // Emit `output-files` entries owned by this descriptor scope. Refs in
+  // `path-template` are resolved against `valueKeys` (binding id ->
+  // bracketed value-key string assigned to its input here); refs that point
+  // to bindings outside the scope are dropped with a warning. Output ids
+  // share the input id scope so they cannot collide.
+  private emitOutputFiles(
+    bt: BtDescriptor,
+    scope: Expr,
+    valueKeys: Map<BindingId, string>,
+    idScope: Scope,
+  ): void {
+    const outputs = this.outputsByScope.get(scope);
+    if (!outputs || outputs.length === 0) return;
+
+    const files: BtOutputFile[] = [];
+    for (const output of outputs) {
+      const file = this.buildOutputFile(output, valueKeys, idScope);
+      if (file) files.push(file);
+    }
+    if (files.length > 0) bt["output-files"] = files;
+  }
+
+  private buildOutputFile(
+    output: ResolvedOutput,
+    valueKeys: Map<BindingId, string>,
+    idScope: Scope,
+  ): BtOutputFile | null {
+    let template = "";
+    let stripExtensions: string[] | undefined;
+    let droppedRef = false;
+
+    for (const token of output.tokens) {
+      if (token.kind === "literal") {
+        template += token.value;
+        continue;
+      }
+      const key = valueKeys.get(token.binding);
+      if (!key) {
+        const bindingName = this.ctx.bindings.get(token.binding)?.name ?? "<unknown>";
+        this.warn(
+          `Output '${output.name}' references binding '${bindingName}' that is not in the same descriptor scope`,
+        );
+        droppedRef = true;
+        continue;
+      }
+      template += key;
+      // The parser applies the same stripped-extensions list to every ref in
+      // an output, so taking the first non-empty list round-trips cleanly.
+      if (token.stripExtensions && !stripExtensions) stripExtensions = token.stripExtensions;
+    }
+
+    // If we couldn't resolve any refs and the template is empty, drop the
+    // output entirely. (A literal-only template stays.)
+    if (droppedRef && template === "") return null;
+
+    const id = idScope.add(this.sanitizeId(output.name));
+    const file: BtOutputFile = { id, "path-template": template };
+    if (output.doc?.title) file.name = output.doc.title;
+    if (output.doc?.description) file.description = output.doc.description;
+    if (output.optional) file.optional = true;
+    if (output.listScope.length > 0) file.list = true;
+    if (stripExtensions) file["path-template-stripped-extensions"] = stripExtensions;
+    return file;
   }
 
   // Extract flag literal from a bool IR pattern: optional(literal("-v"))

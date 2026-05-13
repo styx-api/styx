@@ -146,16 +146,28 @@ export function gateContext(
  * registry. Best-effort: token refs with no resolvable binding are dropped
  * (the validator reports them); the output is still emitted with its remaining
  * tokens.
+ *
+ * Returns the resolved outputs in tree-walk order alongside a map from each
+ * resolved output to its host node (the IR node carrying it in `NodeMeta`),
+ * so callers can attribute outputs back to specific subtrees.
  */
 export function resolveOutputs(
   root: Expr,
   resolve: (n: Expr) => Binding | undefined,
   index?: NodeIndex,
-): ResolvedOutput[] {
-  const hosts = collectOutputHosts(root);
-  if (hosts.length === 0) return [];
+): { outputs: ResolvedOutput[]; hosts: Map<ResolvedOutput, Expr> } {
+  const hostList = collectOutputHosts(root);
+  if (hostList.length === 0) return { outputs: [], hosts: new Map() };
   const idx = index ?? indexTree(root, resolve);
-  return hosts.map(({ host, output }, i) => resolveOne(host, output, i, idx, resolve));
+  const outputs: ResolvedOutput[] = [];
+  const hosts = new Map<ResolvedOutput, Expr>();
+  for (let i = 0; i < hostList.length; i++) {
+    const { host, output } = hostList[i]!;
+    const resolved = resolveOne(host, output, i, idx, resolve);
+    outputs.push(resolved);
+    hosts.set(resolved, host);
+  }
+  return { outputs, hosts };
 }
 
 function resolveOne(

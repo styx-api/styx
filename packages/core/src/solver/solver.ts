@@ -229,7 +229,7 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
   // Outputs live on `NodeMeta.outputs` of the nodes that own them; build the
   // index once and share it between resolution and validation.
   const index = indexTree(expr, resolve);
-  const outputs = resolveOutputs(expr, resolve, index);
+  const { outputs, hosts: outputHosts } = resolveOutputs(expr, resolve, index);
   const outputDiagnostics = validateOutputs(expr, resolve, index);
-  return { bindings: registry, resolve, outputs, outputDiagnostics };
+  return { bindings: registry, resolve, outputs, outputHosts, outputDiagnostics };
 }

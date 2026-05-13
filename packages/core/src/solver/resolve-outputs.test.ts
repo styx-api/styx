@@ -166,4 +166,16 @@ describe("resolveOutputs", () => {
     const result = solve(seq(lit("cmd"), a, b));
     expect(result.outputs.map((o) => o.name)).toEqual(["out_a", "out_b"]);
   });
+
+  it("pairs each resolved output with its host node via outputHosts", () => {
+    const a = withOutputs(path("a"), [{ name: "out_a", tokens: [{ kind: "ref", target: nodeRef("a") }] }]);
+    const b = withOutputs(path("b"), [{ name: "out_b", tokens: [{ kind: "ref", target: nodeRef("b") }] }]);
+    const result = solve(seq(lit("cmd"), a, b));
+    const outA = result.outputs.find((o) => o.name === "out_a")!;
+    const outB = result.outputs.find((o) => o.name === "out_b")!;
+    // outputHosts entries identify the exact IR node carrying each output.
+    expect(result.outputHosts.get(outA)).toBe(a);
+    expect(result.outputHosts.get(outB)).toBe(b);
+    expect(result.outputHosts.size).toBe(2);
+  });
 });

@@ -776,3 +776,239 @@ describe("argdump -> Boutiques validity", () => {
     expect(inp!.description).toContain("Default: 0.5");
   });
 });
+
+describe("Boutiques output-files emission", () => {
+  it("emits a literal-only output-files entry at the root", () => {
+    const bt = emitFor(
+      minimalDescriptor({
+        "command-line": "tool [INPUT1]",
+        inputs: [minimalInput({ type: "String" })],
+        "output-files": [{ id: "log", "path-template": "run.log" }],
+      }),
+    );
+    const files = bt["output-files"] as Record<string, unknown>[];
+    expect(files).toHaveLength(1);
+    expect(files[0]!.id).toBe("log");
+    expect(files[0]!["path-template"]).toBe("run.log");
+    expect(files[0]!.optional).toBeUndefined();
+  });
+
+  it("emits an output that references an input via value-key", () => {
+    const bt = emitFor(
+      minimalDescriptor({
+        "command-line": "tool [INPUT_FILE]",
+        inputs: [{ id: "input_file", name: "In", type: "File", "value-key": "[INPUT_FILE]" }],
+        "output-files": [{ id: "out", "path-template": "[INPUT_FILE].out" }],
+      }),
+    );
+    const inputs = bt.inputs as Record<string, unknown>[];
+    const inputKey = inputs[0]!["value-key"] as string;
+    const files = bt["output-files"] as Record<string, unknown>[];
+    expect(files[0]!["path-template"]).toBe(`${inputKey}.out`);
+  });
+
+  it("marks the output optional when the referenced input is optional", () => {
+    const bt = emitFor(
+      minimalDescriptor({
+        "command-line": "tool [INPUT_FILE]",
+        inputs: [
+          {
+            id: "input_file",
+            name: "In",
+            type: "File",
+            "value-key": "[INPUT_FILE]",
+            optional: true,
+          },
+        ],
+        "output-files": [{ id: "out", "path-template": "[INPUT_FILE].out" }],
+      }),
+    );
+    const files = bt["output-files"] as Record<string, unknown>[];
+    expect(files[0]!.optional).toBe(true);
+  });
+
+  it("propagates path-template-stripped-extensions", () => {
+    const bt = emitFor(
+      minimalDescriptor({
+        "command-line": "tool [INPUT_FILE]",
+        inputs: [{ id: "input_file", name: "In", type: "File", "value-key": "[INPUT_FILE]" }],
+        "output-files": [
+          {
+            id: "out",
+            "path-template": "[INPUT_FILE].out",
+            "path-template-stripped-extensions": [".nii", ".nii.gz"],
+          },
+        ],
+      }),
+    );
+    const files = bt["output-files"] as Record<string, unknown>[];
+    expect(files[0]!["path-template-stripped-extensions"]).toEqual([".nii", ".nii.gz"]);
+  });
+
+  it("preserves output name and description", () => {
+    const bt = emitFor(
+      minimalDescriptor({
+        "command-line": "tool [INPUT_FILE]",
+        inputs: [{ id: "input_file", name: "In", type: "File", "value-key": "[INPUT_FILE]" }],
+        "output-files": [
+          {
+            id: "out",
+            name: "Output file",
+            description: "The output of the tool",
+            "path-template": "[INPUT_FILE].out",
+          },
+        ],
+      }),
+    );
+    const files = bt["output-files"] as Record<string, unknown>[];
+    expect(files[0]!.name).toBe("Output file");
+    expect(files[0]!.description).toBe("The output of the tool");
+  });
+
+  it("emits output-files[].optional from the parser-side optional flag", () => {
+    const bt = emitFor(
+      minimalDescriptor({
+        "command-line": "tool [INPUT_FILE]",
+        inputs: [{ id: "input_file", name: "In", type: "File", "value-key": "[INPUT_FILE]" }],
+        "output-files": [
+          { id: "maybe", "path-template": "[INPUT_FILE].extra", optional: true },
+        ],
+      }),
+    );
+    const files = bt["output-files"] as Record<string, unknown>[];
+    expect(files[0]!.optional).toBe(true);
+  });
+
+  it("emits an output hosted inside a subcommand arm on that arm's descriptor", () => {
+    const bt = emitFor(
+      minimalDescriptor({
+        "command-line": "tool [SUBCMD]",
+        inputs: [
+          {
+            id: "subcmd",
+            "value-key": "[SUBCMD]",
+            type: [
+              {
+                id: "convert",
+                "command-line": "convert [SRC]",
+                inputs: [{ id: "src", "value-key": "[SRC]", type: "File" }],
+                "output-files": [{ id: "converted", "path-template": "[SRC].conv" }],
+              },
+              {
+                id: "inspect",
+                "command-line": "inspect [TARGET]",
+                inputs: [{ id: "target", "value-key": "[TARGET]", type: "File" }],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(bt["output-files"]).toBeUndefined();
+    const inputs = bt.inputs as Record<string, unknown>[];
+    const subType = inputs[0]!.type as Record<string, unknown>[];
+    const convert = subType.find((d) => d.id === "convert")!;
+    const convertFiles = convert["output-files"] as Record<string, unknown>[];
+    expect(convertFiles).toHaveLength(1);
+    expect(convertFiles[0]!.id).toBe("converted");
+    // path-template uses the arm's locally-scoped value-key for SRC
+    const convertInputs = convert.inputs as Record<string, unknown>[];
+    const srcKey = convertInputs[0]!["value-key"] as string;
+    expect(convertFiles[0]!["path-template"]).toBe(`${srcKey}.conv`);
+    const inspectFiles = subType.find((d) => d.id === "inspect")!["output-files"];
+    expect(inspectFiles).toBeUndefined();
+  });
+
+  it("emits no output-files when the descriptor has none", () => {
+    const bt = emitFor(
+      minimalDescriptor({
+        "command-line": "tool [INPUT1]",
+        inputs: [minimalInput({ type: "String" })],
+      }),
+    );
+    expect(bt["output-files"]).toBeUndefined();
+  });
+});
+
+describe("Boutiques output-files round-trip", () => {
+  it("re-parses to an equivalent IR shape after emit", () => {
+    const descriptor = {
+      name: "tool",
+      "command-line": "tool [INPUT_FILE]",
+      inputs: [{ id: "input_file", name: "In", type: "File", "value-key": "[INPUT_FILE]" }],
+      "output-files": [
+        {
+          id: "out",
+          name: "Output",
+          description: "The output",
+          "path-template": "[INPUT_FILE].out",
+          "path-template-stripped-extensions": [".nii"],
+        },
+      ],
+    };
+    const emitted = roundTrip(descriptor);
+    const reFiles = (emitted["output-files"] as Record<string, unknown>[])[0]!;
+    expect(reFiles.id).toBe("out");
+    expect(reFiles.name).toBe("Output");
+    expect(reFiles.description).toBe("The output");
+    expect(reFiles["path-template-stripped-extensions"]).toEqual([".nii"]);
+    // path-template references the emitted input's value-key
+    const emittedInputs = emitted.inputs as Record<string, unknown>[];
+    const inputKey = emittedInputs[0]!["value-key"] as string;
+    expect(reFiles["path-template"]).toBe(`${inputKey}.out`);
+  });
+
+  it("round-trips an optional output flag", () => {
+    const descriptor = {
+      name: "tool",
+      "command-line": "tool [INPUT_FILE]",
+      inputs: [{ id: "input_file", name: "In", type: "File", "value-key": "[INPUT_FILE]" }],
+      "output-files": [{ id: "maybe", "path-template": "[INPUT_FILE].extra", optional: true }],
+    };
+    const emitted = roundTrip(descriptor);
+    const files = emitted["output-files"] as Record<string, unknown>[];
+    expect(files[0]!.optional).toBe(true);
+  });
+
+  it("round-trips a subcommand-scoped output", () => {
+    const descriptor = {
+      name: "tool",
+      "command-line": "tool [SUBCMD]",
+      inputs: [
+        {
+          id: "subcmd",
+          "value-key": "[SUBCMD]",
+          type: [
+            {
+              id: "convert",
+              "command-line": "convert [SRC]",
+              inputs: [{ id: "src", "value-key": "[SRC]", type: "File" }],
+              "output-files": [{ id: "converted", "path-template": "[SRC].conv" }],
+            },
+            {
+              id: "inspect",
+              "command-line": "inspect [TARGET]",
+              inputs: [{ id: "target", "value-key": "[TARGET]", type: "File" }],
+            },
+          ],
+        },
+      ],
+    };
+    const emitted = roundTrip(descriptor);
+    const subType = (emitted.inputs as Record<string, unknown>[])[0]!.type as Record<
+      string,
+      unknown
+    >[];
+    const convert = subType.find((d) => d.id === "convert")!;
+    const files = convert["output-files"] as Record<string, unknown>[];
+    expect(files).toHaveLength(1);
+    expect(files[0]!.id).toBe("converted");
+    // path-template references the arm's own input
+    const convertInputs = convert.inputs as Record<string, unknown>[];
+    const srcKey = convertInputs[0]!["value-key"] as string;
+    expect(files[0]!["path-template"]).toBe(`${srcKey}.conv`);
+    // the inspect arm has no outputs
+    const inspect = subType.find((d) => d.id === "inspect")!;
+    expect(inspect["output-files"]).toBeUndefined();
+  });
+});

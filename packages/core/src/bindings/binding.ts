@@ -30,6 +30,13 @@ export interface SolveResult {
   bindings: BindingRegistry;
   resolve: (node: Expr) => Binding | undefined;
   outputs: ResolvedOutput[];
+  /**
+   * Each resolved output paired with the IR node it is attached to (its
+   * implicit trigger). Backends use this to attribute outputs to the right
+   * descriptor scope (root vs. an `alternative` arm) without re-walking the
+   * tree.
+   */
+  outputHosts: Map<ResolvedOutput, Expr>;
   outputDiagnostics: OutputValidationResult;
 }
 
