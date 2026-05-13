@@ -1,4 +1,4 @@
-import type { AppMeta } from "./meta.js";
+import type { AppMeta, Output, OutputToken } from "./meta.js";
 import type { Expr } from "./node.js";
 
 export function format(expr: Expr, meta?: AppMeta): string {
@@ -28,16 +28,55 @@ export function format(expr: Expr, meta?: AppMeta): string {
   return lines.join("\n");
 }
 
+function formatOutputToken(token: OutputToken): string {
+  if (token.kind === "literal") return JSON.stringify(token.value);
+  const flags = [
+    token.stripExtensions?.length && `strip=${JSON.stringify(token.stripExtensions)}`,
+    token.fallback !== undefined && `fallback=${JSON.stringify(token.fallback)}`,
+  ].filter(Boolean);
+  const suffix = flags.length > 0 ? ` {${flags.join(", ")}}` : "";
+  return `ref(${token.target.name})${suffix}`;
+}
+
+function formatOutputsBlock(outputs: Output[], indent: number): string {
+  const pad = "  ".repeat(indent);
+  const lines = [`${pad}outputs:`];
+  for (const out of outputs) {
+    const name = out.name ?? "<anon>";
+    const optional = out.optional ? " [optional]" : "";
+    const media = out.mediaTypes?.length ? ` (${out.mediaTypes.join(", ")})` : "";
+    const tokens = out.tokens.map(formatOutputToken).join(" + ") || `""`;
+    lines.push(`${pad}  ${name}${optional}${media}: ${tokens}`);
+  }
+  return lines.join("\n");
+}
+
+// Splice the outputs block in right after the node's header line (its first
+// line), before any child lines, so outputs read naturally as belonging to
+// the node they decorate.
+function spliceOutputs(body: string, outputsBlock: string): string {
+  if (!outputsBlock) return body;
+  const nl = body.indexOf("\n");
+  if (nl === -1) return `${body}\n${outputsBlock}`;
+  return `${body.slice(0, nl)}\n${outputsBlock}${body.slice(nl)}`;
+}
+
 function formatExpr(expr: Expr, indent: number): string {
   const pad = "  ".repeat(indent);
   const name = expr.meta?.name ? ` [${expr.meta.name}]` : "";
+  const outputsBlock = expr.meta?.outputs?.length
+    ? formatOutputsBlock(expr.meta.outputs, indent + 1)
+    : "";
 
+  let body: string;
   switch (expr.kind) {
     case "literal":
-      return `${pad}literal${name} "${expr.attrs.str}"`;
+      body = `${pad}literal${name} "${expr.attrs.str}"`;
+      break;
 
     case "str":
-      return `${pad}str${name}`;
+      body = `${pad}str${name}`;
+      break;
 
     case "int": {
       const { minValue, maxValue } = expr.attrs;
@@ -45,7 +84,8 @@ function formatExpr(expr: Expr, indent: number): string {
         minValue !== undefined || maxValue !== undefined
           ? ` (${minValue ?? ""}..${maxValue ?? ""})`
           : "";
-      return `${pad}int${name}${range}`;
+      body = `${pad}int${name}${range}`;
+      break;
     }
 
     case "float": {
@@ -54,7 +94,8 @@ function formatExpr(expr: Expr, indent: number): string {
         minValue !== undefined || maxValue !== undefined
           ? ` (${minValue ?? ""}..${maxValue ?? ""})`
           : "";
-      return `${pad}float${name}${range}`;
+      body = `${pad}float${name}${range}`;
+      break;
     }
 
     case "path": {
@@ -63,29 +104,34 @@ function formatExpr(expr: Expr, indent: number): string {
         expr.attrs.mutable && "mutable",
       ].filter(Boolean);
       const suffix = flags.length > 0 ? ` {${flags.join(", ")}}` : "";
-      return `${pad}path${name}${suffix}`;
+      body = `${pad}path${name}${suffix}`;
+      break;
     }
 
     case "sequence": {
       const join = expr.attrs.join !== undefined ? ` join="${expr.attrs.join}"` : "";
       const header = `${pad}sequence${name}${join}`;
       if (expr.attrs.nodes.length === 0) {
-        return `${header} (empty)`;
+        body = `${header} (empty)`;
+      } else {
+        const children = expr.attrs.nodes.map((n) => formatExpr(n, indent + 1)).join("\n");
+        body = `${header}\n${children}`;
       }
-      const children = expr.attrs.nodes.map((n) => formatExpr(n, indent + 1)).join("\n");
-      return `${header}\n${children}`;
+      break;
     }
 
     case "alternative": {
       const header = `${pad}alternative${name}`;
       const children = expr.attrs.alts.map((n) => formatExpr(n, indent + 1)).join("\n");
-      return `${header}\n${children}`;
+      body = `${header}\n${children}`;
+      break;
     }
 
     case "optional": {
       const header = `${pad}optional${name}`;
       const child = formatExpr(expr.attrs.node, indent + 1);
-      return `${header}\n${child}`;
+      body = `${header}\n${child}`;
+      break;
     }
 
     case "repeat": {
@@ -98,12 +144,15 @@ function formatExpr(expr: Expr, indent: number): string {
       const suffix = parts.length > 0 ? ` {${parts.join(", ")}}` : "";
       const header = `${pad}repeat${name}${suffix}`;
       const child = formatExpr(expr.attrs.node, indent + 1);
-      return `${header}\n${child}`;
+      body = `${header}\n${child}`;
+      break;
     }
 
     default: {
       const _exhaustive: never = expr;
-      return `${pad}unknown`;
+      body = `${pad}unknown`;
     }
   }
+
+  return spliceOutputs(body, outputsBlock);
 }
