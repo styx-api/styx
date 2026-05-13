@@ -1,4 +1,11 @@
-import type { AppMeta, NodeMeta } from "../../ir/meta.js";
+import { nodeRef } from "../../ir/meta.js";
+import type {
+  AppMeta,
+  NodeMeta,
+  NodeRef,
+  Output,
+  OutputToken,
+} from "../../ir/meta.js";
 import type {
   Alternative,
   Expr,
@@ -37,6 +44,84 @@ function isNumber(x: unknown): x is number {
 
 function isArray(x: unknown): x is unknown[] {
   return Array.isArray(x);
+}
+
+// Output host selection helpers
+
+function childExprs(node: Expr): Expr[] {
+  switch (node.kind) {
+    case "sequence":
+      return node.attrs.nodes;
+    case "optional":
+    case "repeat":
+      return [node.attrs.node];
+    case "alternative":
+      return node.attrs.alts;
+    default:
+      return [];
+  }
+}
+
+function buildParentMap(root: Expr): Map<Expr, Expr | null> {
+  const parent = new Map<Expr, Expr | null>();
+  const walk = (n: Expr, p: Expr | null): void => {
+    parent.set(n, p);
+    for (const c of childExprs(n)) walk(c, n);
+  };
+  walk(root, null);
+  return parent;
+}
+
+/** First node in DFS order with `meta.name === name`. */
+function findNamed(root: Expr, name: string): Expr | undefined {
+  if (root.meta?.name === name) return root;
+  for (const c of childExprs(root)) {
+    const hit = findNamed(c, name);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/** Lowest common ancestor of `nodes` given a parent map. */
+function lca(nodes: Expr[], parent: Map<Expr, Expr | null>): Expr | null {
+  if (nodes.length === 0) return null;
+  const pathTo = (n: Expr): Expr[] => {
+    const path: Expr[] = [];
+    let cur: Expr | null = n;
+    while (cur) {
+      path.push(cur);
+      cur = parent.get(cur) ?? null;
+    }
+    return path.reverse(); // root -> n
+  };
+  const paths = nodes.map(pathTo);
+  const minLen = Math.min(...paths.map((p) => p.length));
+  let common: Expr | null = null;
+  for (let i = 0; i < minLen; i++) {
+    const candidate = paths[0]![i]!;
+    if (paths.every((p) => p[i] === candidate)) common = candidate;
+    else break;
+  }
+  return common;
+}
+
+/**
+ * Pick the IR node an output should hang from: the LCA of the nodes its
+ * `path-template` references. Falls back to the root for literal-only outputs
+ * or refs that aren't present in the command-line.
+ */
+function pickOutputHost(
+  rootSeq: Sequence,
+  parent: Map<Expr, Expr | null>,
+  referencedIds: Set<string>,
+): Expr {
+  const refNodes: Expr[] = [];
+  for (const id of referencedIds) {
+    const n = findNamed(rootSeq, id);
+    if (n) refNodes.push(n);
+  }
+  if (refNodes.length === 0) return rootSeq;
+  return lca(refNodes, parent) ?? rootSeq;
 }
 
 // Boutiques types
@@ -197,6 +282,96 @@ export class BoutiquesParser implements Frontend {
         },
       }),
     };
+  }
+
+  private buildOutput(
+    out: BtInput,
+    lookup: Record<string, NodeRef>,
+    idOptional: Set<string>,
+  ): { output: Output; referencedIds: Set<string> } | null {
+    const id = out.id;
+    if (!isString(id)) {
+      this.error("output-files entry missing id");
+      return null;
+    }
+
+    const template = out["path-template"];
+    if (!isString(template)) {
+      this.error(`output-files entry '${id}' missing path-template`);
+      return null;
+    }
+
+    const stripRaw = out["path-template-stripped-extensions"];
+    const stripExtensions =
+      isArray(stripRaw) && stripRaw.every(isString) && stripRaw.length > 0
+        ? (stripRaw as string[])
+        : undefined;
+
+    const parts = destructTemplate<NodeRef>(template, lookup);
+    const referencedIds = new Set<string>();
+
+    const tokens: OutputToken[] = parts.map((part) => {
+      if (typeof part === "string") return { kind: "literal" as const, value: part };
+      referencedIds.add(part.name);
+      return {
+        kind: "ref" as const,
+        target: part,
+        ...(stripExtensions && { stripExtensions }),
+        // Boutiques substitutes an unset optional input with the empty string.
+        ...(idOptional.has(part.name) && { fallback: "" }),
+      };
+    });
+
+    const title = out.name;
+    const description = out.description;
+    const output: Output = { name: id, tokens };
+    if (isString(title) || isString(description)) {
+      output.doc = {
+        ...(isString(title) && { title }),
+        ...(isString(description) && { description }),
+      };
+    }
+    if (out.optional === true) output.optional = true;
+
+    return { output, referencedIds };
+  }
+
+  /**
+   * Attach `output-files` entries to nodes in the freshly built sequence. Each
+   * output hangs from the LCA of the input nodes its `path-template`
+   * references (so their optional/repeat/alternative ancestors gate it);
+   * literal-only outputs hang from the root.
+   */
+  private attachOutputs(rootSeq: Sequence, bt: BtDescriptor): void {
+    const outputFiles = bt["output-files"];
+    if (!isArray(outputFiles)) return;
+
+    const lookup: Record<string, NodeRef> = {};
+    const idOptional = new Set<string>();
+    const inputs = bt["inputs"];
+    if (isArray(inputs)) {
+      for (const input of inputs) {
+        if (isObject(input) && isString(input["value-key"]) && isString(input.id)) {
+          lookup[input["value-key"]] = nodeRef(input.id);
+          if (input.optional === true) idOptional.add(input.id);
+        }
+      }
+    }
+
+    const parent = buildParentMap(rootSeq);
+
+    for (const out of outputFiles) {
+      if (!isObject(out)) {
+        this.warn("Skipping non-object output-files entry");
+        continue;
+      }
+      const built = this.buildOutput(out, lookup, idOptional);
+      if (!built) continue;
+
+      const host = pickOutputHost(rootSeq, parent, built.referencedIds);
+      if (!host.meta) host.meta = {};
+      host.meta.outputs = [...(host.meta.outputs ?? []), built.output];
+    }
   }
 
   private buildAppMeta(bt: BtDescriptor): AppMeta | undefined {
@@ -509,6 +684,7 @@ export class BoutiquesParser implements Frontend {
       }
     }
 
+    this.attachOutputs(rootSeq, bt);
     return rootSeq;
   }
 
@@ -526,8 +702,8 @@ export class BoutiquesParser implements Frontend {
       };
     }
 
-    const meta = this.buildAppMeta(bt);
-    if (!meta) {
+    const baseMeta = this.buildAppMeta(bt);
+    if (!baseMeta) {
       this.error("Descriptor is missing id/name");
       return {
         expr: { kind: "sequence", attrs: { nodes: [] } },
@@ -547,12 +723,12 @@ export class BoutiquesParser implements Frontend {
     }
 
     // Set root struct name from descriptor id if not already set
-    if (!expr.meta?.name && meta?.id) {
-      expr.meta = { ...expr.meta, name: meta.id };
+    if (!expr.meta?.name && baseMeta?.id) {
+      expr.meta = { ...expr.meta, name: baseMeta.id };
     }
 
     return {
-      meta,
+      meta: baseMeta,
       expr,
       errors: this.errors,
       warnings: this.warnings,

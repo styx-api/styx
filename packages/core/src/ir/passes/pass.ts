@@ -73,7 +73,6 @@ export function fixpoint(pass: Pass, maxIterations = 10): Pass {
         current = result.expr;
       }
 
-      // Hit max iterations
       return {
         expr: current,
         status: PassStatus.Changed,

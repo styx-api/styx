@@ -1,11 +1,34 @@
 import { describe, expect, it } from "vitest";
-import type { Alternative, Optional, Repeat, Sequence } from "../../ir/node.js";
+import type { Output } from "../../ir/index.js";
+import type { Alternative, Expr, Optional, Repeat, Sequence } from "../../ir/node.js";
 import { BoutiquesParser } from "./parser.js";
 
 const parser = new BoutiquesParser();
 
 function parse(descriptor: Record<string, unknown>): ReturnType<typeof parser.parse> {
   return parser.parse(JSON.stringify(descriptor));
+}
+
+/** Gather every `Output` attached to nodes in an IR tree, in tree-walk order. */
+function collectOutputs(node: Expr): Output[] {
+  const acc: Output[] = [];
+  function walk(n: Expr): void {
+    if (n.meta?.outputs) acc.push(...n.meta.outputs);
+    switch (n.kind) {
+      case "sequence":
+        for (const c of n.attrs.nodes) walk(c);
+        break;
+      case "optional":
+      case "repeat":
+        walk(n.attrs.node);
+        break;
+      case "alternative":
+        for (const a of n.attrs.alts) walk(a);
+        break;
+    }
+  }
+  walk(node);
+  return acc;
 }
 
 function minimalDescriptor(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -149,6 +172,152 @@ describe("BoutiquesParser", () => {
         }),
       );
       expect(result.meta?.stderr?.name).toBe("stderr");
+    });
+  });
+
+  describe("output-files", () => {
+    it("attaches a literal-only output to the root node", () => {
+      const result = parse(
+        minimalDescriptor({
+          "output-files": [
+            { id: "log_file", name: "Log file", description: "Run log", "path-template": "run.log" },
+          ],
+        }),
+      );
+      expect(result.errors).toEqual([]);
+      // literal-only -> hosted on the root sequence
+      expect(result.expr.meta?.outputs).toHaveLength(1);
+      const outputs = collectOutputs(result.expr);
+      expect(outputs).toHaveLength(1);
+      const out = outputs[0]!;
+      expect(out.name).toBe("log_file");
+      expect(out.doc?.title).toBe("Log file");
+      expect(out.doc?.description).toBe("Run log");
+      expect(out.tokens).toEqual([{ kind: "literal", value: "run.log" }]);
+    });
+
+    it("tokenizes path-template into literals and node refs", () => {
+      const result = parse(
+        minimalDescriptor({
+          "command-line": "test [INPUT_FILE]",
+          inputs: [minimalInput({ id: "input_file", "value-key": "[INPUT_FILE]", type: "File" })],
+          "output-files": [{ id: "out_file", name: "Output", "path-template": "[INPUT_FILE].out" }],
+        }),
+      );
+      expect(result.errors).toEqual([]);
+      expect(collectOutputs(result.expr)[0]?.tokens).toEqual([
+        { kind: "ref", target: { kind: "node-ref", name: "input_file" } },
+        { kind: "literal", value: ".out" },
+      ]);
+    });
+
+    it("hosts a single-ref output on the referenced input's node", () => {
+      const result = parse(
+        minimalDescriptor({
+          "command-line": "test [INPUT_FILE]",
+          inputs: [minimalInput({ id: "input_file", "value-key": "[INPUT_FILE]", type: "File" })],
+          "output-files": [{ id: "out_file", name: "Output", "path-template": "[INPUT_FILE].out" }],
+        }),
+      );
+      const seq = result.expr as Sequence;
+      // nodes: [lit("test"), path{name:input_file, outputs:[...]}]
+      expect(result.expr.meta?.outputs).toBeUndefined();
+      expect(seq.attrs.nodes[1]?.meta?.name).toBe("input_file");
+      expect(seq.attrs.nodes[1]?.meta?.outputs).toHaveLength(1);
+    });
+
+    it("adds an empty-string fallback to refs of optional inputs", () => {
+      const result = parse(
+        minimalDescriptor({
+          "command-line": "test [INPUT_FILE]",
+          inputs: [
+            minimalInput({ id: "input_file", "value-key": "[INPUT_FILE]", type: "File", optional: true }),
+          ],
+          "output-files": [{ id: "out_file", name: "Output", "path-template": "[INPUT_FILE].out" }],
+        }),
+      );
+      const tokens = collectOutputs(result.expr)[0]?.tokens;
+      expect(tokens?.[0]).toEqual({
+        kind: "ref",
+        target: { kind: "node-ref", name: "input_file" },
+        fallback: "",
+      });
+    });
+
+    it("carries output-files[].optional onto Output.optional", () => {
+      const result = parse(
+        minimalDescriptor({
+          "command-line": "test [INPUT_FILE]",
+          inputs: [minimalInput({ id: "input_file", "value-key": "[INPUT_FILE]", type: "File" })],
+          "output-files": [
+            { id: "out_a", name: "A", "path-template": "[INPUT_FILE].a", optional: true },
+            { id: "out_b", name: "B", "path-template": "[INPUT_FILE].b" },
+          ],
+        }),
+      );
+      const outs = collectOutputs(result.expr);
+      expect(outs.find((o) => o.name === "out_a")?.optional).toBe(true);
+      expect(outs.find((o) => o.name === "out_b")?.optional).toBeUndefined();
+    });
+
+    it("attaches stripExtensions to ref tokens", () => {
+      const result = parse(
+        minimalDescriptor({
+          "command-line": "test [INPUT_FILE]",
+          inputs: [minimalInput({ id: "input_file", "value-key": "[INPUT_FILE]", type: "File" })],
+          "output-files": [
+            {
+              id: "out_file",
+              name: "Out",
+              "path-template": "[INPUT_FILE].out",
+              "path-template-stripped-extensions": [".nii", ".nii.gz"],
+            },
+          ],
+        }),
+      );
+      const tokens = collectOutputs(result.expr)[0]?.tokens;
+      expect(tokens?.[0]).toEqual({
+        kind: "ref",
+        target: { kind: "node-ref", name: "input_file" },
+        stripExtensions: [".nii", ".nii.gz"],
+      });
+      expect(tokens?.[1]).toEqual({ kind: "literal", value: ".out" });
+    });
+
+    it("handles multiple output files", () => {
+      const result = parse(
+        minimalDescriptor({
+          "output-files": [
+            { id: "a", name: "A", "path-template": "a.out" },
+            { id: "b", name: "B", "path-template": "b.out" },
+          ],
+        }),
+      );
+      expect(collectOutputs(result.expr).map((o) => o.name)).toEqual(["a", "b"]);
+    });
+
+    it("errors on missing path-template", () => {
+      const result = parse(
+        minimalDescriptor({ "output-files": [{ id: "broken", name: "Broken" }] }),
+      );
+      expect(result.errors[0]?.message).toContain("missing path-template");
+    });
+
+    it("errors on missing id", () => {
+      const result = parse(
+        minimalDescriptor({ "output-files": [{ name: "x", "path-template": "x.out" }] }),
+      );
+      expect(result.errors[0]?.message).toContain("missing id");
+    });
+
+    it("attaches no outputs when output-files is absent", () => {
+      const result = parse(minimalDescriptor());
+      expect(collectOutputs(result.expr)).toEqual([]);
+    });
+
+    it("warns on non-object output-files entry", () => {
+      const result = parse(minimalDescriptor({ "output-files": ["not-an-object"] }));
+      expect(result.warnings.some((w) => w.message.includes("Skipping"))).toBe(true);
     });
   });
 
