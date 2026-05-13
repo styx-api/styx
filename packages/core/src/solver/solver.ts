@@ -1,6 +1,8 @@
 import type { Binding, BindingId, BoundType, SolveResult } from "../bindings/index.js";
 import { createRegistry } from "../bindings/index.js";
-import type { Expr } from "../ir/index.js";
+import type { Expr, Literal } from "../ir/index.js";
+import { indexTree, resolveOutputs } from "./resolve-outputs.js";
+import { validateOutputs } from "./validate-outputs.js";
 
 export interface SolveOptions {
   namingStrategy?: NamingStrategy;
@@ -62,21 +64,34 @@ function literalFromNode(node: Literal): BoundType {
   return { kind: "literal", value: isCleanInt ? num : str };
 }
 
-// Helper to inject discriminator into variant
-function tagVariant(variant: { name: string; type: BoundType; node: Expr }): void {
-  if (variant.type.kind === "literal") return;
-
-  const tag: BoundType = { kind: "literal", value: variant.name };
-
-  if (variant.type.kind === "struct") {
-    variant.type.fields = { "@type": tag, ...variant.type.fields };
-  } else {
-    const fieldName = findDeepName(variant.node) || "value";
-    variant.type = {
-      kind: "struct",
-      fields: { "@type": tag, [fieldName]: variant.type },
-    };
+/**
+ * Name to give the single wrapped field when a non-struct variant gets boxed
+ * into a discriminated struct. For a sequence arm the wrapped value is the
+ * inner parameter (`seq(lit("convert"), path{src})` -> `src`), so look past the
+ * arm's own (variant) name; otherwise use the value's own deep name.
+ */
+function innerParamName(armNode: Expr): string {
+  if (armNode.kind === "sequence") {
+    const inner = armNode.attrs.nodes
+      .filter((n) => n.kind !== "literal")
+      .map(findDeepName)
+      .find(Boolean);
+    if (inner) return inner;
   }
+  return findDeepName(armNode) ?? "value";
+}
+
+/**
+ * Discriminated form of a variant's type: literal variants discriminate by
+ * value (returned unchanged); struct variants get an `@type` field prepended;
+ * anything else is boxed into `{ "@type": <name>, <field>: <type> }`. Pure -
+ * never mutates `type`.
+ */
+function taggedVariantType(name: string, type: BoundType, armNode: Expr): BoundType {
+  if (type.kind === "literal") return type;
+  const tag: BoundType = { kind: "literal", value: name };
+  if (type.kind === "struct") return { kind: "struct", fields: { "@type": tag, ...type.fields } };
+  return { kind: "struct", fields: { "@type": tag, [innerParamName(armNode)]: type } };
 }
 
 export function solve(expr: Expr, options?: SolveOptions): SolveResult {
@@ -159,11 +174,14 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
           return type;
         }
 
-        // Pattern: all literals -> literal union
-        const allLiterals = variants.every((v) => v.type.kind === "literal");
-        if (!allLiterals) {
-          // Complex union -> inject discriminators
-          variants.forEach(tagVariant);
+        // Discriminate each variant. When an arm carries its own binding (a
+        // multi-field struct), retype it so that binding and the union agree;
+        // collapsed single-field arms keep their inner binding and the boxed
+        // form lives only in the union's `variants`.
+        for (const v of variants) {
+          v.type = taggedVariantType(v.name, v.type, v.node);
+          const armBinding = nodeToBinding.get(v.node);
+          if (armBinding) armBinding.type = v.type;
         }
 
         const type: BoundType = {
@@ -207,5 +225,11 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
     }
   }
 
-  return { bindings: registry, resolve: (node) => nodeToBinding.get(node) };
+  const resolve = (node: Expr) => nodeToBinding.get(node);
+  // Outputs live on `NodeMeta.outputs` of the nodes that own them; build the
+  // index once and share it between resolution and validation.
+  const index = indexTree(expr, resolve);
+  const outputs = resolveOutputs(expr, resolve, index);
+  const outputDiagnostics = validateOutputs(expr, resolve, index);
+  return { bindings: registry, resolve, outputs, outputDiagnostics };
 }

@@ -8,6 +8,18 @@ export { collectNamedTypes, resolveTypeName } from "./collect-named-types.js";
 export { findDoc } from "./find-doc.js";
 export { findStructNode } from "./find-struct-node.js";
 export { resolveFieldBinding } from "./resolve-field-binding.js";
+export type {
+  GuardClause,
+  OutputCardinality,
+  OutputEmitPlan,
+  OutputGuard,
+} from "./resolve-output-tokens.js";
+export {
+  compactTokens,
+  outputCardinality,
+  outputGuard,
+  planOutput,
+} from "./resolve-output-tokens.js";
 export { Scope } from "./scope.js";
 export type { JsonSchema } from "./schema/index.js";
 export { generateSchema, JsonSchemaBackend } from "./schema/index.js";
