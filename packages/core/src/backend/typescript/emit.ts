@@ -4,6 +4,7 @@ import { CodeBuilder } from "../code-builder.js";
 import { camelCase } from "../string-case.js";
 import type { ArgResult } from "./arg-builder.js";
 import { buildArgs, resultToStmt } from "./arg-builder.js";
+import { emitOutputsBody } from "./outputs-emit.js";
 import { mapType } from "./typemap.js";
 import type { NamedType } from "./types.js";
 import { collectFieldInfo, resolveTypeName } from "./types.js";
@@ -22,8 +23,10 @@ export function emitJsDoc(cb: CodeBuilder, description?: string): void {
   }
 }
 
-export function emitImports(cb: CodeBuilder): void {
-  cb.line('import type { Runner, Execution, Metadata, InputPathType } from "styxdefs";');
+export function emitImports(cb: CodeBuilder, emitOutputs: boolean): void {
+  const inputs = ["Runner", "Execution", "Metadata", "InputPathType"];
+  if (emitOutputs) inputs.push("OutputPathType");
+  cb.line(`import type { ${inputs.join(", ")} } from "styxdefs";`);
   cb.line('import { getGlobalRunner } from "styxdefs";');
 }
 
@@ -143,6 +146,7 @@ export function emitWrapperFunction(
   funcName: string,
   metaConst: string,
   cb: CodeBuilder,
+  emitOutputs: boolean,
 ): void {
   const appDoc = ctx.app?.doc;
   const docLines: string[] = [];
@@ -168,18 +172,26 @@ export function emitWrapperFunction(
     cb.line(" *");
     cb.line(" * @param params - The parameters.");
     cb.line(" * @param runner - Command runner (defaults to global runner).");
+    if (emitOutputs) cb.line(" * @returns Tool outputs (paths to files produced by the tool).");
     cb.line(" */");
   }
 
+  const returnType = emitOutputs ? "Outputs" : "void";
   cb.line(
-    `export function ${funcName}(params: ${paramsType}, runner: Runner | null = null): void {`,
+    `export function ${funcName}(params: ${paramsType}, runner: Runner | null = null): ${returnType} {`,
   );
   cb.indent(() => {
     cb.line("runner = runner ?? getGlobalRunner();");
     cb.line(`const execution = runner.startExecution(${metaConst});`);
     cb.line("execution.params(params);");
     cb.line(`const cargs = ${camelCase(ctx.app?.id ?? "")}_cargs(params, execution);`);
-    cb.line("execution.run(cargs);");
+    if (emitOutputs) {
+      emitOutputsBody(ctx, cb);
+      cb.line("execution.run(cargs);");
+      cb.line("return outputs;");
+    } else {
+      cb.line("execution.run(cargs);");
+    }
   });
   cb.line("}");
 }

@@ -38,7 +38,11 @@ export const tabs: TabDef[] = [
     id: "bindings",
     label: "Bindings",
     lang: "bindings",
-    compute: ({ solveResult, parseResult }) => formatSolveResult(solveResult, parseResult.expr),
+    compute: ({ solveResult, parseResult, ctx }) =>
+      formatSolveResult(solveResult, parseResult.expr, {
+        scopes: ctx.outputScopes,
+        diagnostics: ctx.outputDiagnostics,
+      }),
   },
   {
     id: "schema",

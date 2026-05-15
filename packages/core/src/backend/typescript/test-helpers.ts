@@ -50,13 +50,12 @@ export function generateCtx(
 
 // -- Execution helper: generate, transpile, run, verify args --
 
-export function execute(
-  expr: Expr,
-  params: Record<string, unknown>,
-  options?: { app?: AppMeta; package?: { name?: string } },
-): string[] {
-  const tsCode = generate(expr, options);
+interface RunResult {
+  args: string[];
+  outputs: unknown;
+}
 
+function runGenerated(tsCode: string, params: Record<string, unknown>): RunResult {
   const jsCode = ts.transpileModule(tsCode, {
     compilerOptions: {
       module: ts.ModuleKind.CommonJS,
@@ -67,6 +66,7 @@ export function execute(
   let capturedArgs: string[] = [];
   const mockExecution = {
     inputFile: (p: unknown) => String(p),
+    outputFile: (p: unknown) => String(p),
     params: () => {},
     run: (args: string[]) => {
       capturedArgs = args;
@@ -90,10 +90,26 @@ export function execute(
   );
 
   const exportedFn = Object.values(mod.exports).find((v) => typeof v === "function") as
-    | ((params: Record<string, unknown>) => void)
+    | ((params: Record<string, unknown>) => unknown)
     | undefined;
   if (!exportedFn) throw new Error("No exported function found in generated code");
 
-  exportedFn(params);
-  return capturedArgs;
+  const outputs = exportedFn(params);
+  return { args: capturedArgs, outputs };
+}
+
+export function execute(
+  expr: Expr,
+  params: Record<string, unknown>,
+  options?: { app?: AppMeta; package?: { name?: string } },
+): string[] {
+  return runGenerated(generate(expr, options), params).args;
+}
+
+export function executeWithOutputs(
+  expr: Expr,
+  params: Record<string, unknown>,
+  options?: { app?: AppMeta; package?: { name?: string } },
+): RunResult {
+  return runGenerated(generate(expr, options), params);
 }
