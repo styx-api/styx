@@ -4,7 +4,9 @@ import {
   alt,
   float,
   generate,
+  generateCore,
   generateCtx,
+  generateIndex,
   int,
   lit,
   namedAlt,
@@ -32,28 +34,32 @@ describe("TypeScript generation - structure", () => {
       app: { id: "bet", doc: { title: "bet", description: "Brain extraction" } },
       package: { name: "fsl" },
     });
-    expect(code).toContain("const BET_METADATA: Metadata");
+    expect(code).toContain("export const METADATA: Metadata");
     expect(code).toContain('id: "bet"');
     expect(code).toContain('name: "bet"');
     expect(code).toContain('package: "fsl"');
+    // Tool-prefixed public alias (rename re-export in index.ts).
+    expect(code).toContain("METADATA as BET_METADATA");
   });
 
   it("emits wrapper function using styxdefs runner protocol", () => {
     const code = generate(seq(lit("tool"), str("input")), {
       app: { id: "my-tool" },
     });
-    expect(code).toContain("export function myTool(");
+    // Internal wrapper in core.ts, then rename re-export in index.ts.
+    expect(code).toContain("export function run(");
+    expect(code).toContain("run as myTool");
     expect(code).toContain("runner = runner ?? getGlobalRunner()");
-    expect(code).toContain("runner.startExecution(MY_TOOL_METADATA)");
+    expect(code).toContain("runner.startExecution(METADATA)");
     expect(code).toContain("execution.params(params)");
-    expect(code).toContain("execution.run(cargs)");
+    expect(code).toContain("execution.run(args)");
   });
 });
 
 describe("TypeScript generation - type declarations", () => {
   it("generates interface for struct with string field", () => {
     const code = generate(seq(lit("tool"), str("name")));
-    expect(code).toContain("export interface");
+    expect(code).toContain("export interface Params {");
     expect(code).toContain("name: string");
   });
 
@@ -159,7 +165,9 @@ describe("TypeScript generation - JSDoc", () => {
     expect(code).toContain("/** Entry name */");
     expect(code).toContain("/** Entry value */");
     // Root entries field should NOT steal nested doc
-    const rootInterface = code.match(/export interface \w+ \{[\s\S]*?\n\}/)?.[0] ?? "";
+    // Root interface is `Params` (always exported). Use a stable name match
+    // so we get the root, not an inner type.
+    const rootInterface = code.match(/export interface Params \{[\s\S]*?\n\}/)?.[0] ?? "";
     expect(rootInterface).not.toContain("Entry name");
   });
 
@@ -180,7 +188,9 @@ describe("TypeScript generation - JSDoc", () => {
     expect(code).toContain("/** Minimum value */");
     expect(code).toContain("/** Maximum value */");
     // Root range field should NOT steal nested doc
-    const rootInterface = code.match(/export interface \w+ \{[\s\S]*?\n\}/)?.[0] ?? "";
+    // Root interface is `Params` (always exported). Use a stable name match
+    // so we get the root, not an inner type.
+    const rootInterface = code.match(/export interface Params \{[\s\S]*?\n\}/)?.[0] ?? "";
     expect(rootInterface).not.toContain("Minimum value");
   });
 
@@ -448,8 +458,41 @@ describe("TypeScript generation - discriminated unions", () => {
   });
 });
 
+describe("TypeScript generation - public aliases (index.ts)", () => {
+  it("emits tool-prefixed rename re-exports in index.ts", () => {
+    const index = generateIndex(seq(lit("bet"), str("input")), { app: { id: "bet" } });
+    expect(index).toContain('from "./core.js"');
+    expect(index).toContain("Params as Bet");
+    expect(index).toContain("METADATA as BET_METADATA");
+    expect(index).toContain("cargs as bet_cargs");
+    expect(index).toContain("run as bet");
+  });
+
+  it("omits Outputs rename when no outputs are present", () => {
+    const index = generateIndex(seq(lit("bet"), str("input")), { app: { id: "bet" } });
+    expect(index).not.toContain("BetOutputs");
+    expect(index).not.toContain("bet_outputs");
+  });
+
+  it("re-exports internal names directly when no appId is provided", () => {
+    const index = generateIndex(seq(lit("tool"), str("input")));
+    expect(index).not.toContain(" as ");
+    expect(index).toContain("Params");
+    expect(index).toContain("METADATA");
+    expect(index).toContain("run");
+  });
+
+  it("core.ts contains the implementation but no re-exports from index", () => {
+    const core = generateCore(seq(lit("bet"), str("input")), { app: { id: "bet" } });
+    expect(core).toContain("export function run(");
+    expect(core).toContain("export function cargs(");
+    expect(core).toContain("export const METADATA: Metadata");
+    expect(core).not.toContain('from "./core.js"');
+  });
+});
+
 describe("TypeScriptBackend", () => {
-  it("emits a file map keyed by app id", () => {
+  it("emits a package directory (index.ts + core.ts) keyed by app id", () => {
     const ctx = generateCtx(seq(lit("bet"), str("input")), {
       app: { id: "bet", doc: { title: "bet" } },
     });
@@ -457,16 +500,19 @@ describe("TypeScriptBackend", () => {
     const result = backend.emit(ctx);
 
     expect(result.errors).toHaveLength(0);
-    expect(result.files.has("bet.ts")).toBe(true);
-    expect(result.files.get("bet.ts")).toContain("export function bet(");
+    expect(result.files.has("bet/index.ts")).toBe(true);
+    expect(result.files.has("bet/core.ts")).toBe(true);
+    expect(result.files.get("bet/index.ts")).toContain("run as bet");
+    expect(result.files.get("bet/core.ts")).toContain("export function run(");
   });
 
-  it("uses output.ts when no app id", () => {
+  it("uses output/ when no app id", () => {
     const ctx = generateCtx(seq(str("input")));
     const backend = new TypeScriptBackend();
     const result = backend.emit(ctx);
 
-    expect(result.files.has("output.ts")).toBe(true);
+    expect(result.files.has("output/index.ts")).toBe(true);
+    expect(result.files.has("output/core.ts")).toBe(true);
   });
 });
 

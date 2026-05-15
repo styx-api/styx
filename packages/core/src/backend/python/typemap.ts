@@ -1,38 +1,55 @@
 import type { BoundType } from "../../bindings/index.js";
-import type { TypeMap } from "../backend.js";
 
-export const pythonTypeMap: TypeMap = {
-  map(type: BoundType): string {
-    switch (type.kind) {
-      case "scalar":
-        return { int: "int", float: "float", str: "str", path: "pathlib.Path" }[type.scalar];
-      case "bool":
-        return "bool";
-      case "count":
-        return "int";
-      case "optional":
-        return `${this.map(type.inner)} | None`;
-      case "list":
-        return `list[${this.map(type.item)}]`;
-      case "struct":
-        return "dict[str, Any]";
-      case "union":
-        return type.variants.map((v) => this.map(v.type)).join(" | ");
-      case "literal":
-        return typeof type.value === "number" ? "int" : "str";
+/**
+ * Map a BoundType to its Python type expression.
+ *
+ * `resolve` is the named-type resolver from `collectNamedTypes` - returns the
+ * declared name for struct/union types so they can be referenced symbolically
+ * rather than inlined.
+ *
+ * Python target: 3.10+ (uses `X | None`, `list[T]`, `int`/`str`/etc.).
+ */
+export function mapType(
+  type: BoundType,
+  resolve: (type: BoundType) => string | undefined,
+): string {
+  switch (type.kind) {
+    case "scalar":
+      return { int: "int", float: "float", str: "str", path: "InputPathType" }[type.scalar];
+    case "bool":
+      return "bool";
+    case "count":
+      return "int";
+    case "literal":
+      return typeof type.value === "string"
+        ? `typing.Literal[${pyStr(type.value)}]`
+        : `typing.Literal[${type.value}]`;
+    case "optional":
+      return `${mapType(type.inner, resolve)} | None`;
+    case "list":
+      return `list[${mapType(type.item, resolve)}]`;
+    case "struct": {
+      const name = resolve(type);
+      if (name) return name;
+      // Fallback: inline as Mapping[str, object]. Real struct types should always
+      // resolve to a declared TypedDict.
+      return "typing.Mapping[str, object]";
     }
-  },
-  imports(type: BoundType): string[] {
-    const imports = new Set<string>();
-    const collect = (t: BoundType) => {
-      if (t.kind === "scalar" && t.scalar === "path") imports.add("import pathlib");
-      if (t.kind === "struct") imports.add("from typing import Any");
-      if (t.kind === "optional") collect(t.inner);
-      if (t.kind === "list") collect(t.item);
-      if (t.kind === "union") t.variants.forEach((v) => collect(v.type));
-      if (t.kind === "struct") Object.values(t.fields).forEach(collect);
-    };
-    collect(type);
-    return Array.from(imports);
-  },
-};
+    case "union": {
+      const name = resolve(type);
+      if (name) return name;
+      return type.variants.map((v) => mapType(v.type, resolve)).join(" | ");
+    }
+  }
+}
+
+/** Python double-quoted string literal with minimal escaping. */
+export function pyStr(value: string): string {
+  // For any value containing control characters, JSON encoding produces a valid
+  // Python double-quoted literal (with the same `\n`/`\t`/`\uXXXX` escapes).
+  // Otherwise we hand-escape backslashes and double quotes only.
+  for (let i = 0; i < value.length; i++) {
+    if (value.charCodeAt(i) < 0x20) return JSON.stringify(value);
+  }
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}

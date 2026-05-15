@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { solve, createContext, type ParseResult } from "@styx/core";
+  import { solve, resolveOutputs, createContext, type ParseResult } from "@styx/core";
   import { tabs, type SolvedParseResult } from "./tabs.js";
   import Messages from "./Messages.svelte";
   import CodeBlock from "./CodeBlock.svelte";
@@ -20,7 +20,8 @@
     if (!result.ok) return null;
     const parseResult = result.value;
     const solveResult = solve(parseResult.expr);
-    const ctx = createContext(parseResult.expr, solveResult, { app: parseResult.meta });
+    const outputs = resolveOutputs(parseResult.expr, solveResult);
+    const ctx = createContext(parseResult.expr, solveResult, outputs, { app: parseResult.meta });
     return { parseResult, solveResult, ctx };
   });
 

@@ -3,6 +3,7 @@ import {
   formatSolveResult,
   BoutiquesBackend,
   JsonSchemaBackend,
+  PythonBackend,
   TypeScriptBackend,
   type ParseResult,
   type CodegenContext,
@@ -25,7 +26,18 @@ export interface TabDef {
 
 const boutiquesBackend = new BoutiquesBackend();
 const jsonSchemaBackend = new JsonSchemaBackend();
+const pythonBackend = new PythonBackend();
 const typescriptBackend = new TypeScriptBackend();
+
+/** Concatenate emitted files with a comment-prefixed header per file. */
+function joinFiles(files: Map<string, string>, commentPrefix: string): string {
+  const parts: string[] = [];
+  for (const [name, content] of files) {
+    const bar = "=".repeat(60);
+    parts.push(`${commentPrefix}${bar}\n${commentPrefix}${name}\n${commentPrefix}${bar}\n${content}`);
+  }
+  return parts.join("\n\n");
+}
 
 export const tabs: TabDef[] = [
   {
@@ -54,7 +66,13 @@ export const tabs: TabDef[] = [
     id: "typescript",
     label: "TypeScript",
     lang: "typescript" as BundledLanguage,
-    compute: ({ ctx }) => [...typescriptBackend.emit(ctx).files.values()][0] ?? "",
+    compute: ({ ctx }) => joinFiles(typescriptBackend.emit(ctx).files, "// "),
+  },
+  {
+    id: "python",
+    label: "Python",
+    lang: "python" as BundledLanguage,
+    compute: ({ ctx }) => joinFiles(pythonBackend.emit(ctx).files, "# "),
   },
   {
     id: "boutiques",

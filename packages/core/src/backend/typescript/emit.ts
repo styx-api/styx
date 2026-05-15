@@ -1,10 +1,8 @@
 import type { BoundType } from "../../bindings/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
-import { camelCase } from "../string-case.js";
 import type { ArgResult } from "./arg-builder.js";
 import { buildArgs, resultToStmt } from "./arg-builder.js";
-import { emitOutputsBody } from "./outputs-emit.js";
 import { mapType } from "./typemap.js";
 import type { NamedType } from "./types.js";
 import { collectFieldInfo, resolveTypeName } from "./types.js";
@@ -35,7 +33,7 @@ export function emitMetadata(ctx: CodegenContext, metaConst: string, cb: CodeBui
   const name = ctx.app?.doc?.title ?? ctx.app?.id ?? "unknown";
   const pkg = ctx.package?.name ?? "unknown";
 
-  cb.line(`const ${metaConst}: Metadata = {`);
+  cb.line(`export const ${metaConst}: Metadata = {`);
   cb.indent(() => {
     cb.line(`id: ${JSON.stringify(id)},`);
     cb.line(`name: ${JSON.stringify(name)},`);
@@ -54,6 +52,7 @@ export function emitTypeDeclarations(
   typeDecls: NamedType[],
   namedTypes: Map<string, string>,
   ctx: CodegenContext,
+  rootName: string,
   appId: string | undefined,
   pkg: string,
   cb: CodeBuilder,
@@ -61,9 +60,10 @@ export function emitTypeDeclarations(
   const resolve = resolveTypeName(namedTypes);
 
   for (const { name, type } of typeDecls) {
+    const isRoot = name === rootName;
+
     if (type.kind === "struct") {
       const fieldInfo = collectFieldInfo(ctx, type);
-      const isRoot = typeDecls[0] === typeDecls.find((t) => t.name === name);
 
       cb.line(`export interface ${name} {`);
       cb.indent(() => {
@@ -108,6 +108,7 @@ export function emitBuildCargs(
   ctx: CodegenContext,
   rootType: BoundType,
   paramsType: string,
+  funcName: string,
   cb: CodeBuilder,
 ): void {
   const paramsVar = "params";
@@ -118,7 +119,7 @@ export function emitBuildCargs(
   } catch {
     emitJsDoc(cb, "Build command-line arguments from parameters.");
     cb.line(
-      `function ${camelCase(ctx.app?.id ?? "")}_cargs(_${paramsVar}: ${paramsType}, _execution: Execution): string[] {`,
+      `export function ${funcName}(_${paramsVar}: ${paramsType}, _execution: Execution): string[] {`,
     );
     cb.indent(() => cb.line("return [];"));
     cb.line("}");
@@ -128,8 +129,9 @@ export function emitBuildCargs(
   const argsCode = resultToStmt(result);
 
   emitJsDoc(cb, "Build command-line arguments from parameters.");
-  const funcName = `${camelCase(ctx.app?.id ?? "")}_cargs`;
-  cb.line(`function ${funcName}(${paramsVar}: ${paramsType}, execution: Execution): string[] {`);
+  cb.line(
+    `export function ${funcName}(${paramsVar}: ${paramsType}, execution: Execution): string[] {`,
+  );
   cb.indent(() => {
     cb.line("const cargs: string[] = [];");
     for (const line of argsCode.split("\n")) {
@@ -145,8 +147,9 @@ export function emitWrapperFunction(
   paramsType: string,
   funcName: string,
   metaConst: string,
+  cargsFunc: string,
+  outputsFunc: string | undefined,
   cb: CodeBuilder,
-  emitOutputs: boolean,
 ): void {
   const appDoc = ctx.app?.doc;
   const docLines: string[] = [];
@@ -163,6 +166,8 @@ export function emitWrapperFunction(
     docLines.push("");
     docLines.push(`URL: ${appDoc.urls[0]}`);
   }
+
+  const emitOutputs = outputsFunc !== undefined;
 
   if (docLines.length > 0) {
     cb.line("/**");
@@ -184,13 +189,15 @@ export function emitWrapperFunction(
     cb.line("runner = runner ?? getGlobalRunner();");
     cb.line(`const execution = runner.startExecution(${metaConst});`);
     cb.line("execution.params(params);");
-    cb.line(`const cargs = ${camelCase(ctx.app?.id ?? "")}_cargs(params, execution);`);
+    // Local names `args`/`out` avoid colliding with the module-level `cargs` /
+    // `outputs` functions when they share generic names.
+    cb.line(`const args = ${cargsFunc}(params, execution);`);
     if (emitOutputs) {
-      emitOutputsBody(ctx, cb);
-      cb.line("execution.run(cargs);");
-      cb.line("return outputs;");
+      cb.line(`const out = ${outputsFunc}(params, execution);`);
+      cb.line("execution.run(args);");
+      cb.line("return out;");
     } else {
-      cb.line("execution.run(cargs);");
+      cb.line("execution.run(args);");
     }
   });
   cb.line("}");

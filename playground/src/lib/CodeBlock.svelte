@@ -24,7 +24,7 @@
     try {
       highlighter = await createHighlighter({
         themes: ["github-dark"],
-        langs: ["json", "typescript"],
+        langs: ["json", "typescript", "python"],
       });
 
       await highlighter.loadLanguage(irGrammar as any);

@@ -1,1 +1,1 @@
-export { pythonTypeMap } from "./typemap.js";
+export { generatePython, PythonBackend } from "./python.js";

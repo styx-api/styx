@@ -17,6 +17,7 @@ export {
   planOutput,
   planScope,
 } from "./resolve-output-tokens.js";
+export { generatePython, PythonBackend } from "./python/index.js";
 export { Scope } from "./scope.js";
 export type { JsonSchema } from "./schema/index.js";
 export { generateSchema, JsonSchemaBackend } from "./schema/index.js";

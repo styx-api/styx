@@ -311,40 +311,56 @@ function jsId(name: string): string {
   return JSON.stringify(name);
 }
 
-/** Emit the wrapper-body that builds the outputs object. */
-export function emitOutputsBody(ctx: CodegenContext, cb: CodeBuilder): void {
-  loopCounter = 0;
-  const ec: OutputEmitCtx = {
-    ctx,
-    access: buildAccessMap(ctx),
-    iter: new Map(),
-  };
-
-  // Initialize the outputs object with defaults so wrapper code can assign or
-  // push into it without conditional construction.
-  cb.line(`const outputs: Outputs = {`);
+/**
+ * Emit a standalone `_outputs(params, execution)` function that builds and
+ * returns the `Outputs` object. Mirrors the `_cargs` function structurally so
+ * the wrapper can just call both.
+ */
+export function emitBuildOutputs(
+  ctx: CodegenContext,
+  paramsType: string,
+  funcName: string,
+  cb: CodeBuilder,
+): void {
+  cb.line(
+    `export function ${funcName}(params: ${paramsType}, execution: Execution): Outputs {`,
+  );
   cb.indent(() => {
+    loopCounter = 0;
+    const ec: OutputEmitCtx = {
+      ctx,
+      access: buildAccessMap(ctx),
+      iter: new Map(),
+    };
+
+    // Initialize the outputs object with defaults so wrapper code can assign or
+    // push into it without conditional construction.
+    cb.line(`const outputs: Outputs = {`);
+    cb.indent(() => {
+      for (const scope of ctx.outputScopes) {
+        const scopeBinding = ctx.bindings.get(scope.scope);
+        const scopeGate = scopeBinding?.gate ?? [];
+        for (const output of scope.outputs) {
+          const gate = outputGate(scopeGate, output, ctx.bindings);
+          const shape = outputShape(gate);
+          cb.line(`${jsId(output.name)}: ${initialValue(shape)},`);
+        }
+      }
+    });
+    cb.line(`};`);
+
     for (const scope of ctx.outputScopes) {
       const scopeBinding = ctx.bindings.get(scope.scope);
       const scopeGate = scopeBinding?.gate ?? [];
       for (const output of scope.outputs) {
         const gate = outputGate(scopeGate, output, ctx.bindings);
-        const shape = outputShape(gate);
-        cb.line(`${jsId(output.name)}: ${initialValue(shape)},`);
+        emitOneOutput(output, gate, ec, cb);
       }
     }
-  });
-  cb.line(`};`);
 
-  // Emit each output's assignment inside its wrapper stack.
-  for (const scope of ctx.outputScopes) {
-    const scopeBinding = ctx.bindings.get(scope.scope);
-    const scopeGate = scopeBinding?.gate ?? [];
-    for (const output of scope.outputs) {
-      const gate = outputGate(scopeGate, output, ctx.bindings);
-      emitOneOutput(output, gate, ec, cb);
-    }
-  }
+    cb.line(`return outputs;`);
+  });
+  cb.line(`}`);
 }
 
 /**

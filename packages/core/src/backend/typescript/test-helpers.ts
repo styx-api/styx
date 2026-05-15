@@ -4,6 +4,7 @@ import { alt, float, int, lit, opt, path, rep, repJoin, seq, seqJoin } from "../
 import type { CodegenContext } from "../../manifest/index.js";
 import { resolveOutputs, solve } from "../../solver/index.js";
 import { createContext } from "../../manifest/context.js";
+import type { GeneratedTypeScript } from "./typescript.js";
 import { generateTypeScript } from "./typescript.js";
 
 // Re-export IR builders for test convenience
@@ -23,17 +24,39 @@ export function namedAlt(name: string, ...alts: Expr[]): Expr {
 
 // -- Generate helpers --
 
+/**
+ * For tests asserting against generated source: returns the concatenation of
+ * `core.ts` and `index.ts` separated by a marker. Most substring assertions
+ * just want "is this string anywhere in the output", and that's preserved
+ * across both files this way.
+ */
 export function generate(
   expr: Expr,
   options?: { app?: AppMeta; package?: { name?: string } },
 ): string {
-  const solveResult = solve(expr);
-  const outputs = resolveOutputs(expr, solveResult);
-  const ctx = createContext(expr, solveResult, outputs, {
-    app: options?.app,
-    package: options?.package,
-  });
-  return generateTypeScript(ctx);
+  const { core, index } = generateBoth(expr, options);
+  return `${core}\n// ----- index.ts -----\n${index}`;
+}
+
+export function generateCore(
+  expr: Expr,
+  options?: { app?: AppMeta; package?: { name?: string } },
+): string {
+  return generateBoth(expr, options).core;
+}
+
+export function generateIndex(
+  expr: Expr,
+  options?: { app?: AppMeta; package?: { name?: string } },
+): string {
+  return generateBoth(expr, options).index;
+}
+
+export function generateBoth(
+  expr: Expr,
+  options?: { app?: AppMeta; package?: { name?: string } },
+): GeneratedTypeScript {
+  return generateTypeScript(generateCtx(expr, options));
 }
 
 export function generateCtx(
@@ -89,10 +112,13 @@ function runGenerated(tsCode: string, params: Record<string, unknown>): RunResul
     mod.exports,
   );
 
-  const exportedFn = Object.values(mod.exports).find((v) => typeof v === "function") as
+  // The wrapper is the `run` function in the core module. Pick it explicitly
+  // rather than guessing by position - all six swap items are exported and
+  // ordering would be brittle.
+  const exportedFn = mod.exports["run"] as
     | ((params: Record<string, unknown>) => unknown)
     | undefined;
-  if (!exportedFn) throw new Error("No exported function found in generated code");
+  if (!exportedFn) throw new Error("No `run` function found in generated code");
 
   const outputs = exportedFn(params);
   return { args: capturedArgs, outputs };
@@ -103,7 +129,9 @@ export function execute(
   params: Record<string, unknown>,
   options?: { app?: AppMeta; package?: { name?: string } },
 ): string[] {
-  return runGenerated(generate(expr, options), params).args;
+  // Execution exercises just the core file - the index file is purely for
+  // public re-exports and adds no behavior.
+  return runGenerated(generateCore(expr, options), params).args;
 }
 
 export function executeWithOutputs(
@@ -111,5 +139,5 @@ export function executeWithOutputs(
   params: Record<string, unknown>,
   options?: { app?: AppMeta; package?: { name?: string } },
 ): RunResult {
-  return runGenerated(generate(expr, options), params);
+  return runGenerated(generateCore(expr, options), params);
 }
