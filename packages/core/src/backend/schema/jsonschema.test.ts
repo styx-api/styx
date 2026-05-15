@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { solve } from "../../solver/solver.js";
+import { resolveOutputs, solve } from "../../solver/index.js";
 import { defaultPipeline } from "../../ir/index.js";
 import { BoutiquesParser } from "../../frontend/boutiques/parser.js";
 import { createContext } from "../../manifest/context.js";
@@ -12,7 +12,8 @@ function schemaFor(descriptor: Record<string, unknown>): JsonSchema {
   const { expr, meta } = parser.parse(JSON.stringify(descriptor));
   const optimized = defaultPipeline.apply(expr).expr;
   const solveResult = solve(optimized);
-  const ctx = createContext(optimized, solveResult, { app: meta });
+  const outputs = resolveOutputs(optimized, solveResult);
+  const ctx = createContext(optimized, solveResult, outputs, { app: meta });
   return generateSchema(ctx);
 }
 
@@ -262,7 +263,8 @@ describe("JsonSchemaBackend", () => {
     );
     const optimized = defaultPipeline.apply(expr).expr;
     const solveResult = solve(optimized);
-    const ctx = createContext(optimized, solveResult, {
+    const outputs = resolveOutputs(optimized, solveResult);
+    const ctx = createContext(optimized, solveResult, outputs, {
       app: meta ? { doc: meta.doc } : undefined,
     });
 

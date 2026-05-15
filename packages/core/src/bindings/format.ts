@@ -1,35 +1,77 @@
 import type { Expr } from "../ir/node.js";
-import type { BindingRegistry } from "./binding.js";
+import type { BindingRegistry, OutputValidationResult } from "./binding.js";
 import type { SolveResult } from "./index.js";
-import type { GateAtom, ResolvedOutput, ResolvedToken } from "./resolved-output.js";
+import { outputGate } from "./output-gate.js";
+import type { GateAtom, OutputScope, ResolvedOutput, ResolvedToken } from "./resolved-output.js";
 import type { BoundType } from "./types.js";
 
-export function formatSolveResult(result: SolveResult, expr: Expr): string {
+export interface FormatExtras {
+  scopes?: OutputScope[];
+  diagnostics?: OutputValidationResult;
+}
+
+export function formatSolveResult(result: SolveResult, expr: Expr, extras?: FormatExtras): string {
   const binding = result.resolve(expr);
   const rootLine = binding ? `${binding.name}: ${formatType(binding.type)}` : "(no binding)";
 
   const sections = [rootLine];
-  if (result.outputs.length > 0) {
-    sections.push("", "outputs:");
-    for (const out of result.outputs) {
-      sections.push(formatResolvedOutput(out, result.bindings, 1));
+
+  const gatedBindings = [...result.bindings.values()].filter(
+    (b) => b.gate.length > 0 && b !== binding,
+  );
+  if (gatedBindings.length > 0) {
+    sections.push("", "gates:");
+    for (const b of gatedBindings) {
+      sections.push(`  ${b.name}: ${formatGate(b.gate, result.bindings)}`);
     }
   }
-  const diags = [...result.outputDiagnostics.errors, ...result.outputDiagnostics.warnings];
+
+  if (extras?.scopes?.length) {
+    sections.push("", "outputs:");
+    for (const scope of extras.scopes) {
+      const scopeBinding = result.bindings.get(scope.scope);
+      const header = scopeBinding ? `  on ${scopeBinding.name}:` : "  on <unbound>:";
+      sections.push(header);
+      const scopeGate = scopeBinding?.gate ?? [];
+      for (const out of scope.outputs) {
+        sections.push(formatResolvedOutput(out, scopeGate, result.bindings, 2));
+      }
+    }
+  }
+
+  const diags = [...(extras?.diagnostics?.errors ?? []), ...(extras?.diagnostics?.warnings ?? [])];
   if (diags.length > 0) {
     sections.push("", "diagnostics:");
-    for (const d of diags) {
-      sections.push(`  [${d.level}] ${d.output}: ${d.message}`);
-    }
+    for (const d of diags) sections.push(`  [${d.level}] ${d.output}: ${d.message}`);
   }
+
   return sections.join("\n");
+}
+
+function formatResolvedOutput(
+  out: ResolvedOutput,
+  scopeGate: GateAtom[],
+  bindings: BindingRegistry,
+  indent: number,
+): string {
+  const pad = "  ".repeat(indent);
+  const media = out.mediaTypes?.length ? ` (${out.mediaTypes.join(", ")})` : "";
+  const tokens = out.tokens.map((t) => formatResolvedToken(t, bindings)).join(" + ") || `""`;
+  const gateAtoms = outputGate(scopeGate, out, bindings);
+  const optional = gateAtoms.some((a) => a.kind === "present" || a.kind === "variant");
+  const optTag = optional ? " [optional]" : "";
+  const gate =
+    gateAtoms.length > 0
+      ? ` when (${gateAtoms.map((a) => formatGateAtom(a, bindings)).join(" AND ")})`
+      : "";
+  return `${pad}${out.name}${optTag}${media}: ${tokens}${gate}`;
 }
 
 function bindingName(bindings: BindingRegistry, id: string): string {
   return bindings.get(id)?.name ?? `<${id}>`;
 }
 
-function formatResolvedToken(token: ResolvedToken, bindings: BindingRegistry): string {
+export function formatResolvedToken(token: ResolvedToken, bindings: BindingRegistry): string {
   if (token.kind === "literal") return JSON.stringify(token.value);
   const flags = [
     token.stripExtensions?.length && `strip=${JSON.stringify(token.stripExtensions)}`,
@@ -39,39 +81,20 @@ function formatResolvedToken(token: ResolvedToken, bindings: BindingRegistry): s
   return `ref(${bindingName(bindings, token.binding)})${suffix}`;
 }
 
-function formatGateAtom(atom: GateAtom, bindings: BindingRegistry): string {
-  if (atom.kind === "present") return `present(${bindingName(bindings, atom.binding)})`;
-  return `${bindingName(bindings, atom.binding)}=${atom.variant}`;
+export function formatGateAtom(atom: GateAtom, bindings: BindingRegistry): string {
+  switch (atom.kind) {
+    case "present":
+      return `present(${bindingName(bindings, atom.binding)})`;
+    case "variant":
+      return `${bindingName(bindings, atom.binding)}=${atom.variant}`;
+    case "iter":
+      return `iter(${bindingName(bindings, atom.binding)})`;
+  }
 }
 
-function formatBranchCondition(
-  branchCondition: GateAtom[][],
-  bindings: BindingRegistry,
-): string {
-  // Outer = disjunction, inner = conjunction. Skip the "[[]]" trivial guard.
-  const meaningful = branchCondition.filter((conj) => conj.length > 0);
-  if (meaningful.length === 0) return "";
-  const clauses = meaningful.map(
-    (conj) => `(${conj.map((a) => formatGateAtom(a, bindings)).join(" AND ")})`,
-  );
-  return ` when ${clauses.join(" OR ")}`;
-}
-
-function formatResolvedOutput(
-  out: ResolvedOutput,
-  bindings: BindingRegistry,
-  indent: number,
-): string {
-  const pad = "  ".repeat(indent);
-  const optional = out.optional ? " [optional]" : "";
-  const media = out.mediaTypes?.length ? ` (${out.mediaTypes.join(", ")})` : "";
-  const tokens = out.tokens.map((t) => formatResolvedToken(t, bindings)).join(" + ") || `""`;
-  const gate = formatBranchCondition(out.branchCondition, bindings);
-  const listScope =
-    out.listScope.length > 0
-      ? ` for each ${out.listScope.map((id) => bindingName(bindings, id)).join(", ")}`
-      : "";
-  return `${pad}${out.name}${optional}${media}: ${tokens}${gate}${listScope}`;
+export function formatGate(gate: GateAtom[], bindings: BindingRegistry): string {
+  if (gate.length === 0) return "(unconditional)";
+  return gate.map((a) => formatGateAtom(a, bindings)).join(" / ");
 }
 
 function formatType(type: BoundType, indent = 0): string {

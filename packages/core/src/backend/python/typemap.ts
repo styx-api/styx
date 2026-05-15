@@ -18,6 +18,8 @@ export const pythonTypeMap: TypeMap = {
         return "dict[str, Any]";
       case "union":
         return type.variants.map((v) => this.map(v.type)).join(" | ");
+      case "literal":
+        return typeof type.value === "number" ? "int" : "str";
     }
   },
   imports(type: BoundType): string[] {

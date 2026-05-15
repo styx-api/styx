@@ -152,11 +152,7 @@
     --warning-subtle: rgba(245, 158, 11, 0.12);
     --radius: 6px;
     --radius-lg: 8px;
-    --font-mono:
-      "JetBrains Mono",
-      "Fira Code",
-      "Cascadia Code",
-      monospace;
+    --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
     --font-size-mono: 13px;
     --transition: 150ms ease;
   }

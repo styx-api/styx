@@ -1,14 +1,19 @@
-import type { BindingRegistry, ResolvedOutput, SolveResult } from "../bindings/index.js";
+import type {
+  BindingRegistry,
+  OutputScope,
+  OutputValidationResult,
+  SolveResult,
+} from "../bindings/index.js";
 import type { AppMeta, Expr } from "../ir/index.js";
+import type { OutputResolution } from "../solver/index.js";
 import type { PackageMeta, ProjectMeta } from "./types.js";
 
 export interface CodegenContext {
   expr: Expr;
   bindings: BindingRegistry;
   resolve: SolveResult["resolve"];
-  outputs: ResolvedOutput[];
-  /** Per-output host node (the IR node carrying it in `NodeMeta.outputs`). */
-  outputHosts: Map<ResolvedOutput, Expr>;
+  outputScopes: OutputScope[];
+  outputDiagnostics: OutputValidationResult;
   app?: AppMeta;
   package?: PackageMeta;
   project?: ProjectMeta;
@@ -17,14 +22,15 @@ export interface CodegenContext {
 export function createContext(
   expr: Expr,
   solveResult: SolveResult,
+  outputs: OutputResolution,
   meta?: { app?: AppMeta; package?: PackageMeta; project?: ProjectMeta },
 ): CodegenContext {
   return {
     expr,
     bindings: solveResult.bindings,
     resolve: solveResult.resolve,
-    outputs: solveResult.outputs,
-    outputHosts: solveResult.outputHosts,
+    outputScopes: outputs.scopes,
+    outputDiagnostics: outputs.diagnostics,
     ...meta,
   };
 }

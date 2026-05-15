@@ -52,11 +52,7 @@
 
   <div class="tab-bar">
     {#each tabs as tab}
-      <button
-        class="tab"
-        class:active={activeTab === tab.id}
-        onclick={() => (activeTab = tab.id)}
-      >
+      <button class="tab" class:active={activeTab === tab.id} onclick={() => (activeTab = tab.id)}>
         {tab.label}
       </button>
     {/each}

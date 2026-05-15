@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { alt, lit, nodeRef, opt, path, seq } from "../ir/index.js";
-import { solve } from "../solver/index.js";
+import { resolveOutputs, solve } from "../solver/index.js";
 import { formatSolveResult } from "./format.js";
 
 describe("formatSolveResult", () => {
   it("renders the root binding alongside resolved outputs", () => {
     const host = opt(path("input"));
-    host.meta = {
+    const root = seq(lit("cmd"), host);
+    root.meta = {
       outputs: [
         {
           name: "out",
@@ -17,13 +18,17 @@ describe("formatSolveResult", () => {
         },
       ],
     };
-    const result = solve(seq(lit("cmd"), host));
-    const text = formatSolveResult(result, seq(lit("cmd"), host));
+    const result = solve(root);
+    const resolution = resolveOutputs(root, result);
+    const text = formatSolveResult(result, root, {
+      scopes: resolution.scopes,
+      diagnostics: resolution.diagnostics,
+    });
     expect(text).toContain("outputs:");
     expect(text).toContain('out [optional]: ref(input) + ".out" when (present(input))');
   });
 
-  it("renders a variant gate for an arm-hosted output", () => {
+  it("renders a variant gate for an output declared inside an alt arm", () => {
     const armA = seq(lit("--a"), path("a"));
     armA.meta = {
       name: "alpha",
@@ -33,9 +38,12 @@ describe("formatSolveResult", () => {
     armB.meta = { name: "beta" };
     const expr = seq(lit("cmd"), alt(armA, armB));
     const result = solve(expr);
-    const text = formatSolveResult(result, expr);
-    // The gate names the union binding and the selected variant.
-    expect(text).toMatch(/out \[optional\]:.*when \(\w+=alpha\)/);
+    const resolution = resolveOutputs(expr, result);
+    const text = formatSolveResult(result, expr, {
+      scopes: resolution.scopes,
+      diagnostics: resolution.diagnostics,
+    });
+    expect(text).toMatch(/out \[optional\]:.*\w+=alpha/);
   });
 
   it("emits a diagnostics section when validation reports issues", () => {
@@ -49,9 +57,12 @@ describe("formatSolveResult", () => {
       ],
     };
     const result = solve(root);
-    const text = formatSolveResult(result, root);
-    // validator complains about the dangling ref
-    if (result.outputDiagnostics.errors.length || result.outputDiagnostics.warnings.length) {
+    const resolution = resolveOutputs(root, result);
+    const text = formatSolveResult(result, root, {
+      scopes: resolution.scopes,
+      diagnostics: resolution.diagnostics,
+    });
+    if (resolution.diagnostics.errors.length || resolution.diagnostics.warnings.length) {
       expect(text).toContain("diagnostics:");
     }
   });

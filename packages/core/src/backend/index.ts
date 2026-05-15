@@ -8,17 +8,14 @@ export { collectNamedTypes, resolveTypeName } from "./collect-named-types.js";
 export { findDoc } from "./find-doc.js";
 export { findStructNode } from "./find-struct-node.js";
 export { resolveFieldBinding } from "./resolve-field-binding.js";
-export type {
-  GuardClause,
-  OutputCardinality,
-  OutputEmitPlan,
-  OutputGuard,
-} from "./resolve-output-tokens.js";
+export type { OutputEmitPlan } from "./resolve-output-tokens.js";
 export {
   compactTokens,
-  outputCardinality,
-  outputGuard,
+  isGated,
+  isIterated,
+  outputGate,
   planOutput,
+  planScope,
 } from "./resolve-output-tokens.js";
 export { Scope } from "./scope.js";
 export type { JsonSchema } from "./schema/index.js";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { solve } from "../../solver/solver.js";
+import { resolveOutputs, solve } from "../../solver/index.js";
 import { defaultPipeline } from "../../ir/index.js";
 import { BoutiquesParser } from "../../frontend/boutiques/parser.js";
 import { ArgdumpParser } from "../../frontend/argdump/parser.js";
@@ -12,7 +12,8 @@ function emitFor(descriptor: Record<string, unknown>): Record<string, unknown> {
   const { expr, meta } = parser.parse(JSON.stringify(descriptor));
   const optimized = defaultPipeline.apply(expr).expr;
   const solveResult = solve(optimized);
-  const ctx = createContext(optimized, solveResult, { app: meta });
+  const outputs = resolveOutputs(optimized, solveResult);
+  const ctx = createContext(optimized, solveResult, outputs, { app: meta });
   const { descriptor: bt } = generateBoutiques(ctx);
   return bt as Record<string, unknown>;
 }
@@ -287,9 +288,7 @@ describe("Boutiques subcommands", () => {
             type: {
               id: "sub",
               "command-line": "--name [NAME]",
-              inputs: [
-                { id: "name", "value-key": "[NAME]", type: "String" },
-              ],
+              inputs: [{ id: "name", "value-key": "[NAME]", type: "String" }],
             },
           },
         ],
@@ -325,9 +324,7 @@ describe("Boutiques subcommands", () => {
                 id: "mode_b",
                 name: "Mode B",
                 "command-line": "--mode b [NUM]",
-                inputs: [
-                  { id: "num", "value-key": "[NUM]", type: "Number", integer: true },
-                ],
+                inputs: [{ id: "num", "value-key": "[NUM]", type: "Number", integer: true }],
               },
             ],
           },
@@ -415,7 +412,8 @@ describe("BoutiquesBackend", () => {
     );
     const optimized = defaultPipeline.apply(expr).expr;
     const solveResult = solve(optimized);
-    const ctx = createContext(optimized, solveResult, { app: meta });
+    const outputs = resolveOutputs(optimized, solveResult);
+    const ctx = createContext(optimized, solveResult, outputs, { app: meta });
 
     const backend = new BoutiquesBackend();
     const result = backend.emit(ctx);
@@ -448,7 +446,8 @@ describe("BoutiquesBackend", () => {
     );
     const optimized = defaultPipeline.apply(expr).expr;
     const solveResult = solve(optimized);
-    const ctx = createContext(optimized, solveResult, { app: meta });
+    const outputs = resolveOutputs(optimized, solveResult);
+    const ctx = createContext(optimized, solveResult, outputs, { app: meta });
 
     const backend = new BoutiquesBackend();
     const result = backend.emit(ctx);
@@ -470,7 +469,8 @@ describe("argdump -> Boutiques validity", () => {
     const { expr, meta } = argdumpParser.parse(JSON.stringify(dump));
     const optimized = defaultPipeline.apply(expr).expr;
     const solveResult = solve(optimized);
-    const ctx = createContext(optimized, solveResult, { app: meta });
+    const outputs = resolveOutputs(optimized, solveResult);
+    const ctx = createContext(optimized, solveResult, outputs, { app: meta });
     const { descriptor: bt } = generateBoutiques(ctx);
     return bt as Record<string, unknown>;
   }
@@ -630,9 +630,7 @@ describe("argdump -> Boutiques validity", () => {
           action_type: "store_true",
         },
       ],
-      mutually_exclusive_groups: [
-        { required: false, actions: ["input_file", "no_input"] },
-      ],
+      mutually_exclusive_groups: [{ required: false, actions: ["input_file", "no_input"] }],
     });
     const inputs = bt.inputs as Record<string, unknown>[];
     const parent = inputs.find((i) => i.id === "input_file_or_no_input");
@@ -665,9 +663,7 @@ describe("argdump -> Boutiques validity", () => {
           action_type: "store_true",
         },
       ],
-      mutually_exclusive_groups: [
-        { required: false, actions: ["input_file", "no_input"] },
-      ],
+      mutually_exclusive_groups: [{ required: false, actions: ["input_file", "no_input"] }],
     });
     const inputs = bt.inputs as Record<string, unknown>[];
     const parent = inputs.find((i) => i.id === "input_file_or_no_input");
@@ -865,18 +861,19 @@ describe("Boutiques output-files emission", () => {
     expect(files[0]!.description).toBe("The output of the tool");
   });
 
-  it("emits output-files[].optional from the parser-side optional flag", () => {
+  it("does not emit `optional: true` when no ref is gated (the source hint is dropped)", () => {
+    // The Boutiques source `optional: true` is a tool-author hint we re-derive
+    // structurally - so an output whose refs all point to required inputs
+    // emits without the flag, regardless of the hint.
     const bt = emitFor(
       minimalDescriptor({
         "command-line": "tool [INPUT_FILE]",
         inputs: [{ id: "input_file", name: "In", type: "File", "value-key": "[INPUT_FILE]" }],
-        "output-files": [
-          { id: "maybe", "path-template": "[INPUT_FILE].extra", optional: true },
-        ],
+        "output-files": [{ id: "maybe", "path-template": "[INPUT_FILE].extra", optional: true }],
       }),
     );
     const files = bt["output-files"] as Record<string, unknown>[];
-    expect(files[0]!.optional).toBe(true);
+    expect(files[0]!.optional).toBeUndefined();
   });
 
   it("emits an output hosted inside a subcommand arm on that arm's descriptor", () => {
@@ -958,12 +955,15 @@ describe("Boutiques output-files round-trip", () => {
     expect(reFiles["path-template"]).toBe(`${inputKey}.out`);
   });
 
-  it("round-trips an optional output flag", () => {
+  it("round-trips an output optional flag derived from an optional ref", () => {
+    // The optional input drives the structural optionality of the output.
     const descriptor = {
       name: "tool",
       "command-line": "tool [INPUT_FILE]",
-      inputs: [{ id: "input_file", name: "In", type: "File", "value-key": "[INPUT_FILE]" }],
-      "output-files": [{ id: "maybe", "path-template": "[INPUT_FILE].extra", optional: true }],
+      inputs: [
+        { id: "input_file", name: "In", type: "File", "value-key": "[INPUT_FILE]", optional: true },
+      ],
+      "output-files": [{ id: "maybe", "path-template": "[INPUT_FILE].extra" }],
     };
     const emitted = roundTrip(descriptor);
     const files = emitted["output-files"] as Record<string, unknown>[];

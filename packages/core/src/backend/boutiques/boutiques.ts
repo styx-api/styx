@@ -3,6 +3,8 @@ import type {
   BindingId,
   BoundType,
   BoundVariant,
+  GateAtom,
+  OutputScope,
   ResolvedOutput,
 } from "../../bindings/index.js";
 import type { Expr, ScalarKind } from "../../ir/index.js";
@@ -12,6 +14,7 @@ import type { Backend, EmitResult, EmitWarning } from "../backend.js";
 import { collectFieldInfo } from "../collect-field-info.js";
 import { findDoc } from "../find-doc.js";
 import { findStructNode } from "../find-struct-node.js";
+import { outputGate } from "../resolve-output-tokens.js";
 import { resolveFieldBinding } from "../resolve-field-binding.js";
 import { Scope } from "../scope.js";
 import { screamingSnakeCase } from "../string-case.js";
@@ -80,75 +83,21 @@ interface PeeledInput {
 
 class BoutiquesEmitter {
   private warnings: EmitWarning[] = [];
-  // Parent map over ctx.expr - used to find each output host's owning scope.
-  private parents = new Map<Expr, Expr | null>();
-  // Owning descriptor scope -> outputs hosted somewhere in that scope. The
-  // scope key is either the root expr or an `alternative` arm node; outputs
-  // emit on the descriptor built from that node.
-  private outputsByScope = new Map<Expr, ResolvedOutput[]>();
+  // Scope binding id -> outputs declared on that struct. The solver forces a
+  // binding on every output-carrying sequence, so this is a one-liner.
+  private outputsByScope = new Map<BindingId, OutputScope>();
 
-  constructor(private ctx: CodegenContext) {}
+  constructor(private ctx: CodegenContext) {
+    for (const scope of ctx.outputScopes) this.outputsByScope.set(scope.scope, scope);
+  }
 
   private warn(message: string): void {
     this.warnings.push({ message });
   }
 
   emit(): { descriptor: BtDescriptor; warnings: EmitWarning[] } {
-    this.indexOutputs();
     const descriptor = this.buildRootDescriptor();
     return { descriptor, warnings: this.warnings };
-  }
-
-  // Build the parent map and the per-scope output groups in one shot. The
-  // solver already exposes each output's host node (the IR node carrying it
-  // in NodeMeta.outputs); we just bucket outputs by owning descriptor scope.
-  private indexOutputs(): void {
-    this.buildParentMap(this.ctx.expr, null);
-    for (const output of this.ctx.outputs) {
-      const host = this.ctx.outputHosts.get(output);
-      if (!host) {
-        // Should not happen - the solver populates outputHosts for every
-        // resolved output - but degrade gracefully if it does.
-        this.warn(`Output '${output.name}' has no host node - skipping`);
-        continue;
-      }
-      const scope = this.findOwningScope(host);
-      let bucket = this.outputsByScope.get(scope);
-      if (!bucket) {
-        bucket = [];
-        this.outputsByScope.set(scope, bucket);
-      }
-      bucket.push(output);
-    }
-  }
-
-  private buildParentMap(node: Expr, parent: Expr | null): void {
-    this.parents.set(node, parent);
-    switch (node.kind) {
-      case "sequence":
-        for (const child of node.attrs.nodes) this.buildParentMap(child, node);
-        break;
-      case "optional":
-      case "repeat":
-        this.buildParentMap(node.attrs.node, node);
-        break;
-      case "alternative":
-        for (const alt of node.attrs.alts) this.buildParentMap(alt, node);
-        break;
-    }
-  }
-
-  // Walk from a host node toward the root. The first ancestor whose parent is
-  // an `alternative` is the owning arm; otherwise the root expr owns it.
-  private findOwningScope(host: Expr): Expr {
-    let node: Expr | null = host;
-    while (node) {
-      const parent: Expr | null = this.parents.get(node) ?? null;
-      if (parent === null) return this.ctx.expr;
-      if (parent.kind === "alternative") return node;
-      node = parent;
-    }
-    return this.ctx.expr;
   }
 
   private buildRootDescriptor(): BtDescriptor {
@@ -409,10 +358,7 @@ class BoutiquesEmitter {
       // Try to resolve to a field binding
       const match = resolveFieldBinding(child, this.ctx, structType);
       if (!match) {
-        // Unbound node - emit as literal text if possible
-        if (child.kind === "literal") {
-          commandParts.push(child.attrs.str);
-        }
+        // Unbound non-literal node - no command-line text we can emit.
         continue;
       }
 
@@ -437,11 +383,22 @@ class BoutiquesEmitter {
         if (flagStr) peeled.flag = flagStr;
       }
 
-      const input = this.buildInput(binding, id, fieldType, valueKeyStr, peeled, fieldInfo, wrapperNode);
+      const input = this.buildInput(
+        binding,
+        id,
+        fieldType,
+        valueKeyStr,
+        peeled,
+        fieldInfo,
+        wrapperNode,
+      );
 
       // Add flag to command line if present, then value-key
       if (peeled.flag) {
-        if (fieldType.kind === "bool" || (fieldType.kind === "optional" && this.isBool(fieldType))) {
+        if (
+          fieldType.kind === "bool" ||
+          (fieldType.kind === "optional" && this.isBool(fieldType))
+        ) {
           // Bool flags: the value-key IS the flag
           commandParts.push(valueKeyStr);
         } else {
@@ -460,29 +417,32 @@ class BoutiquesEmitter {
     this.emitOutputFiles(bt, expr, valueKeyByBinding, idScope);
   }
 
-  // Emit `output-files` entries owned by this descriptor scope. Refs in
-  // `path-template` are resolved against `valueKeys` (binding id ->
-  // bracketed value-key string assigned to its input here); refs that point
-  // to bindings outside the scope are dropped with a warning. Output ids
-  // share the input id scope so they cannot collide.
+  // Emit `output-files` entries declared on this struct binding. `optional`
+  // and `list` are derived from the unified gate (scope binding's gate plus
+  // each ref's binding gate plus type-derived atoms). Refs that point to
+  // bindings outside the scope are dropped with a warning; output ids share
+  // the input id scope so they cannot collide.
   private emitOutputFiles(
     bt: BtDescriptor,
-    scope: Expr,
+    scopeNode: Expr,
     valueKeys: Map<BindingId, string>,
     idScope: Scope,
   ): void {
-    const outputs = this.outputsByScope.get(scope);
-    if (!outputs || outputs.length === 0) return;
+    const scopeBinding = this.ctx.resolve(scopeNode);
+    if (!scopeBinding) return;
+    const scope = this.outputsByScope.get(scopeBinding.id);
+    if (!scope || scope.outputs.length === 0) return;
 
     const files: BtOutputFile[] = [];
-    for (const output of outputs) {
-      const file = this.buildOutputFile(output, valueKeys, idScope);
+    for (const output of scope.outputs) {
+      const file = this.buildOutputFile(scopeBinding.gate, output, valueKeys, idScope);
       if (file) files.push(file);
     }
     if (files.length > 0) bt["output-files"] = files;
   }
 
   private buildOutputFile(
+    scopeGate: GateAtom[],
     output: ResolvedOutput,
     valueKeys: Map<BindingId, string>,
     idScope: Scope,
@@ -515,12 +475,16 @@ class BoutiquesEmitter {
     // output entirely. (A literal-only template stays.)
     if (droppedRef && template === "") return null;
 
+    const gate = outputGate(scopeGate, output, this.ctx.bindings);
+    const isOptional = gate.some((a) => a.kind === "present" || a.kind === "variant");
+    const isList = gate.some((a) => a.kind === "iter");
+
     const id = idScope.add(this.sanitizeId(output.name));
     const file: BtOutputFile = { id, "path-template": template };
     if (output.doc?.title) file.name = output.doc.title;
     if (output.doc?.description) file.description = output.doc.description;
-    if (output.optional) file.optional = true;
-    if (output.listScope.length > 0) file.list = true;
+    if (isOptional) file.optional = true;
+    if (isList) file.list = true;
     if (stripExtensions) file["path-template-stripped-extensions"] = stripExtensions;
     return file;
   }
@@ -658,11 +622,7 @@ class BoutiquesEmitter {
     switch (node.kind) {
       case "optional":
         result.isOptional = true;
-        this.peelNodeInner(
-          node.attrs.node,
-          type.kind === "optional" ? type.inner : type,
-          result,
-        );
+        this.peelNodeInner(node.attrs.node, type.kind === "optional" ? type.inner : type, result);
         break;
 
       case "repeat":
@@ -674,11 +634,7 @@ class BoutiquesEmitter {
         if (node.attrs.join !== undefined) result.listSeparator = node.attrs.join;
         if (node.attrs.countMin !== undefined) result.minListEntries = node.attrs.countMin;
         if (node.attrs.countMax !== undefined) result.maxListEntries = node.attrs.countMax;
-        this.peelNodeInner(
-          node.attrs.node,
-          type.kind === "list" ? type.item : type,
-          result,
-        );
+        this.peelNodeInner(node.attrs.node, type.kind === "list" ? type.item : type, result);
         break;
 
       case "sequence": {
@@ -843,9 +799,7 @@ class BoutiquesEmitter {
     }
 
     // All-struct union -> SubCommandUnion
-    const allStruct = type.variants.every(
-      (v: BoundVariant) => v.type.kind === "struct",
-    );
+    const allStruct = type.variants.every((v: BoundVariant) => v.type.kind === "struct");
     if (allStruct) {
       return { type: this.buildSubCommandUnion(type, node) };
     }
@@ -854,10 +808,7 @@ class BoutiquesEmitter {
     return { type: this.buildMixedUnionAsSubCommands(type, node) };
   }
 
-  private buildSubCommand(
-    type: Extract<BoundType, { kind: "struct" }>,
-    node: Expr,
-  ): BtDescriptor {
+  private buildSubCommand(type: Extract<BoundType, { kind: "struct" }>, node: Expr): BtDescriptor {
     const bt: BtDescriptor = {};
     const structNode = findStructNode(node, this.ctx, type);
     if (structNode) {
@@ -999,9 +950,7 @@ class BoutiquesEmitter {
   // Bounded count -> String + enumerated value-choices.
   // Unbounded count -> SubCommand + list:true (no list-separator: each
   // occurrence must be a separate argv element for argparse to count it).
-  private mapCount(
-    node: Expr,
-  ): {
+  private mapCount(node: Expr): {
     type: string | BtDescriptor;
     valueChoices?: string[];
     list?: boolean;

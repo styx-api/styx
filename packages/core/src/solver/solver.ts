@@ -1,8 +1,6 @@
-import type { Binding, BindingId, BoundType, SolveResult } from "../bindings/index.js";
+import type { Binding, BindingId, BoundType, GateAtom, SolveResult } from "../bindings/index.js";
 import { createRegistry } from "../bindings/index.js";
 import type { Expr, Literal } from "../ir/index.js";
-import { indexTree, resolveOutputs } from "./resolve-outputs.js";
-import { validateOutputs } from "./validate-outputs.js";
 
 export interface SolveOptions {
   namingStrategy?: NamingStrategy;
@@ -99,14 +97,32 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
   const registry = createRegistry();
   const nodeToBinding = new WeakMap<Expr, Binding>();
 
-  function createBinding(node: Expr, name: string, type: BoundType): Binding {
-    const binding: Binding = { id: strategy.generateId(), node, name, type };
-    registry.set(binding.id, binding);
+  // Wrapper bindings (optional/repeat/alternative) need an id BEFORE recursing
+  // into children so the child's `gate` can reference it. Pre-allocate the id
+  // here, then materialize the binding with its computed type after the
+  // recursion settles.
+  function preallocate(): BindingId {
+    return strategy.generateId();
+  }
+
+  function registerBinding(
+    id: BindingId,
+    node: Expr,
+    name: string,
+    type: BoundType,
+    gate: GateAtom[],
+  ): Binding {
+    const binding: Binding = { id, node, name, type, gate };
+    registry.set(id, binding);
     nodeToBinding.set(node, binding);
     return binding;
   }
 
-  function solveNode(node: Expr, path: string[]): BoundType | null {
+  function createBinding(node: Expr, name: string, type: BoundType, gate: GateAtom[]): Binding {
+    return registerBinding(strategy.generateId(), node, name, type, gate);
+  }
+
+  function solveNode(node: Expr, path: string[], gate: GateAtom[]): BoundType | null {
     const name = strategy.getName(node, path);
 
     switch (node.kind) {
@@ -114,26 +130,25 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
         return null;
 
       case "optional": {
-        const inner = solveNode(node.attrs.node, [...path, name]);
-        if (inner === null) {
-          const type: BoundType = { kind: "bool" };
-          createBinding(node, name, type);
-          return type;
-        }
-        const type: BoundType = { kind: "optional", inner };
-        createBinding(node, name, type);
+        const id = preallocate();
+        const childGate = [...gate, { kind: "present" as const, binding: id }];
+        const inner = solveNode(node.attrs.node, [...path, name], childGate);
+        const type: BoundType = inner === null ? { kind: "bool" } : { kind: "optional", inner };
+        registerBinding(id, node, name, type, gate);
         return type;
       }
 
       case "repeat": {
-        const inner = solveNode(node.attrs.node, [...path, name]);
-        if (inner === null) {
-          const type: BoundType = { kind: "count" };
-          createBinding(node, name, type);
-          return type;
-        }
-        const type: BoundType = { kind: "list", item: inner };
-        createBinding(node, name, type);
+        const id = preallocate();
+        // We don't yet know if the inner collapses to a count (no inner
+        // binding -> repeat-of-literal) or to a list. Optimistically tag the
+        // child gate as `iter`; if the inner is null we replace the wrapper
+        // type with `count` and the iter atom never reaches a real binding
+        // (no inner binding consumes the gate).
+        const childGate = [...gate, { kind: "iter" as const, binding: id }];
+        const inner = solveNode(node.attrs.node, [...path, name], childGate);
+        const type: BoundType = inner === null ? { kind: "count" } : { kind: "list", item: inner };
+        registerBinding(id, node, name, type, gate);
         return type;
       }
 
@@ -141,36 +156,56 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
         const fields: Record<string, BoundType> = {};
         for (const child of node.attrs.nodes) {
           const childName = strategy.getName(child, path);
-          const childType = solveNode(child, [...path, childName]);
+          const childType = solveNode(child, [...path, childName], gate);
           if (childType !== null) fields[childName] = childType;
         }
-        if (Object.keys(fields).length === 0) return null;
-        if (Object.keys(fields).length === 1) return Object.values(fields)[0]!;
+        // A sequence that carries `meta.outputs` must always produce a binding,
+        // even when it would otherwise collapse - that binding is the scope key
+        // for the outputs declared on it. Empty- and single-field collapses
+        // would otherwise leave the scope unbound and the outputs orphaned.
+        const hasOutputs = node.meta?.outputs && node.meta.outputs.length > 0;
+        if (Object.keys(fields).length === 0) {
+          if (hasOutputs) {
+            const type: BoundType = { kind: "struct", fields: {} };
+            createBinding(node, name, type, gate);
+            return type;
+          }
+          return null;
+        }
+        if (Object.keys(fields).length === 1 && !hasOutputs) {
+          return Object.values(fields)[0]!;
+        }
         const type: BoundType = { kind: "struct", fields };
-        createBinding(node, name, type);
+        createBinding(node, name, type, gate);
         return type;
       }
 
       case "alternative": {
-        // Solve all variants
-        const variants = node.attrs.alts.map((alt, i) => {
-          const childType =
-            solveNode(alt, [...path, `variant_${i}`]) ??
-            (alt.kind === "literal" ? literalFromNode(alt) : { kind: "bool" as const });
-
-          const name =
-            alt.meta?.name ??
-            (alt.kind === "literal"
-              ? alt.attrs.str.replace(/^-+/, "")
-              : `variant_${i}`);
-
-          return { name, type: childType, node: alt };
+        const id = preallocate();
+        // Resolve each arm's variant name first so child gates can carry it.
+        const armNames = node.attrs.alts.map((alt, i) => {
+          if (alt.meta?.name) return alt.meta.name;
+          if (alt.kind === "literal") return alt.attrs.str.replace(/^-+/, "");
+          return `variant_${i}`;
         });
 
-        // Pattern: boolean pair -> bool
+        const variants = node.attrs.alts.map((alt, i) => {
+          const variantName = armNames[i]!;
+          const childGate = [
+            ...gate,
+            { kind: "variant" as const, binding: id, variant: variantName },
+          ];
+          const childType =
+            solveNode(alt, [...path, `variant_${i}`], childGate) ??
+            (alt.kind === "literal" ? literalFromNode(alt) : { kind: "bool" as const });
+          return { name: variantName, type: childType, node: alt };
+        });
+
+        // Pattern: boolean pair -> bool. The pre-allocated variant atoms in
+        // child gates are unreached (literal arms produce no bindings).
         if (isBooleanLiteralPair(variants)) {
           const type: BoundType = { kind: "bool" };
-          createBinding(node, name, type);
+          registerBinding(id, node, name, type, gate);
           return type;
         }
 
@@ -188,7 +223,7 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
           kind: "union",
           variants: variants.map(({ name, type }) => ({ name, type })),
         };
-        createBinding(node, name, type);
+        registerBinding(id, node, name, type, gate);
         return type;
       }
 
@@ -197,39 +232,34 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
       case "str":
       case "path": {
         const type: BoundType = { kind: "scalar", scalar: node.kind };
-        createBinding(node, name, type);
+        createBinding(node, name, type, gate);
         return type;
       }
     }
   }
 
-  const rootType = solveNode(expr, []);
+  const rootType = solveNode(expr, [], []);
 
   // Ensure a root binding always exists, even when the sequence collapsed
   // (0 fields -> empty struct, 1 field that's not already a struct -> wrap in single-field struct)
   if (!nodeToBinding.has(expr) && expr.kind === "sequence") {
     const name = strategy.getName(expr, []);
     if (rootType === null) {
-      createBinding(expr, name, { kind: "struct", fields: {} });
+      createBinding(expr, name, { kind: "struct", fields: {} }, []);
     } else if (rootType.kind === "struct") {
       // Already a struct (e.g. joined seq with 2+ fields) - use it directly
-      createBinding(expr, name, rootType);
+      createBinding(expr, name, rootType, []);
     } else {
       // Single scalar/optional/list field was collapsed - wrap it in a struct
       const childName = expr.attrs.nodes
         .map((child) => nodeToBinding.get(child))
         .find(Boolean)?.name;
       if (childName) {
-        createBinding(expr, name, { kind: "struct", fields: { [childName]: rootType } });
+        createBinding(expr, name, { kind: "struct", fields: { [childName]: rootType } }, []);
       }
     }
   }
 
   const resolve = (node: Expr) => nodeToBinding.get(node);
-  // Outputs live on `NodeMeta.outputs` of the nodes that own them; build the
-  // index once and share it between resolution and validation.
-  const index = indexTree(expr, resolve);
-  const { outputs, hosts: outputHosts } = resolveOutputs(expr, resolve, index);
-  const outputDiagnostics = validateOutputs(expr, resolve, index);
-  return { bindings: registry, resolve, outputs, outputHosts, outputDiagnostics };
+  return { bindings: registry, resolve };
 }

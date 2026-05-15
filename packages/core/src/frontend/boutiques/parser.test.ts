@@ -180,7 +180,12 @@ describe("BoutiquesParser", () => {
       const result = parse(
         minimalDescriptor({
           "output-files": [
-            { id: "log_file", name: "Log file", description: "Run log", "path-template": "run.log" },
+            {
+              id: "log_file",
+              name: "Log file",
+              description: "Run log",
+              "path-template": "run.log",
+            },
           ],
         }),
       );
@@ -211,7 +216,7 @@ describe("BoutiquesParser", () => {
       ]);
     });
 
-    it("hosts a single-ref output on the referenced input's node", () => {
+    it("attaches outputs to the descriptor's rootSeq, not to inner nodes", () => {
       const result = parse(
         minimalDescriptor({
           "command-line": "test [INPUT_FILE]",
@@ -220,10 +225,10 @@ describe("BoutiquesParser", () => {
         }),
       );
       const seq = result.expr as Sequence;
-      // nodes: [lit("test"), path{name:input_file, outputs:[...]}]
-      expect(result.expr.meta?.outputs).toBeUndefined();
-      expect(seq.attrs.nodes[1]?.meta?.name).toBe("input_file");
-      expect(seq.attrs.nodes[1]?.meta?.outputs).toHaveLength(1);
+      expect(result.expr.meta?.outputs).toHaveLength(1);
+      // Inner nodes don't carry outputs anymore - per-ref gating comes from
+      // the binding's `gate` after solving.
+      expect(seq.attrs.nodes[1]?.meta?.outputs).toBeUndefined();
     });
 
     it("adds an empty-string fallback to refs of optional inputs", () => {
@@ -231,7 +236,12 @@ describe("BoutiquesParser", () => {
         minimalDescriptor({
           "command-line": "test [INPUT_FILE]",
           inputs: [
-            minimalInput({ id: "input_file", "value-key": "[INPUT_FILE]", type: "File", optional: true }),
+            minimalInput({
+              id: "input_file",
+              "value-key": "[INPUT_FILE]",
+              type: "File",
+              optional: true,
+            }),
           ],
           "output-files": [{ id: "out_file", name: "Output", "path-template": "[INPUT_FILE].out" }],
         }),
@@ -244,7 +254,7 @@ describe("BoutiquesParser", () => {
       });
     });
 
-    it("carries output-files[].optional onto Output.optional", () => {
+    it("does not carry the source's `optional: true` hint into the IR (re-derived at emit time)", () => {
       const result = parse(
         minimalDescriptor({
           "command-line": "test [INPUT_FILE]",
@@ -256,8 +266,12 @@ describe("BoutiquesParser", () => {
         }),
       );
       const outs = collectOutputs(result.expr);
-      expect(outs.find((o) => o.name === "out_a")?.optional).toBe(true);
-      expect(outs.find((o) => o.name === "out_b")?.optional).toBeUndefined();
+      expect(outs.find((o) => o.name === "out_a")).toBeDefined();
+      expect(outs.find((o) => o.name === "out_b")).toBeDefined();
+      // No `optional` field on the IR Output type.
+      for (const out of outs) {
+        expect((out as { optional?: boolean }).optional).toBeUndefined();
+      }
     });
 
     it("attaches stripExtensions to ref tokens", () => {
@@ -832,7 +846,7 @@ describe("BoutiquesParser", () => {
         }),
       );
       const seq = result.expr as Sequence;
-      expect(seq.attrs.nodes[1].kind).toBe("sequence");
+      expect(seq.attrs.nodes[1]?.kind).toBe("sequence");
     });
   });
 

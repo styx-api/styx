@@ -43,10 +43,9 @@ function formatOutputsBlock(outputs: Output[], indent: number): string {
   const lines = [`${pad}outputs:`];
   for (const out of outputs) {
     const name = out.name ?? "<anon>";
-    const optional = out.optional ? " [optional]" : "";
     const media = out.mediaTypes?.length ? ` (${out.mediaTypes.join(", ")})` : "";
     const tokens = out.tokens.map(formatOutputToken).join(" + ") || `""`;
-    lines.push(`${pad}  ${name}${optional}${media}: ${tokens}`);
+    lines.push(`${pad}  ${name}${media}: ${tokens}`);
   }
   return lines.join("\n");
 }

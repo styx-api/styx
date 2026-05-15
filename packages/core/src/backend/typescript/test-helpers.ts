@@ -1,20 +1,8 @@
 import ts from "typescript";
 import type { AppMeta, Expr } from "../../ir/index.js";
-import {
-  alt,
-  float,
-  int,
-  lit,
-  opt,
-  path,
-  rep,
-  repJoin,
-  seq,
-  seqJoin,
-  str,
-} from "../../ir/index.js";
+import { alt, float, int, lit, opt, path, rep, repJoin, seq, seqJoin } from "../../ir/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
-import { solve } from "../../solver/solver.js";
+import { resolveOutputs, solve } from "../../solver/index.js";
 import { createContext } from "../../manifest/context.js";
 import { generateTypeScript } from "./typescript.js";
 
@@ -40,7 +28,8 @@ export function generate(
   options?: { app?: AppMeta; package?: { name?: string } },
 ): string {
   const solveResult = solve(expr);
-  const ctx = createContext(expr, solveResult, {
+  const outputs = resolveOutputs(expr, solveResult);
+  const ctx = createContext(expr, solveResult, outputs, {
     app: options?.app,
     package: options?.package,
   });
@@ -52,7 +41,8 @@ export function generateCtx(
   options?: { app?: AppMeta; package?: { name?: string } },
 ): CodegenContext {
   const solveResult = solve(expr);
-  return createContext(expr, solveResult, {
+  const outputs = resolveOutputs(expr, solveResult);
+  return createContext(expr, solveResult, outputs, {
     app: options?.app,
     package: options?.package,
   });

@@ -29,21 +29,14 @@ export type OutputToken =
 
 /**
  * Specification for a file the tool produces. Lives on `NodeMeta.outputs` of
- * the node that "owns" it - that node is the implicit trigger: the output
- * emits exactly when the owning node is active during arg-walk. Gating
- * (optional/alternative ancestors) and list scope (repeat ancestors) are
- * read off the owner's position in the tree, so there is no separate trigger
- * list. Token refs name other in-scope nodes (typically the owner's subtree).
- *
- * `optional` is the frontend asserting the file may be absent independent of
- * structural gating (e.g. Boutiques `output-files[].optional`). The resolved
- * output is optional if this is set OR the owner is structurally gated.
+ * the struct node (root sequence or subcommand sequence) that declared it.
+ * Per-output gating is derived downstream from the scope's binding gate and
+ * each ref binding's gate, so no host node or `optional` flag is stored.
  */
 export interface Output {
   name?: string;
   doc?: Documentation;
   tokens: OutputToken[];
-  optional?: boolean;
   mediaTypes?: MediaTypeIdentifier[];
 }
 

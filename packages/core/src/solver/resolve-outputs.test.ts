@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { alt, lit, nodeRef, opt, path, rep, seq, str } from "../ir/index.js";
+import { outputGate } from "../bindings/index.js";
 import type { Expr, Output } from "../ir/index.js";
+import { alt, lit, nodeRef, opt, path, rep, seq, str } from "../ir/index.js";
+import { resolveOutputs } from "./resolve-outputs.js";
 import { solve } from "./solver.js";
 
 /** Attach outputs to a node and return it (typed-through helper for tests). */
@@ -10,26 +12,26 @@ function withOutputs<T extends Expr>(node: T, outputs: Output[]): T {
 }
 
 describe("resolveOutputs", () => {
-  it("returns empty when no node carries outputs", () => {
-    const result = solve(seq(lit("cmd"), str("input")));
-    expect(result.outputs).toEqual([]);
+  it("returns no scopes when no node carries outputs", () => {
+    const expr = seq(lit("cmd"), str("input"));
+    const result = solve(expr);
+    const resolution = resolveOutputs(expr, result);
+    expect(resolution.scopes).toEqual([]);
   });
 
-  it("resolves a literal-only output hosted on the root as always-emitted", () => {
+  it("collects a literal-only output on the root sequence", () => {
     const expr = withOutputs(seq(lit("cmd")), [
       { name: "log", tokens: [{ kind: "literal", value: "run.log" }] },
     ]);
     const result = solve(expr);
-    expect(result.outputs).toHaveLength(1);
-    const out = result.outputs[0]!;
-    expect(out.name).toBe("log");
-    expect(out.tokens).toEqual([{ kind: "literal", value: "run.log" }]);
-    expect(out.branchCondition).toEqual([[]]);
-    expect(out.optional).toBe(false);
-    expect(out.listScope).toEqual([]);
+    const resolution = resolveOutputs(expr, result);
+    expect(resolution.scopes).toHaveLength(1);
+    const scope = resolution.scopes[0]!;
+    expect(result.bindings.get(scope.scope)?.node).toBe(expr);
+    expect(scope.outputs[0]!.tokens).toEqual([{ kind: "literal", value: "run.log" }]);
   });
 
-  it("resolves a token ref to the outermost binding with that name", () => {
+  it("resolves a token ref to the binding with that name", () => {
     const expr = withOutputs(seq(lit("cmd"), path("input")), [
       {
         name: "out",
@@ -40,68 +42,50 @@ describe("resolveOutputs", () => {
       },
     ]);
     const result = solve(expr);
-    const out = result.outputs[0]!;
+    const resolution = resolveOutputs(expr, result);
+    const out = resolution.scopes[0]!.outputs[0]!;
     const inputBinding = [...result.bindings.values()].find(
       (b) => b.name === "input" && b.type.kind === "scalar",
     );
     expect(inputBinding).toBeDefined();
     expect(out.tokens[0]).toEqual({ kind: "ref", binding: inputBinding!.id });
     expect(out.tokens[1]).toEqual({ kind: "literal", value: ".out" });
-    expect(out.branchCondition).toEqual([[]]);
-    expect(out.optional).toBe(false);
   });
 
-  it("includes an optional host as a 'present' atom in branchCondition", () => {
-    const host = withOutputs(opt(seq(lit("--out"), path("output"))), [
+  it("a ref to an optional-typed binding produces a present atom in the output gate", () => {
+    const inner = opt(seq(lit("--out"), path("output")));
+    const expr = withOutputs(seq(lit("cmd"), inner), [
       { name: "out_path", tokens: [{ kind: "ref", target: nodeRef("output") }] },
     ]);
-    const result = solve(seq(lit("cmd"), host));
-    const out = result.outputs[0]!;
-    const optBinding = [...result.bindings.values()].find((b) => b.type.kind === "optional");
-    expect(optBinding).toBeDefined();
-    expect(out.branchCondition).toEqual([[{ kind: "present", binding: optBinding!.id }]]);
-    expect(out.optional).toBe(true);
-    // the token ref resolves to that same (outermost) binding
-    expect(out.tokens[0]).toEqual({ kind: "ref", binding: optBinding!.id });
+    const result = solve(expr);
+    const resolution = resolveOutputs(expr, result);
+    const scope = resolution.scopes[0]!;
+    const out = scope.outputs[0]!;
+    const scopeGate = result.bindings.get(scope.scope)?.gate ?? [];
+    const gate = outputGate(scopeGate, out, result.bindings);
+    expect(gate.some((a) => a.kind === "present")).toBe(true);
   });
 
-  it("gates an output hosted inside an alternative arm on that arm being selected", () => {
+  it("carries a `variant` atom on bindings inside an alternative arm", () => {
     const armA = seq(lit("--a"), path("a"));
-    armA.meta = {
-      name: "alpha",
-      outputs: [{ name: "out", tokens: [{ kind: "ref", target: nodeRef("a") }] }],
-    };
+    armA.meta = { name: "alpha" };
     const armB = seq(lit("--b"), path("b"));
     armB.meta = { name: "beta" };
-    const result = solve(seq(lit("cmd"), alt(armA, armB)));
-    const out = result.outputs[0]!;
-    const unionBinding = [...result.bindings.values()].find((b) => b.type.kind === "union");
-    expect(unionBinding).toBeDefined();
-    expect(out.branchCondition).toEqual([
-      [{ kind: "variant", binding: unionBinding!.id, variant: "alpha" }],
-    ]);
-    expect(out.optional).toBe(true);
-    const ref = out.tokens.find((t) => t.kind === "ref");
-    expect(ref?.kind === "ref" && result.bindings.get(ref.binding)?.name).toBe("a");
+    const expr = seq(lit("cmd"), alt(armA, armB));
+    const result = solve(expr);
+    const aBinding = [...result.bindings.values()].find((b) => b.name === "a");
+    expect(aBinding).toBeDefined();
+    expect(aBinding!.gate.some((a) => a.kind === "variant" && a.variant === "alpha")).toBe(true);
   });
 
-  it("includes a repeat host's binding in listScope, not branchCondition", () => {
-    const host = withOutputs(rep(path("input")), [
-      {
-        name: "outs",
-        tokens: [
-          { kind: "ref", target: nodeRef("input") },
-          { kind: "literal", value: ".out" },
-        ],
-      },
-    ]);
-    const result = solve(seq(lit("cmd"), host));
-    const out = result.outputs[0]!;
-    const listBinding = [...result.bindings.values()].find((b) => b.type.kind === "list");
-    expect(listBinding).toBeDefined();
-    expect(out.listScope).toEqual([listBinding!.id]);
-    expect(out.branchCondition).toEqual([[]]);
-    expect(out.optional).toBe(false);
+  it("carries an `iter` atom on bindings inside a repeat", () => {
+    const expr = seq(lit("cmd"), rep(path("input")));
+    const result = solve(expr);
+    const inputBinding = [...result.bindings.values()].find(
+      (b) => b.name === "input" && b.type.kind === "scalar",
+    );
+    expect(inputBinding).toBeDefined();
+    expect(inputBinding!.gate.some((a) => a.kind === "iter")).toBe(true);
   });
 
   it("propagates stripExtensions and fallback through ref tokens", () => {
@@ -114,14 +98,15 @@ describe("resolveOutputs", () => {
       },
     ]);
     const result = solve(expr);
-    expect(result.outputs[0]!.tokens[0]).toMatchObject({
+    const resolution = resolveOutputs(expr, result);
+    expect(resolution.scopes[0]!.outputs[0]!.tokens[0]).toMatchObject({
       kind: "ref",
       stripExtensions: [".nii"],
       fallback: "default",
     });
   });
 
-  it("drops dangling token refs but still emits the output", () => {
+  it("reports an error for a dangling ref but still emits the output's remaining tokens", () => {
     const expr = withOutputs(seq(lit("cmd"), str("input")), [
       {
         name: "out",
@@ -132,17 +117,9 @@ describe("resolveOutputs", () => {
       },
     ]);
     const result = solve(expr);
-    expect(result.outputs[0]!.tokens).toEqual([{ kind: "literal", value: ".log" }]);
-  });
-
-  it("respects Output.optional even when the host is ungated", () => {
-    const expr = withOutputs(seq(lit("cmd")), [
-      { name: "maybe_log", tokens: [{ kind: "literal", value: "run.log" }], optional: true },
-    ]);
-    const out = solve(expr).outputs[0]!;
-    expect(out.optional).toBe(true);
-    // ...but there's no structural gate, so the guard is empty
-    expect(out.branchCondition).toEqual([[]]);
+    const resolution = resolveOutputs(expr, result);
+    expect(resolution.diagnostics.errors).toHaveLength(1);
+    expect(resolution.scopes[0]!.outputs[0]!.tokens).toEqual([{ kind: "literal", value: ".log" }]);
   });
 
   it("preserves doc and mediaTypes on the resolved output", () => {
@@ -155,27 +132,20 @@ describe("resolveOutputs", () => {
       },
     ]);
     const result = solve(expr);
-    const out = result.outputs[0]!;
+    const resolution = resolveOutputs(expr, result);
+    const out = resolution.scopes[0]!.outputs[0]!;
     expect(out.doc).toEqual({ title: "Output", description: "An output" });
     expect(out.mediaTypes).toEqual(["text/plain"]);
   });
 
-  it("collects multiple outputs from multiple hosts in tree-walk order", () => {
-    const a = withOutputs(path("a"), [{ name: "out_a", tokens: [{ kind: "ref", target: nodeRef("a") }] }]);
-    const b = withOutputs(path("b"), [{ name: "out_b", tokens: [{ kind: "ref", target: nodeRef("b") }] }]);
-    const result = solve(seq(lit("cmd"), a, b));
-    expect(result.outputs.map((o) => o.name)).toEqual(["out_a", "out_b"]);
-  });
-
-  it("pairs each resolved output with its host node via outputHosts", () => {
-    const a = withOutputs(path("a"), [{ name: "out_a", tokens: [{ kind: "ref", target: nodeRef("a") }] }]);
-    const b = withOutputs(path("b"), [{ name: "out_b", tokens: [{ kind: "ref", target: nodeRef("b") }] }]);
-    const result = solve(seq(lit("cmd"), a, b));
-    const outA = result.outputs.find((o) => o.name === "out_a")!;
-    const outB = result.outputs.find((o) => o.name === "out_b")!;
-    // outputHosts entries identify the exact IR node carrying each output.
-    expect(result.outputHosts.get(outA)).toBe(a);
-    expect(result.outputHosts.get(outB)).toBe(b);
-    expect(result.outputHosts.size).toBe(2);
+  it("buckets multiple outputs declared on the same node into one scope", () => {
+    const root = withOutputs(seq(lit("cmd"), path("a"), path("b")), [
+      { name: "out_a", tokens: [{ kind: "ref", target: nodeRef("a") }] },
+      { name: "out_b", tokens: [{ kind: "ref", target: nodeRef("b") }] },
+    ]);
+    const result = solve(root);
+    const resolution = resolveOutputs(root, result);
+    expect(resolution.scopes).toHaveLength(1);
+    expect(resolution.scopes[0]!.outputs.map((o) => o.name)).toEqual(["out_a", "out_b"]);
   });
 });

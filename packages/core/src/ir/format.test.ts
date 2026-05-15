@@ -14,22 +14,17 @@ describe("format (IR)", () => {
           { kind: "ref", target: nodeRef("input"), stripExtensions: [".nii"], fallback: "" },
           { kind: "literal", value: ".out" },
         ],
-        optional: true,
         mediaTypes: ["text/plain"],
       },
     ];
     host.meta = { ...host.meta, outputs };
 
     const text = format(seq(lit("cmd"), host));
-    // The outputs block lives directly under the owning node header, before children.
-    expect(text).toContain("optional");
     expect(text).toContain("outputs:");
-    expect(text).toContain('out [optional] (text/plain): ref(input) {strip=[".nii"], fallback=""} + ".out"');
+    expect(text).toContain('out (text/plain): ref(input) {strip=[".nii"], fallback=""} + ".out"');
     // Outputs appear before the wrapped child (path)
-    const optionalIdx = text.indexOf("optional");
     const outputsIdx = text.indexOf("outputs:");
     const pathIdx = text.indexOf("path [input]");
-    expect(optionalIdx).toBeLessThan(outputsIdx);
     expect(outputsIdx).toBeLessThan(pathIdx);
   });
 

@@ -197,9 +197,7 @@ export class ArgdumpParser implements Frontend {
       if (typeInfo.serializable === false) {
         const inferred = this.inferFromSamples(action);
         const fallback = inferred ? inferred.kind : "string";
-        this.warn(
-          `Non-serializable type '${name}' for '${action.dest}', treating as ${fallback}`,
-        );
+        this.warn(`Non-serializable type '${name}' for '${action.dest}', treating as ${fallback}`);
         return inferred ?? ({ kind: "str", attrs: {} } satisfies Str);
       }
 
@@ -670,7 +668,10 @@ export class ArgdumpParser implements Frontend {
 
       // Prepend subcommand literal
       const cmdLit: Literal = { kind: "literal", attrs: { str: name } };
-      const seq: Sequence = { kind: "sequence", attrs: { nodes: [cmdLit, ...subExpr.attrs.nodes] } };
+      const seq: Sequence = {
+        kind: "sequence",
+        attrs: { nodes: [cmdLit, ...subExpr.attrs.nodes] },
+      };
 
       // Attach name and aliases as doc
       const subAliases = aliases[name];

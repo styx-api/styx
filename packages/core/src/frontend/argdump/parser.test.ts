@@ -736,15 +736,11 @@ describe("ArgdumpParser", () => {
               subparsers: {
                 add: {
                   prog: "test-tool add",
-                  actions: [
-                    { dest: "name", action_type: "store", option_strings: [] },
-                  ],
+                  actions: [{ dest: "name", action_type: "store", option_strings: [] }],
                 },
                 remove: {
                   prog: "test-tool remove",
-                  actions: [
-                    { dest: "id", action_type: "store", option_strings: [] },
-                  ],
+                  actions: [{ dest: "id", action_type: "store", option_strings: [] }],
                 },
               },
               subparsers_required: true,

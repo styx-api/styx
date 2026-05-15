@@ -18,7 +18,7 @@ export function compile(
   const options =
     typeof filenameOrOptions === "string"
       ? { filename: filenameOrOptions }
-      : filenameOrOptions ?? {};
+      : (filenameOrOptions ?? {});
 
   const format = options.format ?? detectFormat(source);
 

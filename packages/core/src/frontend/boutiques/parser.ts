@@ -1,11 +1,5 @@
 import { nodeRef } from "../../ir/meta.js";
-import type {
-  AppMeta,
-  NodeMeta,
-  NodeRef,
-  Output,
-  OutputToken,
-} from "../../ir/meta.js";
+import type { AppMeta, NodeMeta, NodeRef, Output, OutputToken } from "../../ir/meta.js";
 import type {
   Alternative,
   Expr,
@@ -46,83 +40,9 @@ function isArray(x: unknown): x is unknown[] {
   return Array.isArray(x);
 }
 
-// Output host selection helpers
-
-function childExprs(node: Expr): Expr[] {
-  switch (node.kind) {
-    case "sequence":
-      return node.attrs.nodes;
-    case "optional":
-    case "repeat":
-      return [node.attrs.node];
-    case "alternative":
-      return node.attrs.alts;
-    default:
-      return [];
-  }
-}
-
-function buildParentMap(root: Expr): Map<Expr, Expr | null> {
-  const parent = new Map<Expr, Expr | null>();
-  const walk = (n: Expr, p: Expr | null): void => {
-    parent.set(n, p);
-    for (const c of childExprs(n)) walk(c, n);
-  };
-  walk(root, null);
-  return parent;
-}
-
-/** First node in DFS order with `meta.name === name`. */
-function findNamed(root: Expr, name: string): Expr | undefined {
-  if (root.meta?.name === name) return root;
-  for (const c of childExprs(root)) {
-    const hit = findNamed(c, name);
-    if (hit) return hit;
-  }
-  return undefined;
-}
-
-/** Lowest common ancestor of `nodes` given a parent map. */
-function lca(nodes: Expr[], parent: Map<Expr, Expr | null>): Expr | null {
-  if (nodes.length === 0) return null;
-  const pathTo = (n: Expr): Expr[] => {
-    const path: Expr[] = [];
-    let cur: Expr | null = n;
-    while (cur) {
-      path.push(cur);
-      cur = parent.get(cur) ?? null;
-    }
-    return path.reverse(); // root -> n
-  };
-  const paths = nodes.map(pathTo);
-  const minLen = Math.min(...paths.map((p) => p.length));
-  let common: Expr | null = null;
-  for (let i = 0; i < minLen; i++) {
-    const candidate = paths[0]![i]!;
-    if (paths.every((p) => p[i] === candidate)) common = candidate;
-    else break;
-  }
-  return common;
-}
-
-/**
- * Pick the IR node an output should hang from: the LCA of the nodes its
- * `path-template` references. Falls back to the root for literal-only outputs
- * or refs that aren't present in the command-line.
- */
-function pickOutputHost(
-  rootSeq: Sequence,
-  parent: Map<Expr, Expr | null>,
-  referencedIds: Set<string>,
-): Expr {
-  const refNodes: Expr[] = [];
-  for (const id of referencedIds) {
-    const n = findNamed(rootSeq, id);
-    if (n) refNodes.push(n);
-  }
-  if (refNodes.length === 0) return rootSeq;
-  return lca(refNodes, parent) ?? rootSeq;
-}
+// Outputs attach to the rootSeq of the descriptor they were declared in
+// (root or a subcommand's sequence). Per-ref gating is computed downstream
+// from each referenced binding's `gate`.
 
 // Boutiques types
 
@@ -288,7 +208,7 @@ export class BoutiquesParser implements Frontend {
     out: BtInput,
     lookup: Record<string, NodeRef>,
     idOptional: Set<string>,
-  ): { output: Output; referencedIds: Set<string> } | null {
+  ): { output: Output } | null {
     const id = out.id;
     if (!isString(id)) {
       this.error("output-files entry missing id");
@@ -308,11 +228,9 @@ export class BoutiquesParser implements Frontend {
         : undefined;
 
     const parts = destructTemplate<NodeRef>(template, lookup);
-    const referencedIds = new Set<string>();
 
     const tokens: OutputToken[] = parts.map((part) => {
       if (typeof part === "string") return { kind: "literal" as const, value: part };
-      referencedIds.add(part.name);
       return {
         kind: "ref" as const,
         target: part,
@@ -331,16 +249,16 @@ export class BoutiquesParser implements Frontend {
         ...(isString(description) && { description }),
       };
     }
-    if (out.optional === true) output.optional = true;
+    // Boutiques' `optional: bool` on output-files is a tool-author hint and is
+    // re-derived at emit time from the refs' bindings - we don't store it.
 
-    return { output, referencedIds };
+    return { output };
   }
 
   /**
-   * Attach `output-files` entries to nodes in the freshly built sequence. Each
-   * output hangs from the LCA of the input nodes its `path-template`
-   * references (so their optional/repeat/alternative ancestors gate it);
-   * literal-only outputs hang from the root.
+   * Attach `output-files` entries to the descriptor's rootSeq. Per-output
+   * gating (which refs are optional, which arm we're inside) is recovered
+   * downstream from each ref binding's `gate`.
    */
   private attachOutputs(rootSeq: Sequence, bt: BtDescriptor): void {
     const outputFiles = bt["output-files"];
@@ -358,8 +276,6 @@ export class BoutiquesParser implements Frontend {
       }
     }
 
-    const parent = buildParentMap(rootSeq);
-
     for (const out of outputFiles) {
       if (!isObject(out)) {
         this.warn("Skipping non-object output-files entry");
@@ -368,9 +284,8 @@ export class BoutiquesParser implements Frontend {
       const built = this.buildOutput(out, lookup, idOptional);
       if (!built) continue;
 
-      const host = pickOutputHost(rootSeq, parent, built.referencedIds);
-      if (!host.meta) host.meta = {};
-      host.meta.outputs = [...(host.meta.outputs ?? []), built.output];
+      if (!rootSeq.meta) rootSeq.meta = {};
+      rootSeq.meta.outputs = [...(rootSeq.meta.outputs ?? []), built.output];
     }
   }
 

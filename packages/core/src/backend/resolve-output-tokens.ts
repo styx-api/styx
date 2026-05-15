@@ -1,63 +1,19 @@
-import type { BindingId, GateAtom, ResolvedOutput, ResolvedToken } from "../bindings/index.js";
+import type {
+  BindingRegistry,
+  GateAtom,
+  OutputScope,
+  ResolvedOutput,
+  ResolvedToken,
+} from "../bindings/index.js";
+import { outputGate } from "../bindings/index.js";
+
+// Re-export the core helper so backends have a single entry point.
+export { outputGate };
 
 /**
- * Cardinality of a resolved output: how many path values it produces and
- * whether the user must handle a null/missing case.
- *
- * - `always`: exactly one path, never null. Type as `path`.
- * - `optional`: zero or one path. Type as `path | null`.
- * - `list`: zero or more paths (per listScope iteration). Type as `path[]`.
- * - `list-optional`: zero or more paths but the whole output may be skipped.
- *   Type as `path[] | null`.
- */
-export type OutputCardinality = "always" | "optional" | "list" | "list-optional";
-
-/** Compute cardinality from `listScope` and `optional` on a ResolvedOutput. */
-export function outputCardinality(resolved: ResolvedOutput): OutputCardinality {
-  const isList = resolved.listScope.length > 0;
-  if (isList && resolved.optional) return "list-optional";
-  if (isList) return "list";
-  if (resolved.optional) return "optional";
-  return "always";
-}
-
-/**
- * Guard expression controlling whether the output emits.
- *
- * `always` means the output emits unconditionally (no gating ancestors).
- * `any-of` is a disjunction of conjunctions: emit if any clause's atoms all
- * hold. Each `GateAtom` is either `present` (the bound parameter is non-null /
- * `true` / `> 0`, per its binding's type) or `variant` (a union selected a
- * particular arm).
- */
-export type OutputGuard =
-  | { kind: "always" }
-  | { kind: "any-of"; clauses: GuardClause[] };
-
-export interface GuardClause {
-  /** All of these conditions must hold for this clause to fire. */
-  atoms: GateAtom[];
-}
-
-/**
- * Reduce `branchCondition` to a guard expression. An empty branchCondition or
- * a single empty path collapses to `always`; otherwise we keep the disjunction
- * of conjunctions.
- */
-export function outputGuard(resolved: ResolvedOutput): OutputGuard {
-  const bc = resolved.branchCondition;
-  if (bc.length === 0) return { kind: "always" };
-  if (bc.length === 1 && bc[0]!.length === 0) return { kind: "always" };
-  return {
-    kind: "any-of",
-    clauses: bc.map((atoms) => ({ atoms })),
-  };
-}
-
-/**
- * Merge consecutive literal tokens. Backends that emit string concatenation
+ * Compact consecutive literal tokens. Backends that emit string concatenation
  * benefit from a shorter token stream; backends that template each token
- * individually can ignore this and use `resolved.tokens` directly.
+ * individually can ignore this and use `output.tokens` directly.
  */
 export function compactTokens(tokens: ResolvedToken[]): ResolvedToken[] {
   const out: ResolvedToken[] = [];
@@ -73,33 +29,52 @@ export function compactTokens(tokens: ResolvedToken[]): ResolvedToken[] {
 }
 
 /**
- * Single point of entry: convert a ResolvedOutput to a plan whose fields map
- * directly to the codegen patterns described in `memory/design_outputs.md`.
- *
- * Backends typically need:
- * - `cardinality` to decide the field type (`path | null` vs `path[]`, etc.).
- * - `guard` to render the if-condition gating the output assignment.
- * - `listScope` to render the for-loop when iterating per repeat-binding.
- * - `tokens` to render the path expression. Refs with a `fallback` should be
- *   emitted as `ref ?? fallback` (or the language equivalent) so unreachable
- *   refs naturally resolve to their fallback at runtime.
+ * One output ready for codegen. `gate` is the wrapper sequence (outermost
+ * first); the backend renders each atom as the appropriate scope-introducing
+ * statement, then emits the path expression inside the innermost layer.
  */
 export interface OutputEmitPlan {
   name: string;
-  cardinality: OutputCardinality;
-  guard: OutputGuard;
-  listScope: BindingId[];
+  gate: GateAtom[];
   tokens: ResolvedToken[];
   resolved: ResolvedOutput;
 }
 
-export function planOutput(resolved: ResolvedOutput): OutputEmitPlan {
+export function planOutput(
+  scopeGate: GateAtom[],
+  output: ResolvedOutput,
+  bindings: BindingRegistry,
+): OutputEmitPlan {
   return {
-    name: resolved.name,
-    cardinality: outputCardinality(resolved),
-    guard: outputGuard(resolved),
-    listScope: resolved.listScope,
-    tokens: compactTokens(resolved.tokens),
-    resolved,
+    name: output.name,
+    gate: outputGate(scopeGate, output, bindings),
+    tokens: compactTokens(output.tokens),
+    resolved: output,
   };
+}
+
+/**
+ * Does the output have any conditional wrapper? Equivalent to "is at least one
+ * atom a `present` or `variant`?". `iter` alone means the output emits a list
+ * and is not conditionally absent.
+ */
+export function isGated(plan: OutputEmitPlan): boolean {
+  return plan.gate.some((a) => a.kind === "present" || a.kind === "variant");
+}
+
+/** Does the output iterate (emit zero-or-more values)? */
+export function isIterated(plan: OutputEmitPlan): boolean {
+  return plan.gate.some((a) => a.kind === "iter");
+}
+
+/**
+ * Convenience for backends emitting all outputs of a scope at once. The caller
+ * provides the scope's gate (typically `bindings.get(scope.scope)?.gate ?? []`).
+ */
+export function planScope(
+  scope: OutputScope,
+  scopeGate: GateAtom[],
+  bindings: BindingRegistry,
+): OutputEmitPlan[] {
+  return scope.outputs.map((output) => planOutput(scopeGate, output, bindings));
 }

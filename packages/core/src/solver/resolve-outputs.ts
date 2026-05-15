@@ -1,42 +1,34 @@
 import type {
   Binding,
   BindingId,
-  GateAtom,
+  OutputDiagnostic,
+  OutputScope,
+  OutputValidationResult,
   ResolvedOutput,
   ResolvedToken,
+  SolveResult,
 } from "../bindings/index.js";
 import type { Expr, Output } from "../ir/index.js";
 import { effectiveOutputName } from "../ir/index.js";
 
+export interface OutputResolution {
+  scopes: OutputScope[];
+  diagnostics: OutputValidationResult;
+}
+
 /**
- * An output paired with the IR node it is attached to. The host node is the
- * output's implicit trigger - the output emits when the host is active during
- * arg-walk.
+ * Per-binding map keyed by `Binding.name`. Frontends attach outputs to the
+ * declaring struct, so refs name fields visible in that scope (the resolver
+ * accepts a single global name index because optimization can move bindings
+ * around but never duplicates names within a scope).
  */
-export interface OutputHost {
-  host: Expr;
-  output: Output;
+interface NameIndex {
+  byName: Map<string, Binding>;
 }
 
-export interface NodeIndex {
-  /** node -> parent (root maps to null). */
-  parent: Map<Expr, Expr | null>;
-  /**
-   * binding name -> the outermost (shallowest) binding carrying that name.
-   * Skips the root binding, whose name may be the inner field's name due to
-   * the solver's single-field-collapse fallback.
-   */
-  bindingByName: Map<string, Binding>;
-}
-
-/** Build a parent map and a name->binding index over the IR tree. */
-export function indexTree(root: Expr, resolve: (n: Expr) => Binding | undefined): NodeIndex {
-  const parent = new Map<Expr, Expr | null>();
+function indexBindingsByName(root: Expr, resolve: (n: Expr) => Binding | undefined): NameIndex {
   const byNameDepth = new Map<string, { binding: Binding; depth: number }>();
-
-  function walk(node: Expr, p: Expr | null, depth: number): void {
-    parent.set(node, p);
-
+  function walk(node: Expr, depth: number): void {
     const binding = resolve(node);
     if (binding && depth > 0) {
       const existing = byNameDepth.get(binding.name);
@@ -44,36 +36,33 @@ export function indexTree(root: Expr, resolve: (n: Expr) => Binding | undefined)
         byNameDepth.set(binding.name, { binding, depth });
       }
     }
-
     switch (node.kind) {
       case "sequence":
-        for (const child of node.attrs.nodes) walk(child, node, depth + 1);
+        for (const child of node.attrs.nodes) walk(child, depth + 1);
         break;
       case "optional":
       case "repeat":
-        walk(node.attrs.node, node, depth + 1);
+        walk(node.attrs.node, depth + 1);
         break;
       case "alternative":
-        for (const alt of node.attrs.alts) walk(alt, node, depth + 1);
+        for (const alt of node.attrs.alts) walk(alt, depth + 1);
         break;
     }
   }
-
-  walk(root, null, 0);
-
-  const bindingByName = new Map<string, Binding>();
-  for (const [name, { binding }] of byNameDepth) bindingByName.set(name, binding);
-  return { parent, bindingByName };
+  walk(root, 0);
+  const byName = new Map<string, Binding>();
+  for (const [name, { binding }] of byNameDepth) byName.set(name, binding);
+  return { byName };
 }
 
-/** Collect every `(node, output)` pair in tree-walk order. */
-export function collectOutputHosts(root: Expr): OutputHost[] {
-  const hosts: OutputHost[] = [];
-
+/**
+ * Walk the IR collecting `(node, outputs)` pairs in tree order. Outputs attach
+ * to struct/sequence nodes by frontend convention.
+ */
+function collectScopes(root: Expr): { node: Expr; outputs: Output[] }[] {
+  const out: { node: Expr; outputs: Output[] }[] = [];
   function walk(node: Expr): void {
-    if (node.meta?.outputs) {
-      for (const output of node.meta.outputs) hosts.push({ host: node, output });
-    }
+    if (node.meta?.outputs?.length) out.push({ node, outputs: node.meta.outputs });
     switch (node.kind) {
       case "sequence":
         for (const child of node.attrs.nodes) walk(child);
@@ -87,104 +76,32 @@ export function collectOutputHosts(root: Expr): OutputHost[] {
         break;
     }
   }
-
   walk(root);
-  return hosts;
-}
-
-/**
- * Walk from an output's host node up to the root, collecting the conditions
- * that gate it: `optional`/`count` ancestors and selected-`alternative`-arm
- * ancestors become `GateAtom`s in `branchPath` (all must hold); `repeat`
- * ancestors that resolved to a `list` go into `listScope` (the output emits
- * once per iteration). The host node itself counts if it is one of those
- * wrappers.
- */
-export function gateContext(
-  host: Expr,
-  parent: Map<Expr, Expr | null>,
-  resolve: (n: Expr) => Binding | undefined,
-): { branchPath: GateAtom[]; listScope: BindingId[] } {
-  const branchPath: GateAtom[] = [];
-  const listScope: BindingId[] = [];
-
-  let node: Expr | null = host;
-  let prev: Expr | null = null;
-  while (node) {
-    if (node.kind === "optional") {
-      const b = resolve(node);
-      if (b) branchPath.push({ kind: "present", binding: b.id });
-    } else if (node.kind === "repeat") {
-      const b = resolve(node);
-      if (b) {
-        // repeat(value) -> list (iterate); repeat(literal) -> count (gate on > 0)
-        if (b.type.kind === "count") branchPath.push({ kind: "present", binding: b.id });
-        else listScope.push(b.id);
-      }
-    } else if (node.kind === "alternative" && prev) {
-      // Gate: "this union selected the arm containing the host." Variant order
-      // matches arm order. Bool-pair alternatives resolve to `bool`, not
-      // `union`, and carry no variant info - skip.
-      const union = resolve(node);
-      if (union?.type.kind === "union") {
-        const i = node.attrs.alts.indexOf(prev);
-        const variant = i >= 0 ? union.type.variants[i] : undefined;
-        if (variant) {
-          branchPath.push({ kind: "variant", binding: union.id, variant: variant.name ?? `variant_${i}` });
-        }
-      }
-    }
-    prev = node;
-    node = parent.get(node) ?? null;
-  }
-
-  return { branchPath: branchPath.reverse(), listScope: listScope.reverse() };
-}
-
-/**
- * Resolve every output attached to nodes in the tree against the binding
- * registry. Best-effort: token refs with no resolvable binding are dropped
- * (the validator reports them); the output is still emitted with its remaining
- * tokens.
- *
- * Returns the resolved outputs in tree-walk order alongside a map from each
- * resolved output to its host node (the IR node carrying it in `NodeMeta`),
- * so callers can attribute outputs back to specific subtrees.
- */
-export function resolveOutputs(
-  root: Expr,
-  resolve: (n: Expr) => Binding | undefined,
-  index?: NodeIndex,
-): { outputs: ResolvedOutput[]; hosts: Map<ResolvedOutput, Expr> } {
-  const hostList = collectOutputHosts(root);
-  if (hostList.length === 0) return { outputs: [], hosts: new Map() };
-  const idx = index ?? indexTree(root, resolve);
-  const outputs: ResolvedOutput[] = [];
-  const hosts = new Map<ResolvedOutput, Expr>();
-  for (let i = 0; i < hostList.length; i++) {
-    const { host, output } = hostList[i]!;
-    const resolved = resolveOne(host, output, i, idx, resolve);
-    outputs.push(resolved);
-    hosts.set(resolved, host);
-  }
-  return { outputs, hosts };
+  return out;
 }
 
 function resolveOne(
-  host: Expr,
   output: Output,
   index: number,
-  idx: NodeIndex,
-  resolve: (n: Expr) => Binding | undefined,
-): ResolvedOutput {
+  names: NameIndex,
+): { resolved: ResolvedOutput; errors: OutputDiagnostic[] } {
+  const errors: OutputDiagnostic[] = [];
+  const name = effectiveOutputName(output, index);
   const tokens: ResolvedToken[] = [];
   for (const token of output.tokens) {
     if (token.kind === "literal") {
       tokens.push({ kind: "literal", value: token.value });
       continue;
     }
-    const binding = idx.bindingByName.get(token.target.name);
-    if (!binding) continue; // dangling - validator catches
+    const binding = names.byName.get(token.target.name);
+    if (!binding) {
+      errors.push({
+        output: name,
+        level: "error",
+        message: `token ref '${token.target.name}' has no binding with that name (frontend produced an inconsistent output spec)`,
+      });
+      continue;
+    }
     tokens.push({
       kind: "ref",
       binding: binding.id,
@@ -192,17 +109,58 @@ function resolveOne(
       ...(token.fallback !== undefined && { fallback: token.fallback }),
     });
   }
-
-  const { branchPath, listScope } = gateContext(host, idx.parent, resolve);
-  const optional = (output.optional ?? false) || branchPath.length > 0;
-
-  return {
-    name: effectiveOutputName(output, index),
+  const resolved: ResolvedOutput = {
+    name,
     ...(output.doc && { doc: output.doc }),
     tokens,
-    branchCondition: [branchPath],
-    listScope,
-    optional,
     ...(output.mediaTypes && { mediaTypes: output.mediaTypes }),
+  };
+  return { resolved, errors };
+}
+
+/**
+ * Translate each `NodeMeta.outputs` entry against the binding registry,
+ * grouped by the declaring struct binding (the "scope"). The solver forces a
+ * binding on every output-carrying sequence, so an output without a scope
+ * binding indicates a frontend bug (outputs attached to a non-sequence
+ * node) - it is reported as a diagnostic and dropped.
+ */
+export function resolveOutputs(root: Expr, solved: SolveResult): OutputResolution {
+  const names = indexBindingsByName(root, solved.resolve);
+  const collected = collectScopes(root);
+
+  const byScope = new Map<BindingId, OutputScope>();
+  const errors: OutputDiagnostic[] = [];
+  const warnings: OutputDiagnostic[] = [];
+
+  let outputIndex = 0;
+  for (const { node, outputs } of collected) {
+    const scopeBinding = solved.resolve(node);
+    if (!scopeBinding) {
+      for (const output of outputs) {
+        const name = effectiveOutputName(output, outputIndex++);
+        errors.push({
+          output: name,
+          level: "error",
+          message: `output '${name}' is attached to a node without a binding (frontends should attach outputs to struct sequences)`,
+        });
+      }
+      continue;
+    }
+    let bucket = byScope.get(scopeBinding.id);
+    if (!bucket) {
+      bucket = { scope: scopeBinding.id, outputs: [] };
+      byScope.set(scopeBinding.id, bucket);
+    }
+    for (const output of outputs) {
+      const { resolved, errors: outErrors } = resolveOne(output, outputIndex++, names);
+      errors.push(...outErrors);
+      bucket.outputs.push(resolved);
+    }
+  }
+
+  return {
+    scopes: Array.from(byScope.values()),
+    diagnostics: { errors, warnings },
   };
 }
