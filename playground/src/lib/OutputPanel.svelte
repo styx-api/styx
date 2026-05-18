@@ -12,6 +12,7 @@
 
   let { result }: Props = $props();
   let activeTab = $state(tabs[0].id);
+  let subTabSelections = $state<Record<string, string>>({});
 
   const activeTabDef = $derived(tabs.find((t) => t.id === activeTab) ?? tabs[0]);
 
@@ -28,11 +29,28 @@
   const output = $derived.by(() => {
     if (!solved) return null;
     try {
-      return { ok: true as const, code: activeTabDef.compute(solved) };
+      return { ok: true as const, files: activeTabDef.compute(solved) };
     } catch (e) {
       return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
     }
   });
+
+  const fileNames = $derived(output?.ok ? Array.from(output.files.keys()) : []);
+
+  const activeFileName = $derived.by(() => {
+    if (!output?.ok) return null;
+    const selected = subTabSelections[activeTab];
+    if (selected !== undefined && output.files.has(selected)) return selected;
+    return fileNames[0] ?? null;
+  });
+
+  const activeFileContent = $derived(
+    output?.ok && activeFileName !== null ? (output.files.get(activeFileName) ?? "") : "",
+  );
+
+  function selectSubTab(filename: string) {
+    subTabSelections = { ...subTabSelections, [activeTab]: filename };
+  }
 </script>
 
 <div class="output">
@@ -62,6 +80,20 @@
     {/if}
   </div>
 
+  {#if fileNames.length > 1}
+    <div class="sub-tab-bar">
+      {#each fileNames as name}
+        <button
+          class="sub-tab"
+          class:active={activeFileName === name}
+          onclick={() => selectSubTab(name)}
+        >
+          {name}
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   <div class="content">
     {#if !result.ok}
       {#if result.error}
@@ -70,7 +102,7 @@
         <div class="empty">Load an example or paste a descriptor to begin.</div>
       {/if}
     {:else if output?.ok}
-      <CodeBlock code={output.code} lang={activeTabDef.lang} />
+      <CodeBlock code={activeFileContent} lang={activeTabDef.lang} />
     {:else if output && !output.ok}
       <Messages type="errors" messages={[{ message: output.error }]} />
     {/if}
@@ -120,6 +152,39 @@
   }
 
   .tab.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+
+  .sub-tab-bar {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-inset);
+    padding: 0 0.5rem;
+    gap: 0.25rem;
+    overflow-x: auto;
+  }
+
+  .sub-tab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.4rem 0.6rem;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    white-space: nowrap;
+    transition: all var(--transition);
+  }
+
+  .sub-tab:hover {
+    color: var(--text-secondary);
+  }
+
+  .sub-tab.active {
     color: var(--text);
     border-bottom-color: var(--accent);
   }

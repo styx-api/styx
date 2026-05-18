@@ -21,7 +21,7 @@ export interface TabDef {
   id: string;
   label: string;
   lang: BundledLanguage | "ir" | "bindings";
-  compute: (solved: SolvedParseResult) => string;
+  compute: (solved: SolvedParseResult) => Map<string, string>;
 }
 
 const boutiquesBackend = new BoutiquesBackend();
@@ -29,14 +29,8 @@ const jsonSchemaBackend = new JsonSchemaBackend();
 const pythonBackend = new PythonBackend();
 const typescriptBackend = new TypeScriptBackend();
 
-/** Concatenate emitted files with a comment-prefixed header per file. */
-function joinFiles(files: Map<string, string>, commentPrefix: string): string {
-  const parts: string[] = [];
-  for (const [name, content] of files) {
-    const bar = "=".repeat(60);
-    parts.push(`${commentPrefix}${bar}\n${commentPrefix}${name}\n${commentPrefix}${bar}\n${content}`);
-  }
-  return parts.join("\n\n");
+function single(name: string, content: string): Map<string, string> {
+  return new Map([[name, content]]);
 }
 
 export const tabs: TabDef[] = [
@@ -44,40 +38,43 @@ export const tabs: TabDef[] = [
     id: "ir",
     label: "IR",
     lang: "ir",
-    compute: ({ parseResult }) => format(parseResult.expr),
+    compute: ({ parseResult }) => single("ir", format(parseResult.expr)),
   },
   {
     id: "bindings",
     label: "Bindings",
     lang: "bindings",
     compute: ({ solveResult, parseResult, ctx }) =>
-      formatSolveResult(solveResult, parseResult.expr, {
-        scopes: ctx.outputScopes,
-        diagnostics: ctx.outputDiagnostics,
-      }),
+      single(
+        "bindings",
+        formatSolveResult(solveResult, parseResult.expr, {
+          scopes: ctx.outputScopes,
+          diagnostics: ctx.outputDiagnostics,
+        }),
+      ),
   },
   {
     id: "schema",
     label: "JSON Schema",
     lang: "json",
-    compute: ({ ctx }) => jsonSchemaBackend.emit(ctx).files.get("schema.json") ?? "{}",
+    compute: ({ ctx }) => jsonSchemaBackend.emit(ctx).files,
   },
   {
     id: "typescript",
     label: "TypeScript",
     lang: "typescript" as BundledLanguage,
-    compute: ({ ctx }) => joinFiles(typescriptBackend.emit(ctx).files, "// "),
+    compute: ({ ctx }) => typescriptBackend.emit(ctx).files,
   },
   {
     id: "python",
     label: "Python",
     lang: "python" as BundledLanguage,
-    compute: ({ ctx }) => joinFiles(pythonBackend.emit(ctx).files, "# "),
+    compute: ({ ctx }) => pythonBackend.emit(ctx).files,
   },
   {
     id: "boutiques",
     label: "Boutiques",
     lang: "json",
-    compute: ({ ctx }) => boutiquesBackend.emit(ctx).files.get("descriptor.json") ?? "{}",
+    compute: ({ ctx }) => boutiquesBackend.emit(ctx).files,
   },
 ];
