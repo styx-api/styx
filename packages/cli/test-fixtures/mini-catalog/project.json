@@ -1,0 +1,10 @@
+{
+  "name": "miniproject",
+  "version": "0.1.0",
+  "license": "MIT",
+  "packages": ["tools"],
+  "docs": {
+    "title": "Mini Project",
+    "description": "Tiny fixture used by CLI golden tests."
+  }
+}

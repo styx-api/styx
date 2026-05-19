@@ -1,0 +1,18 @@
+{
+  "name": "farewell",
+  "description": "Print a farewell.",
+  "tool-version": "1.0",
+  "schema-version": "0.5",
+  "command-line": "farewell [TIMES]",
+  "inputs": [
+    {
+      "id": "times",
+      "name": "Times",
+      "description": "How many times to say it.",
+      "type": "Number",
+      "integer": true,
+      "value-key": "[TIMES]",
+      "default-value": 1
+    }
+  ]
+}

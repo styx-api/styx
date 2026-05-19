@@ -1,0 +1,5 @@
+{
+  "name": "1.0",
+  "container": "miniproject/tools:1.0",
+  "apps": ["greet", "farewell"]
+}

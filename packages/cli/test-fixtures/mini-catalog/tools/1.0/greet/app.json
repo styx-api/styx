@@ -1,0 +1,4 @@
+{
+  "name": "greet",
+  "source": { "type": "boutiques", "path": "boutiques.json" }
+}

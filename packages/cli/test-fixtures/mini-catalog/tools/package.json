@@ -1,0 +1,11 @@
+{
+  "name": "tools",
+  "versions": [
+    "1.0"
+  ],
+  "default": "1.0",
+  "docs": {
+    "title": "Tools",
+    "description": "Mini test toolset."
+  }
+}
