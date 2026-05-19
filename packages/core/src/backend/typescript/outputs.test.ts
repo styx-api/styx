@@ -26,18 +26,16 @@ describe("typescript outputs - codegen", () => {
       ],
     };
     const code = generate(root, { app: { id: "tool" } });
-    // Internal interface, then public rename re-export.
-    expect(code).toContain("export interface Outputs {");
-    expect(code).toContain("Outputs as ToolOutputs");
+    expect(code).toContain("export interface ToolOutputs {");
     expect(code).toContain("out_file: OutputPathType");
-    expect(code).toContain("): Outputs {");
+    expect(code).toContain("): ToolOutputs {");
     expect(code).toContain("return out;");
   });
 
   it("omits Outputs entirely when no outputs are attached", () => {
     const root = seq(lit("tool"), path("input"));
     const code = generate(root, { app: { id: "tool" } });
-    expect(code).not.toContain("export interface Outputs");
+    expect(code).not.toContain("ToolOutputs");
     expect(code).not.toContain("OutputPathType");
     expect(code).toContain("): void {");
   });

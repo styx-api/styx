@@ -3,7 +3,6 @@ import { alt, float, int, lit, opt, path, rep, repJoin, seq, seqJoin } from "../
 import type { CodegenContext } from "../../manifest/index.js";
 import { createContext } from "../../manifest/context.js";
 import { resolveOutputs, solve } from "../../solver/index.js";
-import type { GeneratedPython } from "./python.js";
 import { generatePython } from "./python.js";
 
 // Re-export IR builders for test convenience.
@@ -19,38 +18,11 @@ export function namedAlt(name: string, ...alts: Expr[]): Expr {
   return { kind: "alternative", attrs: { alts }, meta: { name } };
 }
 
-/**
- * For tests that assert against generated source: returns the concatenation
- * of `_core.py` and `__init__.py` separated by a marker. Most substring
- * assertions just want "is this string anywhere in the output", and that's
- * preserved across both files this way.
- */
+/** Generate the single-file Python source for an expression. */
 export function generate(
   expr: Expr,
   options?: { app?: AppMeta; package?: { name?: string } },
 ): string {
-  const { core, init } = generateBoth(expr, options);
-  return `${core}\n# ----- __init__.py -----\n${init}`;
-}
-
-export function generateCore(
-  expr: Expr,
-  options?: { app?: AppMeta; package?: { name?: string } },
-): string {
-  return generateBoth(expr, options).core;
-}
-
-export function generateInit(
-  expr: Expr,
-  options?: { app?: AppMeta; package?: { name?: string } },
-): string {
-  return generateBoth(expr, options).init;
-}
-
-export function generateBoth(
-  expr: Expr,
-  options?: { app?: AppMeta; package?: { name?: string } },
-): GeneratedPython {
   return generatePython(generateCtx(expr, options));
 }
 

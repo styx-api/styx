@@ -40,10 +40,14 @@ export function hasAnyOutputs(ctx: CodegenContext): boolean {
   return ctx.outputScopes.some((s) => s.outputs.length > 0);
 }
 
-/** Emit `@dataclasses.dataclass\nclass Outputs:` declaration. */
-export function emitOutputsClass(ctx: CodegenContext, cb: CodeBuilder): void {
+/** Emit `@dataclasses.dataclass\nclass <outputsType>:` declaration. */
+export function emitOutputsClass(
+  ctx: CodegenContext,
+  outputsType: string,
+  cb: CodeBuilder,
+): void {
   cb.line("@dataclasses.dataclass");
-  cb.line("class Outputs:");
+  cb.line(`class ${outputsType}:`);
   cb.indent(() => {
     emitDocstring(cb, "Output paths produced by the tool.");
     let emitted = false;
@@ -285,14 +289,15 @@ function emitOneOutput(
 export function emitBuildOutputs(
   ctx: CodegenContext,
   paramsType: string,
+  outputsType: string,
   funcName: string,
   cb: CodeBuilder,
 ): void {
   cb.line(
-    `def ${funcName}(params: ${paramsType}, execution: Execution) -> Outputs:`,
+    `def ${funcName}(params: ${paramsType}, execution: Execution) -> ${outputsType}:`,
   );
   cb.indent(() => {
-    cb.line(`"""Build the Outputs object for this tool."""`);
+    cb.line(`"""Build the ${outputsType} object for this tool."""`);
     loopCounter = 0;
     const ec: OutputEmitCtx = {
       ctx,
@@ -312,9 +317,9 @@ export function emitBuildOutputs(
     }
 
     if (fieldAssigns.length === 0) {
-      cb.line("return Outputs()");
+      cb.line(`return ${outputsType}()`);
     } else {
-      cb.line("return Outputs(");
+      cb.line(`return ${outputsType}(`);
       cb.indent(() => {
         for (const { name, localVar } of fieldAssigns) {
           cb.line(`${name}=${localVar},`);

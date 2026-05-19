@@ -50,9 +50,13 @@ export function hasAnyOutputs(ctx: CodegenContext): boolean {
   return ctx.outputScopes.some((s) => s.outputs.length > 0);
 }
 
-/** Emit the `export interface Outputs { ... }` declaration. */
-export function emitOutputsInterface(ctx: CodegenContext, cb: CodeBuilder): void {
-  cb.line(`export interface Outputs {`);
+/** Emit the `export interface <outputsType> { ... }` declaration. */
+export function emitOutputsInterface(
+  ctx: CodegenContext,
+  outputsType: string,
+  cb: CodeBuilder,
+): void {
+  cb.line(`export interface ${outputsType} {`);
   cb.indent(() => {
     for (const scope of ctx.outputScopes) {
       const scopeBinding = ctx.bindings.get(scope.scope);
@@ -319,11 +323,12 @@ function jsId(name: string): string {
 export function emitBuildOutputs(
   ctx: CodegenContext,
   paramsType: string,
+  outputsType: string,
   funcName: string,
   cb: CodeBuilder,
 ): void {
   cb.line(
-    `export function ${funcName}(params: ${paramsType}, execution: Execution): Outputs {`,
+    `export function ${funcName}(params: ${paramsType}, execution: Execution): ${outputsType} {`,
   );
   cb.indent(() => {
     loopCounter = 0;
@@ -335,7 +340,7 @@ export function emitBuildOutputs(
 
     // Initialize the outputs object with defaults so wrapper code can assign or
     // push into it without conditional construction.
-    cb.line(`const outputs: Outputs = {`);
+    cb.line(`const outputs: ${outputsType} = {`);
     cb.indent(() => {
       for (const scope of ctx.outputScopes) {
         const scopeBinding = ctx.bindings.get(scope.scope);

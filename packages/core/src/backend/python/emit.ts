@@ -198,6 +198,7 @@ export function emitWrapperFunction(
   metaConst: string,
   cargsFunc: string,
   outputsFunc: string | undefined,
+  outputsType: string | undefined,
   cb: CodeBuilder,
 ): void {
   const emitOutputs = outputsFunc !== undefined;
@@ -224,7 +225,7 @@ export function emitWrapperFunction(
   docLines.push("Returns:");
   docLines.push(emitOutputs ? "    Tool outputs (paths to files produced by the tool)." : "    None.");
 
-  const returnType = emitOutputs ? "Outputs" : "None";
+  const returnType = emitOutputs && outputsType ? outputsType : "None";
   cb.line(
     `def ${funcName}(params: ${paramsType}, runner: Runner | None = None) -> ${returnType}:`,
   );

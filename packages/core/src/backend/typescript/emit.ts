@@ -149,6 +149,7 @@ export function emitWrapperFunction(
   metaConst: string,
   cargsFunc: string,
   outputsFunc: string | undefined,
+  outputsType: string | undefined,
   cb: CodeBuilder,
 ): void {
   const appDoc = ctx.app?.doc;
@@ -181,7 +182,7 @@ export function emitWrapperFunction(
     cb.line(" */");
   }
 
-  const returnType = emitOutputs ? "Outputs" : "void";
+  const returnType = emitOutputs && outputsType ? outputsType : "void";
   cb.line(
     `export function ${funcName}(params: ${paramsType}, runner: Runner | null = null): ${returnType} {`,
   );

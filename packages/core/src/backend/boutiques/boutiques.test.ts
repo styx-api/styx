@@ -416,7 +416,7 @@ describe("BoutiquesBackend", () => {
     const ctx = createContext(optimized, solveResult, outputs, { app: meta });
 
     const backend = new BoutiquesBackend();
-    const result = backend.emit(ctx);
+    const result = backend.emitApp(ctx);
 
     expect(result.errors).toHaveLength(0);
     expect(result.files.has("descriptor.json")).toBe(true);
@@ -450,7 +450,7 @@ describe("BoutiquesBackend", () => {
     const ctx = createContext(optimized, solveResult, outputs, { app: meta });
 
     const backend = new BoutiquesBackend();
-    const result = backend.emit(ctx);
+    const result = backend.emitApp(ctx);
     const json = result.files.get("descriptor.json")!;
 
     // Re-parse with BoutiquesParser - should succeed

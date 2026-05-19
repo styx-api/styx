@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { TypeScriptBackend } from "./typescript.js";
+import { TypeScriptBackend, generatePackageIndex } from "./typescript.js";
 import {
   alt,
   float,
   generate,
-  generateCore,
   generateCtx,
-  generateIndex,
   int,
   lit,
   namedAlt,
@@ -29,28 +27,24 @@ describe("TypeScript generation - structure", () => {
     expect(code).toContain('import { getGlobalRunner } from "styxdefs"');
   });
 
-  it("emits metadata constant with Metadata type", () => {
+  it("emits metadata constant with Metadata type using tool-prefixed name", () => {
     const code = generate(seq(lit("bet")), {
       app: { id: "bet", doc: { title: "bet", description: "Brain extraction" } },
       package: { name: "fsl" },
     });
-    expect(code).toContain("export const METADATA: Metadata");
+    expect(code).toContain("export const BET_METADATA: Metadata");
     expect(code).toContain('id: "bet"');
     expect(code).toContain('name: "bet"');
     expect(code).toContain('package: "fsl"');
-    // Tool-prefixed public alias (rename re-export in index.ts).
-    expect(code).toContain("METADATA as BET_METADATA");
   });
 
-  it("emits wrapper function using styxdefs runner protocol", () => {
+  it("emits wrapper function with tool-prefixed name", () => {
     const code = generate(seq(lit("tool"), str("input")), {
       app: { id: "my-tool" },
     });
-    // Internal wrapper in core.ts, then rename re-export in index.ts.
-    expect(code).toContain("export function run(");
-    expect(code).toContain("run as myTool");
+    expect(code).toContain("export function myTool(");
     expect(code).toContain("runner = runner ?? getGlobalRunner()");
-    expect(code).toContain("runner.startExecution(METADATA)");
+    expect(code).toContain("runner.startExecution(MY_TOOL_METADATA)");
     expect(code).toContain("execution.params(params)");
     expect(code).toContain("execution.run(args)");
   });
@@ -458,61 +452,85 @@ describe("TypeScript generation - discriminated unions", () => {
   });
 });
 
-describe("TypeScript generation - public aliases (index.ts)", () => {
-  it("emits tool-prefixed rename re-exports in index.ts", () => {
-    const index = generateIndex(seq(lit("bet"), str("input")), { app: { id: "bet" } });
-    expect(index).toContain('from "./core.js"');
-    expect(index).toContain("Params as Bet");
-    expect(index).toContain("METADATA as BET_METADATA");
-    expect(index).toContain("cargs as bet_cargs");
-    expect(index).toContain("run as bet");
+describe("TypeScript generation - public names", () => {
+  it("emits tool-prefixed public names directly in the tool file", () => {
+    const code = generate(seq(lit("bet"), str("input")), { app: { id: "bet" } });
+    expect(code).toContain("export interface Bet {");
+    expect(code).toContain("export const BET_METADATA: Metadata");
+    expect(code).toContain("export function bet_cargs(");
+    expect(code).toContain("export function bet(");
   });
 
-  it("omits Outputs rename when no outputs are present", () => {
-    const index = generateIndex(seq(lit("bet"), str("input")), { app: { id: "bet" } });
-    expect(index).not.toContain("BetOutputs");
-    expect(index).not.toContain("bet_outputs");
+  it("omits Outputs symbols when no outputs are present", () => {
+    const code = generate(seq(lit("bet"), str("input")), { app: { id: "bet" } });
+    expect(code).not.toContain("BetOutputs");
+    expect(code).not.toContain("bet_outputs");
   });
 
-  it("re-exports internal names directly when no appId is provided", () => {
-    const index = generateIndex(seq(lit("tool"), str("input")));
-    expect(index).not.toContain(" as ");
-    expect(index).toContain("Params");
-    expect(index).toContain("METADATA");
-    expect(index).toContain("run");
-  });
-
-  it("core.ts contains the implementation but no re-exports from index", () => {
-    const core = generateCore(seq(lit("bet"), str("input")), { app: { id: "bet" } });
-    expect(core).toContain("export function run(");
-    expect(core).toContain("export function cargs(");
-    expect(core).toContain("export const METADATA: Metadata");
-    expect(core).not.toContain('from "./core.js"');
+  it("uses generic names when no appId is provided", () => {
+    const code = generate(seq(lit("tool"), str("input")));
+    expect(code).toContain("export function run(");
+    expect(code).toContain("export function cargs(");
+    expect(code).toContain("export const METADATA: Metadata");
+    expect(code).toContain("export interface Params");
   });
 });
 
 describe("TypeScriptBackend", () => {
-  it("emits a package directory (index.ts + core.ts) keyed by app id", () => {
+  it("emits a single flat tool file keyed by snake_cased app id", () => {
     const ctx = generateCtx(seq(lit("bet"), str("input")), {
       app: { id: "bet", doc: { title: "bet" } },
     });
     const backend = new TypeScriptBackend();
-    const result = backend.emit(ctx);
+    const result = backend.emitApp(ctx);
 
     expect(result.errors).toHaveLength(0);
-    expect(result.files.has("bet/index.ts")).toBe(true);
-    expect(result.files.has("bet/core.ts")).toBe(true);
-    expect(result.files.get("bet/index.ts")).toContain("run as bet");
-    expect(result.files.get("bet/core.ts")).toContain("export function run(");
+    expect(result.files.has("bet.ts")).toBe(true);
+    expect(result.files.size).toBe(1);
+    expect(result.files.get("bet.ts")).toContain("export function bet(");
   });
 
-  it("uses output/ when no app id", () => {
+  it("snake-cases multi-word app ids in the tool file name", () => {
+    const ctx = generateCtx(seq(lit("my-tool"), str("input")), {
+      app: { id: "my-tool", doc: { title: "my-tool" } },
+    });
+    const backend = new TypeScriptBackend();
+    const result = backend.emitApp(ctx);
+
+    expect(result.files.has("my_tool.ts")).toBe(true);
+  });
+
+  it("uses output.ts when no app id", () => {
     const ctx = generateCtx(seq(str("input")));
     const backend = new TypeScriptBackend();
-    const result = backend.emit(ctx);
+    const result = backend.emitApp(ctx);
 
-    expect(result.files.has("output/index.ts")).toBe(true);
-    expect(result.files.has("output/core.ts")).toBe(true);
+    expect(result.files.has("output.ts")).toBe(true);
+  });
+
+  it("emitPackage emits an index.ts with star-exports of each tool module", () => {
+    const backend = new TypeScriptBackend();
+    const apps = [
+      backend.emitApp(generateCtx(seq(lit("bet"), str("input")), { app: { id: "bet" } })),
+      backend.emitApp(generateCtx(seq(lit("flirt"), str("input")), { app: { id: "flirt" } })),
+    ];
+    const pkg = backend.emitPackage({ name: "fsl" }, apps);
+
+    expect(pkg.files.has("index.ts")).toBe(true);
+    const index = pkg.files.get("index.ts")!;
+    expect(index).toContain('export * from "./bet.js"');
+    expect(index).toContain('export * from "./flirt.js"');
+  });
+
+  it("generatePackageIndex sorts modules alphabetically", () => {
+    const index = generatePackageIndex([
+      { meta: { id: "zeta" }, files: new Map(), errors: [], warnings: [] },
+      { meta: { id: "alpha" }, files: new Map(), errors: [], warnings: [] },
+      { meta: { id: "mu" }, files: new Map(), errors: [], warnings: [] },
+    ]);
+    const idx = (s: string) => index.indexOf(s);
+    expect(idx('export * from "./alpha.js"')).toBeLessThan(idx('export * from "./mu.js"'));
+    expect(idx('export * from "./mu.js"')).toBeLessThan(idx('export * from "./zeta.js"'));
   });
 });
 

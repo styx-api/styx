@@ -269,7 +269,7 @@ describe("JsonSchemaBackend", () => {
     });
 
     const backend = new JsonSchemaBackend();
-    const result = backend.emit(ctx);
+    const result = backend.emitApp(ctx);
 
     expect(result.errors).toHaveLength(0);
     expect(result.files.has("schema.json")).toBe(true);

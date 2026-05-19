@@ -10,7 +10,7 @@ import type {
 import type { Expr, ScalarKind } from "../../ir/index.js";
 import type { AppMeta } from "../../ir/meta.js";
 import type { CodegenContext } from "../../manifest/index.js";
-import type { Backend, EmitResult, EmitWarning } from "../backend.js";
+import type { Backend, EmittedApp, EmitWarning } from "../backend.js";
 import { collectFieldInfo } from "../collect-field-info.js";
 import { findDoc } from "../find-doc.js";
 import { findStructNode } from "../find-struct-node.js";
@@ -1005,10 +1005,11 @@ export class BoutiquesBackend implements Backend {
   readonly name = "boutiques";
   readonly target = "boutiques";
 
-  emit(ctx: CodegenContext): EmitResult {
+  emitApp(ctx: CodegenContext): EmittedApp {
     const { descriptor, warnings } = generateBoutiques(ctx);
     const json = JSON.stringify(descriptor, null, 2);
     return {
+      meta: ctx.app,
       files: new Map([["descriptor.json", json]]),
       errors: [],
       warnings,

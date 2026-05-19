@@ -57,24 +57,24 @@ export const tabs: TabDef[] = [
     id: "schema",
     label: "JSON Schema",
     lang: "json",
-    compute: ({ ctx }) => jsonSchemaBackend.emit(ctx).files,
+    compute: ({ ctx }) => jsonSchemaBackend.emitApp(ctx).files,
   },
   {
     id: "typescript",
     label: "TypeScript",
     lang: "typescript" as BundledLanguage,
-    compute: ({ ctx }) => typescriptBackend.emit(ctx).files,
+    compute: ({ ctx }) => typescriptBackend.emitApp(ctx).files,
   },
   {
     id: "python",
     label: "Python",
     lang: "python" as BundledLanguage,
-    compute: ({ ctx }) => pythonBackend.emit(ctx).files,
+    compute: ({ ctx }) => pythonBackend.emitApp(ctx).files,
   },
   {
     id: "boutiques",
     label: "Boutiques",
     lang: "json",
-    compute: ({ ctx }) => boutiquesBackend.emit(ctx).files,
+    compute: ({ ctx }) => boutiquesBackend.emitApp(ctx).files,
   },
 ];

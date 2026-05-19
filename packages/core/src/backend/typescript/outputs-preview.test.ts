@@ -23,8 +23,7 @@ function compile(descriptor: Record<string, unknown>): string {
   const solveResult = solve(optimized);
   const outputs = resolveOutputs(optimized, solveResult);
   const ctx = createContext(optimized, solveResult, outputs, { app: meta });
-  const { core, index } = generateTypeScript(ctx);
-  return `${core}\n// ----- index.ts -----\n${index}`;
+  return generateTypeScript(ctx);
 }
 
 function header(label: string): string {

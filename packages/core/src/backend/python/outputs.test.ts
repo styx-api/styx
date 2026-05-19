@@ -18,16 +18,16 @@ describe("python outputs - codegen", () => {
     };
     const code = generate(root, { app: { id: "tool" } });
     expect(code).toContain("@dataclasses.dataclass");
-    expect(code).toContain("class Outputs:");
+    expect(code).toContain("class ToolOutputs:");
     expect(code).toContain("out_file: OutputPathType");
-    expect(code).toContain("-> Outputs:");
+    expect(code).toContain("-> ToolOutputs:");
     expect(code).toContain("return out");
   });
 
   it("omits Outputs entirely when no outputs are attached", () => {
     const root = seq(lit("tool"), path("input"));
     const code = generate(root, { app: { id: "tool" } });
-    expect(code).not.toContain("class Outputs:");
+    expect(code).not.toContain("class ToolOutputs:");
     expect(code).not.toContain("OutputPathType");
     expect(code).toContain("-> None:");
   });

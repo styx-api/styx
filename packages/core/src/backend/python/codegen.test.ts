@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { PythonBackend } from "./python.js";
+import { PythonBackend, generatePackageInit } from "./python.js";
 import {
   alt,
   float,
   generate,
-  generateCore,
   generateCtx,
-  generateInit,
   int,
   lit,
   namedAlt,
@@ -33,28 +31,24 @@ describe("Python generation - structure", () => {
     expect(code).toContain("get_global_runner");
   });
 
-  it("emits metadata constant with Metadata type", () => {
+  it("emits metadata constant with Metadata type using tool-prefixed name", () => {
     const code = generate(seq(lit("bet")), {
       app: { id: "bet", doc: { title: "bet", description: "Brain extraction" } },
       package: { name: "fsl" },
     });
-    expect(code).toContain("METADATA = Metadata(");
+    expect(code).toContain("BET_METADATA = Metadata(");
     expect(code).toContain('id="bet"');
     expect(code).toContain('name="bet"');
     expect(code).toContain('package="fsl"');
-    // Tool-prefixed public alias (rename-import in __init__.py).
-    expect(code).toContain("METADATA as BET_METADATA");
   });
 
-  it("emits wrapper function using styxdefs runner protocol", () => {
+  it("emits wrapper function with tool-prefixed name", () => {
     const code = generate(seq(lit("tool"), str("input")), {
       app: { id: "my-tool" },
     });
-    // Internal wrapper, then public alias rename-import.
-    expect(code).toContain("def run(");
-    expect(code).toContain("run as my_tool");
+    expect(code).toContain("def my_tool(");
     expect(code).toContain("runner = runner if runner is not None else get_global_runner()");
-    expect(code).toContain("execution = runner.start_execution(METADATA)");
+    expect(code).toContain("execution = runner.start_execution(MY_TOOL_METADATA)");
     expect(code).toContain("execution.params(params)");
     expect(code).toContain("execution.run(args)");
   });
@@ -307,20 +301,19 @@ describe("Python generation - discriminated unions", () => {
   });
 });
 
-describe("Python generation - public aliases / __all__", () => {
-  it("emits tool-prefixed rename-imports in __init__.py", () => {
-    const init = generateInit(seq(lit("bet"), str("input")), { app: { id: "bet" } });
-    expect(init).toContain("from ._core import");
-    expect(init).toContain("Params as Bet");
-    expect(init).toContain("METADATA as BET_METADATA");
-    expect(init).toContain("cargs as bet_cargs");
-    expect(init).toContain("run as bet");
+describe("Python generation - public names / __all__", () => {
+  it("emits tool-prefixed public names directly in the tool file", () => {
+    const code = generate(seq(lit("bet"), str("input")), { app: { id: "bet" } });
+    expect(code).toContain("class Bet(typing.TypedDict):");
+    expect(code).toContain("BET_METADATA = Metadata(");
+    expect(code).toContain("def bet_cargs(");
+    expect(code).toContain("def bet(");
   });
 
-  it("emits __all__ in __init__.py listing only the public aliased names", () => {
-    const init = generateInit(seq(lit("bet"), str("input")), { app: { id: "bet" } });
-    expect(init).toMatch(/__all__ = \[[\s\S]*?\]/);
-    const allBlock = init.match(/__all__ = \[([\s\S]*?)\]/)?.[1] ?? "";
+  it("emits __all__ listing only the public names", () => {
+    const code = generate(seq(lit("bet"), str("input")), { app: { id: "bet" } });
+    expect(code).toMatch(/__all__ = \[[\s\S]*?\]/);
+    const allBlock = code.match(/__all__ = \[([\s\S]*?)\]/)?.[1] ?? "";
     expect(allBlock).toContain('"Bet"');
     expect(allBlock).toContain('"BET_METADATA"');
     expect(allBlock).toContain('"bet"');
@@ -329,63 +322,79 @@ describe("Python generation - public aliases / __all__", () => {
     expect(allBlock).not.toContain('"run"');
   });
 
-  it("omits Outputs imports when no outputs are present", () => {
-    const init = generateInit(seq(lit("bet"), path("input")), { app: { id: "bet" } });
-    expect(init).not.toContain("Outputs as BetOutputs");
-    expect(init).not.toContain("outputs as bet_outputs");
+  it("omits Outputs symbols from __all__ when no outputs are present", () => {
+    const code = generate(seq(lit("bet"), path("input")), { app: { id: "bet" } });
+    const allBlock = code.match(/__all__ = \[([\s\S]*?)\]/)?.[1] ?? "";
+    expect(allBlock).not.toContain('"BetOutputs"');
+    expect(allBlock).not.toContain('"bet_outputs"');
   });
 
-  it("re-exports internal names directly when no appId is provided", () => {
-    const init = generateInit(seq(lit("tool"), str("input")));
-    // Without an appId, internal names == public names; no rename `as`.
-    expect(init).not.toContain(" as ");
-    expect(init).toContain("Params,");
-    expect(init).toContain("run,");
-  });
-
-  it("_core.py contains the implementation but no aliases or __all__", () => {
-    const core = generateCore(seq(lit("bet"), str("input")), { app: { id: "bet" } });
-    expect(core).toContain("def run(");
-    expect(core).toContain("def cargs(");
-    expect(core).toContain("METADATA = Metadata(");
-    expect(core).not.toContain("__all__");
-    expect(core).not.toContain("from ._core");
+  it("uses generic names when no appId is provided", () => {
+    const code = generate(seq(lit("tool"), str("input")));
+    expect(code).toContain("def run(");
+    expect(code).toContain("def cargs(");
+    expect(code).toContain("METADATA = Metadata(");
+    const allBlock = code.match(/__all__ = \[([\s\S]*?)\]/)?.[1] ?? "";
+    expect(allBlock).toContain('"Params"');
+    expect(allBlock).toContain('"run"');
   });
 });
 
 describe("PythonBackend", () => {
-  it("emits a package directory (__init__.py + _core.py) keyed by snake_cased app id", () => {
+  it("emits a single flat tool file keyed by snake_cased app id", () => {
     const ctx = generateCtx(seq(lit("bet"), str("input")), {
       app: { id: "bet", doc: { title: "bet" } },
     });
     const backend = new PythonBackend();
-    const result = backend.emit(ctx);
+    const result = backend.emitApp(ctx);
 
     expect(result.errors).toHaveLength(0);
-    expect(result.files.has("bet/__init__.py")).toBe(true);
-    expect(result.files.has("bet/_core.py")).toBe(true);
-    expect(result.files.get("bet/__init__.py")).toContain("run as bet");
-    expect(result.files.get("bet/_core.py")).toContain("def run(");
+    expect(result.files.has("bet.py")).toBe(true);
+    expect(result.files.size).toBe(1);
+    expect(result.files.get("bet.py")).toContain("def bet(");
   });
 
-  it("snake-cases multi-word app ids in the package directory", () => {
+  it("snake-cases multi-word app ids in the tool file name", () => {
     const ctx = generateCtx(seq(lit("my-tool"), str("input")), {
       app: { id: "my-tool", doc: { title: "my-tool" } },
     });
     const backend = new PythonBackend();
-    const result = backend.emit(ctx);
+    const result = backend.emitApp(ctx);
 
-    expect(result.files.has("my_tool/__init__.py")).toBe(true);
-    expect(result.files.has("my_tool/_core.py")).toBe(true);
+    expect(result.files.has("my_tool.py")).toBe(true);
   });
 
-  it("uses output/ when no app id", () => {
+  it("uses output.py when no app id", () => {
     const ctx = generateCtx(seq(str("input")));
     const backend = new PythonBackend();
-    const result = backend.emit(ctx);
+    const result = backend.emitApp(ctx);
 
-    expect(result.files.has("output/__init__.py")).toBe(true);
-    expect(result.files.has("output/_core.py")).toBe(true);
+    expect(result.files.has("output.py")).toBe(true);
+  });
+
+  it("emitPackage emits an __init__.py with star-imports of each tool module", () => {
+    const backend = new PythonBackend();
+    const apps = [
+      backend.emitApp(generateCtx(seq(lit("bet"), str("input")), { app: { id: "bet" } })),
+      backend.emitApp(generateCtx(seq(lit("flirt"), str("input")), { app: { id: "flirt" } })),
+    ];
+    const pkg = backend.emitPackage({ name: "fsl" }, apps);
+
+    expect(pkg.files.has("__init__.py")).toBe(true);
+    const init = pkg.files.get("__init__.py")!;
+    expect(init).toContain("from .bet import *");
+    expect(init).toContain("from .flirt import *");
+  });
+
+  it("generatePackageInit sorts modules alphabetically", () => {
+    const init = generatePackageInit([
+      { meta: { id: "zeta" }, files: new Map(), errors: [], warnings: [] },
+      { meta: { id: "alpha" }, files: new Map(), errors: [], warnings: [] },
+      { meta: { id: "mu" }, files: new Map(), errors: [], warnings: [] },
+    ]);
+    const idx = (s: string) => init.indexOf(s);
+    expect(idx("from .alpha import *")).toBeLessThan(idx("from .mu import *"));
+    expect(idx("from .mu import *")).toBeLessThan(idx("from .zeta import *"));
   });
 });
 

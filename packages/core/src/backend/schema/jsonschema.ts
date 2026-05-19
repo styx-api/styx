@@ -1,7 +1,7 @@
 import type { Binding, BoundType, BoundVariant } from "../../bindings/index.js";
 import type { Expr, ScalarKind } from "../../ir/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
-import type { Backend, EmitResult } from "../backend.js";
+import type { Backend, EmittedApp } from "../backend.js";
 import { findDoc } from "../find-doc.js";
 import { findStructNode } from "../find-struct-node.js";
 import { resolveFieldBinding } from "../resolve-field-binding.js";
@@ -179,10 +179,11 @@ export class JsonSchemaBackend implements Backend {
   readonly name = "json-schema";
   readonly target = "json-schema";
 
-  emit(ctx: CodegenContext): EmitResult {
+  emitApp(ctx: CodegenContext): EmittedApp {
     const schema = generateSchema(ctx);
     const json = JSON.stringify(schema, null, 2);
     return {
+      meta: ctx.app,
       files: new Map([["schema.json", json]]),
       errors: [],
       warnings: [],
