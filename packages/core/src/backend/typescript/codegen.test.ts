@@ -84,17 +84,22 @@ describe("TypeScript generation - type declarations", () => {
     expect(code).toMatch(/"a"\s*\|\s*"b"\s*\|\s*"c"/);
   });
 
-  it("emits @type discriminator on root params interface", () => {
+  it("emits @type discriminator on root params interface as optional", () => {
     const code = generate(seq(str("input")), {
       app: { id: "bet" },
       package: { name: "fsl" },
     });
+    // Optional (`?:`): the factory always sets it, but the type system has no
+    // need to require it. Union variants keep @type required for narrowing.
     expect(code).toContain('"@type"?: "fsl/bet"');
   });
 
-  it("marks fields with defaultValue as optional", () => {
+  it("keeps fields with defaultValue required in the interface", () => {
+    // Defaults live on the params factory signature, not the interface; the
+    // factory always writes the field, so it stays required on the dict shape.
     const code = generate(seq(opt(seq(lit("-v")), { name: "verbose", defaultValue: false })));
-    expect(code).toMatch(/verbose\?: boolean/);
+    expect(code).toMatch(/verbose: boolean/);
+    expect(code).not.toMatch(/verbose\?: boolean/);
   });
 });
 
@@ -333,7 +338,8 @@ describe("TypeScript generation - complex IR", () => {
     );
     expect(code).toContain("input: string");
     expect(code).toMatch(/threshold\?: number \| null/);
-    expect(code).toMatch(/verbose\?: boolean/);
+    // `verbose` has an explicit default; stays required on the interface.
+    expect(code).toMatch(/verbose: boolean/);
     expect(code).toContain('cargs.push("tool")');
     expect(code).toContain("if (params.verbose)");
   });
@@ -531,6 +537,89 @@ describe("TypeScriptBackend", () => {
     const idx = (s: string) => index.indexOf(s);
     expect(idx('export * from "./alpha.js"')).toBeLessThan(idx('export * from "./mu.js"'));
     expect(idx('export * from "./mu.js"')).toBeLessThan(idx('export * from "./zeta.js"'));
+  });
+});
+
+describe("TypeScript generation - params factory & kwarg wrapper", () => {
+  it("emits a `<tool>Params` factory returning the params object", () => {
+    const code = generate(seq(lit("greet"), str("name", "Person to greet.")), {
+      app: { id: "greet" },
+    });
+    expect(code).toMatch(/export function greetParams\(\s*name: string,\s*\): Greet \{/);
+    expect(code).toContain("name: name,");
+    expect(code).toContain("return params;");
+  });
+
+  it("renames the dict-style wrapper to `<tool>Execute`", () => {
+    const code = generate(seq(lit("greet"), str("name")), { app: { id: "greet" } });
+    expect(code).toContain(
+      "export function greetExecute(params: Greet, runner: Runner | null = null): void",
+    );
+  });
+
+  it("emits a kwarg `<tool>` wrapper that calls the factory then execute", () => {
+    const code = generate(seq(lit("greet"), str("name")), { app: { id: "greet" } });
+    expect(code).toMatch(
+      /export function greet\(\s*name: string,\s*runner: Runner \| null = null,\s*\): void \{/,
+    );
+    expect(code).toMatch(/const params = greetParams\(\s*name,\s*\)/);
+    expect(code).toContain("greetExecute(params, runner)");
+  });
+
+  it("renders explicit defaults in the kwarg signature; bool defaults stay required in interface", () => {
+    const code = generate(
+      seq(lit("t"), str("name"), opt(seq(lit("-v")), { name: "verbose", defaultValue: false })),
+      { app: { id: "t" } },
+    );
+    expect(code).toMatch(/verbose: boolean = false/);
+    // Object literal includes the field unconditionally.
+    expect(code).toMatch(/verbose: verbose,/);
+  });
+
+  it("conditionally adds optional-without-default fields to the params object", () => {
+    const code = generate(seq(lit("t"), opt(str("name"))), { app: { id: "t" } });
+    expect(code).toMatch(/name: string \| null = null,/);
+    expect(code).toMatch(/if \(name !== null\)/);
+    expect(code).toMatch(/params\.name = name;/);
+  });
+
+  it("orders required (no default) before defaulted fields in the signature", () => {
+    const code = generate(
+      seq(
+        lit("t"),
+        str("required_str"),
+        opt(seq(lit("-v")), { name: "flag", defaultValue: false }),
+      ),
+      { app: { id: "t" } },
+    );
+    const sig = code.match(/export function tParams\(([\s\S]*?)\): T \{/)?.[1] ?? "";
+    const requiredIdx = sig.indexOf("required_str:");
+    const flagIdx = sig.indexOf("flag:");
+    expect(requiredIdx).toBeGreaterThanOrEqual(0);
+    expect(flagIdx).toBeGreaterThan(requiredIdx);
+  });
+
+  it("threads field docs into JSDoc `@param` lines on both factory and kwarg wrapper", () => {
+    const code = generate(seq(lit("t"), str("name", "Person to greet.")), { app: { id: "t" } });
+    const matches = code.match(/@param name Person to greet\./g) ?? [];
+    expect(matches.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("injects `@type: <pkg>/<id>` on the root interface and params object", () => {
+    const code = generate(seq(lit("bet"), str("name")), {
+      app: { id: "bet" },
+      package: { name: "fsl" },
+    });
+    // Interface: optional. Factory body: always written.
+    expect(code).toContain('"@type"?: "fsl/bet"');
+    expect(code).toContain('"@type": "fsl/bet"');
+  });
+
+  it("skips the kwarg wrapper / factory when the solver leaves no struct root", () => {
+    const code = generate(seq(seqJoin("=", lit("--out"), str("out"))), { app: { id: "t" } });
+    expect(code).not.toMatch(/export function tParams\(/);
+    expect(code).not.toMatch(/export function tExecute\(/);
+    expect(code).toMatch(/export function t\(params:/);
   });
 });
 

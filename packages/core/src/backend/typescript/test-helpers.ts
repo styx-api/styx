@@ -99,8 +99,19 @@ function runGenerated(
   return { args: capturedArgs, outputs };
 }
 
-function wrapperExport(options?: { app?: AppMeta }): string {
-  return computePublicNames(options?.app?.id).wrapper;
+/**
+ * Pick the dict-style export to invoke from the test harness: prefer the
+ * internal `<tool>Execute` (it takes a params object), falling back to the
+ * user-facing `wrapper` name when there's no struct root (the wrapper IS
+ * dict-style in that case).
+ */
+function executeExport(ctx: CodegenContext): string {
+  const publicNames = computePublicNames(ctx.app?.id);
+  const rootBinding = ctx.resolve(ctx.expr);
+  // Mirror the codegen: only a real struct root produces the internal
+  // `<tool>Execute`; otherwise the user-facing wrapper IS the dict-style fn.
+  const rootIsStruct = rootBinding?.type.kind === "struct";
+  return rootIsStruct ? publicNames.execute : publicNames.wrapper;
 }
 
 export function execute(
@@ -108,7 +119,8 @@ export function execute(
   params: Record<string, unknown>,
   options?: { app?: AppMeta; package?: { name?: string } },
 ): string[] {
-  return runGenerated(generate(expr, options), params, wrapperExport(options)).args;
+  const ctx = generateCtx(expr, options);
+  return runGenerated(generateTypeScript(ctx), params, executeExport(ctx)).args;
 }
 
 export function executeWithOutputs(
@@ -116,5 +128,6 @@ export function executeWithOutputs(
   params: Record<string, unknown>,
   options?: { app?: AppMeta; package?: { name?: string } },
 ): RunResult {
-  return runGenerated(generate(expr, options), params, wrapperExport(options));
+  const ctx = generateCtx(expr, options);
+  return runGenerated(generateTypeScript(ctx), params, executeExport(ctx));
 }

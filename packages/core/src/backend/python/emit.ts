@@ -1,6 +1,7 @@
 import type { BoundType } from "../../bindings/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
+import type { SigEntry, SigOptions } from "../sig-entries.js";
 import { snakeCase } from "../string-case.js";
 import type { ArgResult } from "./arg-builder.js";
 import { buildArgs, resultToStmt } from "./arg-builder.js";
@@ -63,6 +64,10 @@ function isPyIdent(s: string): boolean {
  * Emit the python source for one struct as a TypedDict. Uses functional syntax
  * if any field name is not a Python identifier (e.g. `@type` discriminators);
  * otherwise uses class syntax for readability.
+ *
+ * When `injectAtTypeTag` is given, an `@type: typing.Literal[<tag>]` entry is
+ * prepended; used by the root struct of single-tool params, whose tag is
+ * derived from `pkg/appId` rather than from the IR.
  */
 function emitStructTypedDict(
   name: string,
@@ -70,19 +75,33 @@ function emitStructTypedDict(
   ctx: CodegenContext,
   resolve: (t: BoundType) => string | undefined,
   cb: CodeBuilder,
+  injectAtTypeTag?: string,
 ): void {
   const fieldInfo = collectFieldInfo(ctx, type);
   const entries = Object.entries(type.fields);
   // @type literal fields are special: they're not user-provided regular fields
   // but discriminator values. Other literals are skipped (they have no runtime
   // representation in the dict).
-  const hasNonIdentKey = entries.some(([k, v]) => {
-    if (v.kind === "literal") return k === "@type";
-    return !isPyIdent(k);
-  });
+  const hasInjectedAtType = injectAtTypeTag !== undefined;
+  const hasNonIdentKey =
+    hasInjectedAtType ||
+    entries.some(([k, v]) => {
+      if (v.kind === "literal") return k === "@type";
+      return !isPyIdent(k);
+    });
 
   // Compute the typed entry list (skipping non-discriminator literals).
   const typedEntries: Array<{ key: string; type: string; doc?: string }> = [];
+  if (injectAtTypeTag !== undefined) {
+    // NotRequired: the factory always sets @type and runtime dispatch tables
+    // read it, but callers building a dict by hand shouldn't have to type it.
+    // (Union variants further down keep their @type required - that one IS
+    // load-bearing for discriminated-union narrowing.)
+    typedEntries.push({
+      key: "@type",
+      type: `typing.NotRequired[typing.Literal[${pyStr(injectAtTypeTag)}]]`,
+    });
+  }
   for (const [fieldName, fieldType] of entries) {
     if (fieldType.kind === "literal") {
       if (fieldName === "@type") {
@@ -138,6 +157,8 @@ export function emitTypeDeclarations(
   namedTypes: Map<string, string>,
   ctx: CodegenContext,
   cb: CodeBuilder,
+  rootName?: string,
+  rootTypeTag?: string,
 ): void {
   const resolve = resolveTypeName(namedTypes);
 
@@ -149,7 +170,8 @@ export function emitTypeDeclarations(
 
   for (const { name, type } of ordered) {
     if (type.kind === "struct") {
-      emitStructTypedDict(name, type, ctx, resolve, cb);
+      const inject = name === rootName ? rootTypeTag : undefined;
+      emitStructTypedDict(name, type, ctx, resolve, cb, inject);
       cb.blank();
     } else if (type.kind === "union") {
       const parts = type.variants.map((v) => mapType(v.type, resolve));
@@ -203,36 +225,39 @@ export function emitWrapperFunction(
 ): void {
   const emitOutputs = outputsFunc !== undefined;
   const appDoc = ctx.app?.doc;
-  const docLines: string[] = [];
-  if (appDoc?.title) docLines.push(appDoc.title);
-  if (appDoc?.description) {
-    if (docLines.length > 0) docLines.push("");
-    docLines.push(appDoc.description);
-  }
-  if (appDoc?.authors?.length) {
-    docLines.push("");
-    docLines.push(`Author: ${appDoc.authors.join(", ")}`);
-  }
-  if (appDoc?.urls?.length) {
-    docLines.push("");
-    docLines.push(`URL: ${appDoc.urls[0]}`);
-  }
-  docLines.push("");
-  docLines.push("Args:");
-  docLines.push("    params: The parameters.");
-  docLines.push("    runner: Command runner (defaults to global runner).");
-  docLines.push("");
-  docLines.push("Returns:");
-  docLines.push(emitOutputs ? "    Tool outputs (paths to files produced by the tool)." : "    None.");
-
   const returnType = emitOutputs && outputsType ? outputsType : "None";
-  cb.line(
-    `def ${funcName}(params: ${paramsType}, runner: Runner | None = None) -> ${returnType}:`,
-  );
+
+  cb.line(`def ${funcName}(params: ${paramsType}, runner: Runner | None = None) -> ${returnType}:`);
   cb.indent(() => {
-    cb.line(`"""`);
-    for (const line of docLines) cb.line(line);
-    cb.line(`"""`);
+    cb.line('"""');
+    let hasContent = false;
+    if (appDoc?.title) {
+      cb.line(appDoc.title);
+      hasContent = true;
+    }
+    if (appDoc?.description) {
+      if (hasContent) cb.blank();
+      cb.line(appDoc.description);
+      hasContent = true;
+    }
+    if (appDoc?.authors?.length) {
+      if (hasContent) cb.blank();
+      cb.line(`Author: ${appDoc.authors.join(", ")}`);
+      hasContent = true;
+    }
+    if (appDoc?.urls?.length) {
+      if (hasContent) cb.blank();
+      cb.line(`URL: ${appDoc.urls[0]}`);
+      hasContent = true;
+    }
+    if (hasContent) cb.blank();
+    cb.line("Args:");
+    cb.line("    params: The parameters.");
+    cb.line("    runner: Command runner (defaults to global runner).");
+    cb.blank();
+    cb.line("Returns:");
+    cb.line(emitOutputs ? "    Tool outputs (paths to files produced by the tool)." : "    None.");
+    cb.line('"""');
     cb.line("runner = runner if runner is not None else get_global_runner()");
     cb.line(`execution = runner.start_execution(${metaConst})`);
     cb.line("execution.params(params)");
@@ -252,4 +277,196 @@ export function emitWrapperFunction(
 /** Convenience: derive a snake_case function name from the app id. */
 export function appFuncName(ctx: CodegenContext, fallback: string): string {
   return snakeCase(ctx.app?.id ?? fallback);
+}
+
+/** Render a JS value as a Python literal. Used for default values in signatures. */
+function renderPyDefault(value: string | number | boolean): string {
+  if (typeof value === "boolean") return value ? "True" : "False";
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "float('nan')";
+  return pyStr(value);
+}
+
+/** SigOptions hooks for Python: ` | None` nullable suffix, `None` nullable default. */
+export function pySigOptions(resolve: (t: BoundType) => string | undefined): SigOptions {
+  return {
+    renderType: (t) => mapType(t, resolve),
+    nullableSuffix: " | None",
+    nullableDefault: "None",
+    renderDefault: renderPyDefault,
+  };
+}
+
+/** Emit a sequence of `name: type [= default],` lines (one per entry) into `cb`. */
+function emitSigParams(entries: readonly SigEntry[], cb: CodeBuilder): void {
+  for (const e of entries) {
+    if (e.sigDefault !== undefined) {
+      cb.line(`${e.name}: ${e.sigType} = ${e.sigDefault},`);
+    } else {
+      cb.line(`${e.name}: ${e.sigType},`);
+    }
+  }
+}
+
+/**
+ * Word-wrap a Google-style "Args:" entry. Produces lines like
+ *   `name: description that continues...\`
+ *   `    until it ends here.`
+ * The first line is prefixed with `<indent><name>: `; continuations use
+ * `<indent>    ` (4 spaces deeper). Lines that exceed `lineWidth` end with a
+ * `\` continuation marker.
+ */
+function wrapDocEntry(name: string, doc: string, indent: string, lineWidth = 80): string[] {
+  const firstPrefix = `${indent}${name}: `;
+  const contPrefix = `${indent}    `;
+  const words = doc.split(/\s+/).filter((w) => w.length > 0);
+  if (words.length === 0) return [`${firstPrefix.trimEnd()}`];
+
+  const lines: string[] = [];
+  let current = firstPrefix + words[0]!;
+  for (let i = 1; i < words.length; i++) {
+    const word = words[i]!;
+    if (current.length + 1 + word.length + 1 > lineWidth) {
+      lines.push(current + "\\");
+      current = contPrefix + word;
+    } else {
+      current += " " + word;
+    }
+  }
+  lines.push(current);
+  return lines;
+}
+
+/** Emit the per-field `Args:` block for a docstring. Caller is already at the
+ * correct indent (i.e. inside the function body). */
+function emitArgsBlock(entries: readonly { name: string; doc?: string }[], cb: CodeBuilder): void {
+  cb.line("Args:");
+  for (const e of entries) {
+    for (const ln of wrapDocEntry(e.name, e.doc ?? "", "    ")) cb.line(ln);
+  }
+}
+
+/**
+ * Emit the `_params(...)` factory: a kwarg-style function that builds and
+ * returns the params dict (with `@type` injected). Required fields and fields
+ * with explicit defaults are always set; optional-without-default fields are
+ * conditionally set when not None.
+ */
+export function emitParamsFactory(
+  entries: readonly SigEntry[],
+  funcName: string,
+  paramsType: string,
+  typeTag: string | undefined,
+  cb: CodeBuilder,
+): void {
+  // Signature
+  if (entries.length === 0) {
+    cb.line(`def ${funcName}() -> ${paramsType}:`);
+  } else {
+    cb.line(`def ${funcName}(`);
+    cb.indent(() => emitSigParams(entries, cb));
+    cb.line(`) -> ${paramsType}:`);
+  }
+
+  cb.indent(() => {
+    // Docstring
+    cb.line('"""');
+    cb.line("Build params.");
+    if (entries.length > 0) {
+      cb.blank();
+      emitArgsBlock(entries, cb);
+    }
+    cb.blank();
+    cb.line("Returns:");
+    cb.line("    Params dictionary.");
+    cb.line('"""');
+
+    // Build dict: required and explicitly-defaulted fields go into the literal
+    cb.line(`params: ${paramsType} = {`);
+    cb.indent(() => {
+      if (typeTag !== undefined) cb.line(`"@type": ${pyStr(typeTag)},`);
+      for (const e of entries) {
+        if (!e.isOptional || e.hasExplicitDefault) {
+          cb.line(`${pyStr(e.name)}: ${e.name},`);
+        }
+      }
+    });
+    cb.line("}");
+
+    // Conditional include for optional-without-default fields
+    for (const e of entries) {
+      if (e.isOptional && !e.hasExplicitDefault) {
+        cb.line(`if ${e.name} is not None:`);
+        cb.indent(() => cb.line(`params[${pyStr(e.name)}] = ${e.name}`));
+      }
+    }
+    cb.line("return params");
+  });
+}
+
+/**
+ * Emit the user-facing kwarg wrapper: takes the same kwargs as `_params()`
+ * plus `runner`, builds the params dict, and delegates to the dict-style
+ * execute function.
+ */
+export function emitKwargWrapper(
+  ctx: CodegenContext,
+  entries: readonly SigEntry[],
+  funcName: string,
+  paramsFnName: string,
+  executeFnName: string,
+  outputsType: string | undefined,
+  cb: CodeBuilder,
+): void {
+  // Signature: same as params factory + `runner` last
+  cb.line(`def ${funcName}(`);
+  cb.indent(() => {
+    emitSigParams(entries, cb);
+    cb.line("runner: Runner | None = None,");
+  });
+  const returnType = outputsType ?? "None";
+  cb.line(`) -> ${returnType}:`);
+
+  cb.indent(() => {
+    // Docstring: app title/description + per-field docs + runner + Returns.
+    const appDoc = ctx.app?.doc;
+    cb.line('"""');
+    if (appDoc?.title) cb.line(appDoc.title);
+    if (appDoc?.description) {
+      if (appDoc?.title) cb.blank();
+      cb.line(appDoc.description);
+    }
+    if (appDoc?.authors?.length) {
+      cb.blank();
+      cb.line(`Author: ${appDoc.authors.join(", ")}`);
+    }
+    if (appDoc?.urls?.length) {
+      cb.blank();
+      cb.line(`URL: ${appDoc.urls[0]}`);
+    }
+    cb.blank();
+    emitArgsBlock(
+      [...entries, { name: "runner", doc: "Command runner (defaults to global runner)." }],
+      cb,
+    );
+    cb.blank();
+    cb.line("Returns:");
+    cb.line(outputsType ? "    Tool outputs (paths to files produced by the tool)." : "    None.");
+    cb.line('"""');
+
+    // Body: delegate to factory + execute
+    if (entries.length === 0) {
+      cb.line(`params = ${paramsFnName}()`);
+    } else {
+      cb.line(`params = ${paramsFnName}(`);
+      cb.indent(() => {
+        for (const e of entries) cb.line(`${e.name}=${e.name},`);
+      });
+      cb.line(")");
+    }
+    if (outputsType) {
+      cb.line(`return ${executeFnName}(params, runner)`);
+    } else {
+      cb.line(`${executeFnName}(params, runner)`);
+    }
+  });
 }

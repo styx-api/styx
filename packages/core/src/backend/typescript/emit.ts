@@ -1,6 +1,7 @@
 import type { BoundType } from "../../bindings/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
+import type { SigEntry, SigOptions } from "../sig-entries.js";
 import type { ArgResult } from "./arg-builder.js";
 import { buildArgs, resultToStmt } from "./arg-builder.js";
 import { mapType } from "./typemap.js";
@@ -67,7 +68,11 @@ export function emitTypeDeclarations(
 
       cb.line(`export interface ${name} {`);
       cb.indent(() => {
-        // Emit @type discriminator on root params interface
+        // @type discriminator on root params interface. Optional: the params
+        // factory always sets it and runtime dispatch tables read it, but the
+        // type system doesn't need it required (there's only one shape). Union
+        // variants below keep their @type required - that one IS load-bearing
+        // for discriminated-union narrowing.
         if (isRoot && appId) {
           cb.line(`"@type"?: "${pkg}/${appId}";`);
         }
@@ -85,7 +90,11 @@ export function emitTypeDeclarations(
 
           const hasDefault = fi?.defaultValue !== undefined;
           const isOptional = fieldType.kind === "optional";
-          const optional = isOptional || hasDefault ? "?" : "";
+          // Fields with explicit defaults remain required in the interface; the
+          // params-factory's signature default handles the omission case. This
+          // mirrors v1: a `boolean` flag with default `false` stays `: boolean`
+          // (the factory always writes `false` if the user didn't override).
+          const optional = isOptional ? "?" : "";
 
           const mapped =
             fieldType.kind === "optional"
@@ -138,6 +147,164 @@ export function emitBuildCargs(
       if (line.trim()) cb.line(line);
     }
     cb.line("return cargs;");
+  });
+  cb.line("}");
+}
+
+/** Render a JS value as a TypeScript literal for default-parameter use. */
+function renderTsDefault(value: string | number | boolean): string {
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "NaN";
+  return JSON.stringify(value);
+}
+
+/** SigOptions hooks for TypeScript: ` | null` nullable suffix, `null` nullable default. */
+export function tsSigOptions(resolve: (t: BoundType) => string | undefined): SigOptions {
+  return {
+    renderType: (t) => mapType(t, resolve),
+    nullableSuffix: " | null",
+    nullableDefault: "null",
+    renderDefault: renderTsDefault,
+  };
+}
+
+/** Emit `name: type [= default],` lines (one per entry) into `cb`. */
+function emitSigParams(entries: readonly SigEntry[], cb: CodeBuilder): void {
+  for (const e of entries) {
+    if (e.sigDefault !== undefined) {
+      cb.line(`${e.name}: ${e.sigType} = ${e.sigDefault},`);
+    } else {
+      cb.line(`${e.name}: ${e.sigType},`);
+    }
+  }
+}
+
+/** Emit `@param <name> <doc>` JSDoc lines (trimmed empty docs) for each entry. */
+function emitJsDocParams(
+  entries: readonly { name: string; doc?: string }[],
+  cb: CodeBuilder,
+): void {
+  for (const e of entries) {
+    cb.line(` * @param ${e.name} ${e.doc ?? ""}`.trimEnd());
+  }
+}
+
+/**
+ * Emit the `<tool>Params(...)` factory: a kwarg-style builder for the params
+ * object. Required fields and explicitly-defaulted fields are always set;
+ * optional-without-default fields are conditionally set when not null.
+ */
+export function emitParamsFactory(
+  entries: readonly SigEntry[],
+  funcName: string,
+  paramsType: string,
+  typeTag: string | undefined,
+  cb: CodeBuilder,
+): void {
+  // JSDoc
+  cb.line("/**");
+  cb.line(" * Build params for the tool.");
+  if (entries.length > 0) cb.line(" *");
+  emitJsDocParams(entries, cb);
+  cb.line(" *");
+  cb.line(" * @returns Parameter object.");
+  cb.line(" */");
+
+  if (entries.length === 0) {
+    cb.line(`export function ${funcName}(): ${paramsType} {`);
+  } else {
+    cb.line(`export function ${funcName}(`);
+    cb.indent(() => emitSigParams(entries, cb));
+    cb.line(`): ${paramsType} {`);
+  }
+  cb.indent(() => {
+    cb.line(`const params: ${paramsType} = {`);
+    cb.indent(() => {
+      if (typeTag !== undefined) cb.line(`"@type": ${JSON.stringify(typeTag)},`);
+      for (const e of entries) {
+        if (!e.isOptional || e.hasExplicitDefault) {
+          cb.line(`${e.name}: ${e.name},`);
+        }
+      }
+    });
+    cb.line("};");
+    for (const e of entries) {
+      if (e.isOptional && !e.hasExplicitDefault) {
+        cb.line(`if (${e.name} !== null) {`);
+        cb.indent(() => cb.line(`params.${e.name} = ${e.name};`));
+        cb.line("}");
+      }
+    }
+    cb.line("return params;");
+  });
+  cb.line("}");
+}
+
+/**
+ * Emit the user-facing kwarg wrapper: takes the same kwargs as the factory
+ * plus `runner`, builds the params object, and delegates to the dict-style
+ * execute function.
+ */
+export function emitKwargWrapper(
+  ctx: CodegenContext,
+  entries: readonly SigEntry[],
+  funcName: string,
+  paramsFnName: string,
+  executeFnName: string,
+  outputsType: string | undefined,
+  cb: CodeBuilder,
+): void {
+  const appDoc = ctx.app?.doc;
+  cb.line("/**");
+  if (appDoc?.title) cb.line(` * ${appDoc.title}`);
+  if (appDoc?.description) {
+    if (appDoc?.title) cb.line(" *");
+    cb.line(` * ${appDoc.description}`);
+  }
+  if (appDoc?.authors?.length) {
+    cb.line(" *");
+    cb.line(` * Author: ${appDoc.authors.join(", ")}`);
+  }
+  if (appDoc?.urls?.length) {
+    cb.line(" *");
+    cb.line(` * URL: ${appDoc.urls[0]}`);
+  }
+  cb.line(" *");
+  emitJsDocParams(
+    [...entries, { name: "runner", doc: "Command runner (defaults to global runner)." }],
+    cb,
+  );
+  cb.line(" *");
+  cb.line(
+    outputsType
+      ? " * @returns Tool outputs (paths to files produced by the tool)."
+      : " * @returns void",
+  );
+  cb.line(" */");
+
+  const returnType = outputsType ?? "void";
+  cb.line(`export function ${funcName}(`);
+  cb.indent(() => {
+    emitSigParams(entries, cb);
+    cb.line("runner: Runner | null = null,");
+  });
+  cb.line(`): ${returnType} {`);
+
+  cb.indent(() => {
+    if (entries.length === 0) {
+      cb.line(`const params = ${paramsFnName}();`);
+    } else {
+      cb.line(`const params = ${paramsFnName}(`);
+      cb.indent(() => {
+        for (const e of entries) cb.line(`${e.name},`);
+      });
+      cb.line(");");
+    }
+    if (outputsType) {
+      cb.line(`return ${executeFnName}(params, runner);`);
+    } else {
+      cb.line(`${executeFnName}(params, runner);`);
+    }
   });
   cb.line("}");
 }

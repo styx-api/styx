@@ -18,6 +18,26 @@ class Greet(typing.TypedDict):
     loud: bool | None
     """Shout the greeting."""
 
+def greet_params(
+    name: str,
+    loud: bool = False,
+) -> Greet:
+    """
+    Build params.
+
+    Args:
+        name: Person to greet.
+        loud: Shout the greeting.
+
+    Returns:
+        Params dictionary.
+    """
+    params: Greet = {
+        "name": name,
+        "loud": loud,
+    }
+    return params
+
 def greet_cargs(params: Greet, execution: Execution) -> list[str]:
     """Build command-line arguments from parameters."""
     cargs: list[str] = []
@@ -27,16 +47,16 @@ def greet_cargs(params: Greet, execution: Execution) -> list[str]:
         cargs.append("--loud")
     return cargs
 
-def greet(params: Greet, runner: Runner | None = None) -> None:
+def greet_execute(params: Greet, runner: Runner | None = None) -> None:
     """
     greet
-    
+
     Print a greeting.
-    
+
     Args:
         params: The parameters.
         runner: Command runner (defaults to global runner).
-    
+
     Returns:
         None.
     """
@@ -46,9 +66,35 @@ def greet(params: Greet, runner: Runner | None = None) -> None:
     args = greet_cargs(params, execution)
     execution.run(args)
 
+def greet(
+    name: str,
+    loud: bool = False,
+    runner: Runner | None = None,
+) -> None:
+    """
+    greet
+
+    Print a greeting.
+
+    Args:
+        name: Person to greet.
+        loud: Shout the greeting.
+        runner: Command runner (defaults to global runner).
+
+    Returns:
+        None.
+    """
+    params = greet_params(
+        name=name,
+        loud=loud,
+    )
+    greet_execute(params, runner)
+
 __all__ = [
     "Greet",
     "GREET_METADATA",
     "greet_cargs",
+    "greet_params",
+    "greet_execute",
     "greet",
 ]

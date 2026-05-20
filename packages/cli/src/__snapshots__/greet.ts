@@ -15,7 +15,27 @@ export interface Greet {
   /** Person to greet. */
   name: string;
   /** Shout the greeting. */
-  loud?: boolean;
+  loud: boolean;
+}
+
+/**
+ * Build params for the tool.
+ *
+ * @param name Person to greet.
+ * @param loud Shout the greeting.
+ *
+ * @returns Parameter object.
+ */
+export function greetParams(
+  name: string,
+  loud: boolean = false,
+): Greet {
+  const params: Greet = {
+    "@type": "unknown/greet",
+    name: name,
+    loud: loud,
+  };
+  return params;
 }
 
 /** Build command-line arguments from parameters. */
@@ -37,10 +57,33 @@ export function greet_cargs(params: Greet, execution: Execution): string[] {
  * @param params - The parameters.
  * @param runner - Command runner (defaults to global runner).
  */
-export function greet(params: Greet, runner: Runner | null = null): void {
+export function greetExecute(params: Greet, runner: Runner | null = null): void {
   runner = runner ?? getGlobalRunner();
   const execution = runner.startExecution(GREET_METADATA);
   execution.params(params);
   const args = greet_cargs(params, execution);
   execution.run(args);
+}
+
+/**
+ * greet
+ *
+ * Print a greeting.
+ *
+ * @param name Person to greet.
+ * @param loud Shout the greeting.
+ * @param runner Command runner (defaults to global runner).
+ *
+ * @returns void
+ */
+export function greet(
+  name: string,
+  loud: boolean = false,
+  runner: Runner | null = null,
+): void {
+  const params = greetParams(
+    name,
+    loud,
+  );
+  greetExecute(params, runner);
 }

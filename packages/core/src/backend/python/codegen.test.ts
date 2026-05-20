@@ -230,7 +230,9 @@ describe("Python generation - complex IR", () => {
   });
 
   it("handles alternative with non-literal variants (discriminated union)", () => {
-    const code = generate(seq(alt(seq(lit("--file"), path("file")), seq(lit("--url"), str("url")))));
+    const code = generate(
+      seq(alt(seq(lit("--file"), path("file")), seq(lit("--url"), str("url")))),
+    );
     // TypedDicts with @type emitted via functional syntax.
     expect(code).toContain('"@type": typing.Literal["variant_0"]');
     expect(code).toContain('"@type": typing.Literal["variant_1"]');
@@ -395,6 +397,107 @@ describe("PythonBackend", () => {
     const idx = (s: string) => init.indexOf(s);
     expect(idx("from .alpha import *")).toBeLessThan(idx("from .mu import *"));
     expect(idx("from .mu import *")).toBeLessThan(idx("from .zeta import *"));
+  });
+});
+
+describe("Python generation - params factory & kwarg wrapper", () => {
+  it("emits a `<tool>_params` factory returning the params dict", () => {
+    const code = generate(seq(lit("greet"), str("name", "Person to greet.")), {
+      app: { id: "greet" },
+    });
+    expect(code).toMatch(/def greet_params\(\s*name: str,\s*\) -> Greet:/);
+    expect(code).toContain('"name": name,');
+    expect(code).toContain("return params");
+  });
+
+  it("renames the dict-style wrapper to `<tool>_execute`", () => {
+    const code = generate(seq(lit("greet"), str("name")), { app: { id: "greet" } });
+    expect(code).toContain("def greet_execute(params: Greet, runner: Runner | None = None)");
+  });
+
+  it("emits a kwarg `<tool>` wrapper that calls the factory then execute", () => {
+    const code = generate(seq(lit("greet"), str("name")), { app: { id: "greet" } });
+    expect(code).toMatch(/def greet\(\s*name: str,\s*runner: Runner \| None = None,\s*\) -> None:/);
+    expect(code).toMatch(/params = greet_params\(\s*name=name,\s*\)/);
+    expect(code).toContain("greet_execute(params, runner)");
+  });
+
+  it("renders explicit defaults in the kwarg signature; bool defaults stay required in dict", () => {
+    const code = generate(
+      seq(lit("t"), str("name"), opt(seq(lit("-v")), { name: "verbose", defaultValue: false })),
+      { app: { id: "t" } },
+    );
+    // Signature: explicit default rendered.
+    expect(code).toMatch(/verbose: bool = False/);
+    // Body: required field included unconditionally in the dict literal.
+    expect(code).toMatch(/"verbose": verbose,/);
+  });
+
+  it("conditionally adds optional-without-default fields to the dict", () => {
+    const code = generate(seq(lit("t"), opt(str("name"))), { app: { id: "t" } });
+    expect(code).toMatch(/name: str \| None = None,/);
+    expect(code).toMatch(/if name is not None:/);
+    expect(code).toMatch(/params\["name"\] = name/);
+  });
+
+  it("orders required (no default) before defaulted fields in the signature", () => {
+    // `required_str` has no default; `flag` has explicit default false.
+    const code = generate(
+      seq(
+        lit("t"),
+        str("required_str"),
+        opt(seq(lit("-v")), { name: "flag", defaultValue: false }),
+      ),
+      { app: { id: "t" } },
+    );
+    const sig = code.match(/def t_params\(([\s\S]*?)\) -> T:/)?.[1] ?? "";
+    const requiredIdx = sig.indexOf("required_str:");
+    const flagIdx = sig.indexOf("flag:");
+    expect(requiredIdx).toBeGreaterThanOrEqual(0);
+    expect(flagIdx).toBeGreaterThan(requiredIdx);
+  });
+
+  it("threads field docs into the Args block of both factory and kwarg wrapper", () => {
+    const code = generate(seq(lit("t"), str("name", "Person to greet.")), { app: { id: "t" } });
+    // Both functions emit `name: Person to greet.` under `Args:`.
+    const docs = code.match(/name: Person to greet\./g) ?? [];
+    expect(docs.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("wraps long field docs with `\\` continuation at ~80 cols", () => {
+    const longDoc =
+      "This is a very long description that should be wrapped at approximately eighty columns to keep the docstring readable in source.";
+    const code = generate(seq(lit("t"), str("name", longDoc)), { app: { id: "t" } });
+    expect(code).toContain("\\");
+    // Continuation indented 8 spaces beneath `    name:`.
+    expect(code).toMatch(/\n        \S+/);
+  });
+
+  it("injects `@type: NotRequired[Literal[<pkg>/<id>]]` on the root TypedDict + dict literal", () => {
+    const code = generate(seq(lit("bet"), str("name")), {
+      app: { id: "bet" },
+      package: { name: "fsl" },
+    });
+    // TypedDict: NotRequired. Factory body: always written.
+    expect(code).toContain('"@type": typing.NotRequired[typing.Literal["fsl/bet"]]');
+    expect(code).toContain('"@type": "fsl/bet"');
+  });
+
+  it("skips the kwarg wrapper / factory when the solver leaves no struct root", () => {
+    // A single-field joined-seq collapses, leaving no struct binding on the root.
+    const code = generate(seq(seqJoin("=", lit("--out"), str("out"))), { app: { id: "t" } });
+    expect(code).not.toMatch(/def t_params\(/);
+    expect(code).not.toMatch(/def t_execute\(/);
+    // The user-facing wrapper is still emitted as the dict-style fallback.
+    expect(code).toMatch(/def t\(params:/);
+  });
+
+  it("lists the new symbols in __all__", () => {
+    const code = generate(seq(lit("bet"), str("name")), { app: { id: "bet" } });
+    const allBlock = code.match(/__all__ = \[([\s\S]*?)\]/)?.[1] ?? "";
+    expect(allBlock).toContain('"bet_params"');
+    expect(allBlock).toContain('"bet_execute"');
+    expect(allBlock).toContain('"bet"');
   });
 });
 

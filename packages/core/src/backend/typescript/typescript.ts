@@ -4,13 +4,18 @@ import type { Backend, EmittedApp, EmittedPackage } from "../backend.js";
 import { CodeBuilder } from "../code-builder.js";
 import { Scope } from "../scope.js";
 import { camelCase, pascalCase, screamingSnakeCase, snakeCase } from "../string-case.js";
+import { buildSigEntries } from "../sig-entries.js";
 import {
   emitBuildCargs,
   emitImports,
+  emitKwargWrapper,
   emitMetadata,
+  emitParamsFactory,
   emitTypeDeclarations,
   emitWrapperFunction,
+  tsSigOptions,
 } from "./emit.js";
+import { collectFieldInfo } from "./types.js";
 import {
   emitBuildOutputs,
   emitOutputsInterface,
@@ -82,6 +87,8 @@ export interface PublicNames {
   metadata: string;
   cargs: string;
   outputsFn: string;
+  paramsFn: string;
+  execute: string;
   wrapper: string;
 }
 
@@ -94,6 +101,8 @@ export function computePublicNames(appId: string | undefined): PublicNames {
       metadata: "METADATA",
       cargs: "cargs",
       outputsFn: "outputs",
+      paramsFn: "buildParams",
+      execute: "execute",
       wrapper: "run",
     };
   }
@@ -103,6 +112,8 @@ export function computePublicNames(appId: string | undefined): PublicNames {
     metadata: screamingSnakeCase(appId) + "_METADATA",
     cargs: camelCase(appId) + "_cargs",
     outputsFn: camelCase(appId) + "_outputs",
+    paramsFn: camelCase(appId) + "Params",
+    execute: camelCase(appId) + "Execute",
     wrapper: camelCase(appId),
   };
 }
@@ -117,6 +128,10 @@ export function generateTypeScript(ctx: CodegenContext): string {
 
   const rootBinding = ctx.resolve(ctx.expr);
   const rootType = rootBinding?.type ?? { kind: "struct" as const, fields: {} };
+  // Only treat the root as struct-shaped when there's a real binding. A
+  // synthesized empty-struct fallback (no root binding) means the solver
+  // collapsed everything away, so the kwarg wrapper has nothing to wrap.
+  const rootIsStruct = rootBinding?.type.kind === "struct";
 
   // Pre-reserve module-level public names so any IR-derived names colliding
   // with them get suffix-bumped. `params` is intentionally NOT pre-reserved -
@@ -127,6 +142,8 @@ export function generateTypeScript(ctx: CodegenContext): string {
     metadata: scope.add(publicNames.metadata),
     cargs: scope.add(publicNames.cargs),
     outputsFn: scope.add(publicNames.outputsFn),
+    paramsFn: rootIsStruct ? scope.add(publicNames.paramsFn) : "",
+    execute: rootIsStruct ? scope.add(publicNames.execute) : "",
     wrapper: scope.add(publicNames.wrapper),
   };
 
@@ -168,6 +185,27 @@ export function generateTypeScript(ctx: CodegenContext): string {
     cb.blank();
   }
 
+  // Build the per-field SigEntry list once - the factory and kwarg wrapper
+  // both consume it. `rootType.kind === "struct"` check satisfies the
+  // `Extract` constraint when `rootIsStruct` is true.
+  const rootTypeTag = appId ? `${pkg}/${appId}` : undefined;
+  const sigEntries =
+    rootIsStruct && rootType.kind === "struct"
+      ? buildSigEntries(
+          rootType,
+          collectFieldInfo(ctx, rootType),
+          tsSigOptions(resolveTypeName(namedTypes)),
+        )
+      : [];
+
+  // Params factory (struct-rooted tools only): a kwarg-style builder for the
+  // params object. Useful for callers that want to build a params object to
+  // mutate before executing.
+  if (rootIsStruct) {
+    emitParamsFactory(sigEntries, names.paramsFn, paramsType, rootTypeTag, cb);
+    cb.blank();
+  }
+
   emitBuildCargs(ctx, rootType, paramsType, names.cargs, cb);
   cb.blank();
 
@@ -176,10 +214,13 @@ export function generateTypeScript(ctx: CodegenContext): string {
     cb.blank();
   }
 
+  // Dict-style execute function. For struct roots it's the internal
+  // `<tool>Execute`; for other roots it doubles as the user-facing wrapper.
+  const executeName = rootIsStruct ? names.execute : names.wrapper;
   emitWrapperFunction(
     ctx,
     paramsType,
-    names.wrapper,
+    executeName,
     names.metadata,
     names.cargs,
     emitOutputs ? names.outputsFn : undefined,
@@ -187,6 +228,20 @@ export function generateTypeScript(ctx: CodegenContext): string {
     cb,
   );
   cb.blank();
+
+  // Kwarg-style wrapper (struct roots only): the v1-parity user-facing entry.
+  if (rootIsStruct) {
+    emitKwargWrapper(
+      ctx,
+      sigEntries,
+      names.wrapper,
+      names.paramsFn,
+      names.execute,
+      emitOutputs ? names.outputs : undefined,
+      cb,
+    );
+    cb.blank();
+  }
 
   return cb.toString();
 }
