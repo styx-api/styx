@@ -602,6 +602,29 @@ describe("execution - alternatives", () => {
     expect(args).toEqual(["[/data/x.mat]"]);
   });
 
+  // Mirror of the bool/union join fix for non-join repeats. Boutiques
+  // produces `rep(seq(lit(FLAG), val))` inside a parent join template for
+  // multi-occurrence flags (e.g. freesurfer mri_mark_temporal_lobe `-gradient
+  // subject1 subject2 ...`); inside a join the repeat must concat into a
+  // single arg, not push N statements.
+  it("non-join repeat inside seqJoin concatenates per iteration", () => {
+    const args = execute(
+      seq(seqJoin("", lit("["), rep(str("name"), "names"), lit("]"))),
+      { names: ["a", "b", "c"] },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["[abc]"]);
+  });
+
+  it("non-join repeat inside seqJoin with multi-part body concatenates per iteration", () => {
+    const args = execute(
+      seq(seqJoin("", lit("["), rep(seq(lit(","), str("name")), "names"), lit("]"))),
+      { names: ["a", "b"] },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["[,a,b]"]);
+  });
+
   it("discriminated union with seqJoin variants inside seqJoin emits chained ternary", () => {
     // Union variants must be Expr-shaped (seqJoin) for the chained-ternary
     // form. Variants whose body is a non-join seq emit cargs.push() statements

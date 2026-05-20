@@ -247,7 +247,9 @@ function walkRepeat(
 ): ArgResult {
   const binding = ctx.resolve(node);
   if (!binding) throw new Error("Missing binding for repeat node");
-  const join = node.attrs.join;
+  // A non-join repeat inside an outer join concatenates rather than pushing
+  // separate args, mirroring walkSequence's handling of bare non-join seqs.
+  const join = node.attrs.join ?? (arg.joinDepth > 0 ? "" : undefined);
   const access = resolveAccess(arg, binding.name);
 
   // Count repeat: emit a counted for-loop
