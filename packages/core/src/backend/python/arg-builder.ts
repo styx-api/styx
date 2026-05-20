@@ -142,7 +142,12 @@ function walkSequence(
   arg: ArgContext,
 ): ArgResult {
   const binding = ctx.resolve(node);
-  const join = node.attrs.join;
+  // A non-join sequence inside an outer join must concatenate (rather than
+  // push separate args) so it can stand in as a single Expr element of the
+  // outer join. Boutiques produces this shape for `command-line-flag` inputs
+  // nested under a parent join template (e.g. `[OUTPUT][FLAG]` -> seqJoin('')
+  // around an opt(seq(lit(FLAG), value))).
+  const join = node.attrs.join ?? (arg.joinDepth > 0 ? "" : undefined);
 
   const needsScope =
     binding && hasStructScope(binding.type) && binding.type !== arg.currentStructType;
@@ -295,6 +300,14 @@ function walkAlternative(
   }
 
   if (binding.type.kind === "bool") {
+    // Inside a join, the alternative's output must be an expression, not a
+    // statement: an `if/else` block dropped into a `"".join([...])` list
+    // literal is not valid Python. Emit a ternary when both arms are exprs.
+    if (arg.joinDepth > 0 && variants.every(isExpr)) {
+      const v0 = (variants[0] as Expr_).expr;
+      const v1 = variants[1] ? (variants[1] as Expr_).expr : pyStr("");
+      return { expr: `(${v0} if ${access} else ${v1})` };
+    }
     const cb = new CodeBuilder("    ");
     cb.line(`if ${access}:`);
     cb.indent(() => appendLines(cb, resultToStmt(variants[0]!)));
@@ -306,8 +319,18 @@ function walkAlternative(
   }
 
   if (binding.type.kind === "union") {
-    const cb = new CodeBuilder("    ");
     const unionType = binding.type;
+    // Inside a join: chained ternary, same reason as bool above.
+    if (arg.joinDepth > 0 && variants.every(isExpr)) {
+      let expr = pyStr("");
+      for (let i = unionType.variants.length - 1; i >= 0; i--) {
+        const variant = unionType.variants[i]!;
+        const v = (variants[i] as Expr_).expr;
+        expr = `(${v} if ${access}["@type"] == ${pyStr(variant.name ?? "")} else ${expr})`;
+      }
+      return { expr };
+    }
+    const cb = new CodeBuilder("    ");
     for (let i = 0; i < unionType.variants.length; i++) {
       const variant = unionType.variants[i]!;
       const keyword = i === 0 ? "if" : "elif";

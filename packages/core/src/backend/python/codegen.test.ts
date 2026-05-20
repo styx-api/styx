@@ -545,4 +545,52 @@ describe("Python generation - join", () => {
     expect(code).toContain("execution.input_file");
     expect(code).toContain('"=".join(');
   });
+
+  // Regression: bool/union alternatives inside a join used to emit if/else
+  // statements directly into a `"".join([...])` list literal, producing
+  // unparseable Python. They must collapse to a ternary expression.
+  it("bool alternative inside seqJoin emits ternary, not if/else", () => {
+    const code = generate(seq(seqJoin(",", lit("X"), namedAlt("flag", lit("0"), lit("1")))));
+    // Stmt-shaped `if X:` inside the join argument is the bug. Ensure the join
+    // arg uses ternary syntax instead.
+    expect(code).toMatch(/"0" if params\["flag"\] else "1"/);
+    expect(code).not.toMatch(/\.join\(\[[^\]]*if params\["flag"\]:/);
+  });
+
+  it("bool alternative inside optional seqJoin (antsRegistration use_inverse shape)", () => {
+    const code = generate(
+      seq(
+        seqJoin(
+          "",
+          lit("["),
+          path("infile"),
+          opt(seqJoin("", lit(","), namedAlt("inv", lit("0"), lit("1")))),
+          lit("]"),
+        ),
+      ),
+    );
+    expect(code).toMatch(/"0" if params\["inv"\] else "1"/);
+    // The optional wraps the inner seqJoin into a ternary inside the outer join.
+    expect(code).toMatch(/if params\["inv"\] is not None else ""/);
+  });
+
+  it("discriminated union with seqJoin variants inside seqJoin emits chained ternary", () => {
+    // Variants must be Expr-shaped (seqJoin) to fold into a chained ternary.
+    const code = generate(
+      seq(
+        seqJoin(
+          ",",
+          lit("X"),
+          namedAlt(
+            "kind",
+            seqJoin("=", lit("a"), str("v1")),
+            seqJoin("=", lit("b"), str("v2")),
+          ),
+        ),
+      ),
+    );
+    expect(code).toMatch(/if params\["kind"\]\["@type"\] == "variant_0" else/);
+    // Verify the chained-ternary form is used (no elif inside the join).
+    expect(code).not.toMatch(/\.join\(\[[^\]]*elif /);
+  });
 });

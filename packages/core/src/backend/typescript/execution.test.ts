@@ -544,6 +544,85 @@ describe("execution - alternatives", () => {
     );
     expect(args).toEqual(["cmd"]);
   });
+
+  // Regression: bool / union alternative inside a join previously emitted an
+  // if/else block straight into the `[...].join(...)` array literal, producing
+  // unparseable code. Each arm must be a ternary expression inside a join.
+  it("bool alternative inside seqJoin emits valid ternary", () => {
+    const args = execute(
+      seq(seqJoin(",", lit("X"), namedAlt("flag", lit("0"), lit("1")))),
+      { flag: true },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["X,0"]);
+  });
+
+  it("bool alternative inside seqJoin (false branch)", () => {
+    const args = execute(
+      seq(seqJoin(",", lit("X"), namedAlt("flag", lit("0"), lit("1")))),
+      { flag: false },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["X,1"]);
+  });
+
+  it("bool alternative inside optional seqJoin (mirrors antsRegistration use_inverse)", () => {
+    // opt(seqJoin("", lit(","), bool_alt)) inside an outer seqJoin: this is
+    // the exact shape that broke antsRegistration's initial_moving_transform_use_inverse.
+    const args = execute(
+      seq(
+        seqJoin(
+          "",
+          lit("["),
+          path("infile"),
+          opt(seqJoin("", lit(","), namedAlt("inv", lit("0"), lit("1")))),
+          lit("]"),
+        ),
+      ),
+      { infile: "/data/x.mat", inv: true },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["[/data/x.mat,0]"]);
+  });
+
+  it("bool alternative inside optional seqJoin (optional absent)", () => {
+    const args = execute(
+      seq(
+        seqJoin(
+          "",
+          lit("["),
+          path("infile"),
+          opt(seqJoin("", lit(","), namedAlt("inv", lit("0"), lit("1")))),
+          lit("]"),
+        ),
+      ),
+      { infile: "/data/x.mat", inv: null },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["[/data/x.mat]"]);
+  });
+
+  it("discriminated union with seqJoin variants inside seqJoin emits chained ternary", () => {
+    // Union variants must be Expr-shaped (seqJoin) for the chained-ternary
+    // form. Variants whose body is a non-join seq emit cargs.push() statements
+    // and would need hoisting, which we don't implement here.
+    const args = execute(
+      seq(
+        seqJoin(
+          ",",
+          lit("X"),
+          namedAlt(
+            "kind",
+            seqJoin("=", lit("a"), str("v1")),
+            seqJoin("=", lit("b"), str("v2")),
+          ),
+        ),
+      ),
+      { kind: { "@type": "variant_1", v2: "hello" } },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["X,b=hello"]);
+  });
 });
 
 // -- Nesting: optional + repeat --
