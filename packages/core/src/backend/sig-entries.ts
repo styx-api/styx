@@ -10,9 +10,19 @@ import type { FieldInfo } from "./collect-field-info.js";
  *   and explicitly-defaulted fields are always set; optional-no-default fields
  *   are conditionally set when not None/null)
  * - `doc` is rendered into the per-param doc block (Args / @param)
+ *
+ * `name` is the scrubbed host identifier (used in the signature and function
+ * body); `wireKey` is the Boutiques field name (used as the dict key /
+ * TypedDict field key). They diverge when the wire key collides with a host
+ * reserved word, is not a valid identifier, or shadows a local in the emitting
+ * function (e.g. wire `float` -> host `float_`, wire `4d_input` -> host
+ * `v_4d_input`).
  */
 export interface SigEntry {
+  /** Scrubbed host identifier - safe to use in signatures and as a local. */
   name: string;
+  /** Boutiques field name - used as the dict key / TypedDict field key. */
+  wireKey: string;
   sigType: string;
   /** Rendered default expression in the host language, or undefined for required-no-default. */
   sigDefault?: string;
@@ -40,10 +50,17 @@ export interface SigOptions {
  * Skips `@type` (the factory injects it as a constant). Required-no-default
  * entries are placed before defaulted ones so the resulting signature is
  * syntactically valid in both Python and TS.
+ *
+ * `registerLocal` is called once per field with the wire key; it must return
+ * a scrubbed, unique host identifier (typically by combining a language-aware
+ * scrub function with `Scope.add()`). The caller's scope should already have
+ * the function's other locals (`params`, `runner`, ...) reserved so this
+ * registration cannot collide with them.
  */
 export function buildSigEntries(
   rootType: Extract<BoundType, { kind: "struct" }>,
   fieldInfo: Map<string, FieldInfo>,
+  registerLocal: (wireKey: string) => string,
   opts: SigOptions,
 ): SigEntry[] {
   const entries: SigEntry[] = [];
@@ -65,7 +82,8 @@ export function buildSigEntries(
     }
 
     entries.push({
-      name: fieldName,
+      name: registerLocal(fieldName),
+      wireKey: fieldName,
       sigType,
       sigDefault,
       isOptional,

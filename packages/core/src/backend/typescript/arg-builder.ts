@@ -90,9 +90,16 @@ interface ArgContext {
   currentStructType?: BoundType;
 }
 
+const TS_IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/** Append a property key onto a base expression, choosing dot or bracket. */
+function tsProp(base: string, key: string): string {
+  return TS_IDENT_RE.test(key) ? `${base}.${key}` : `${base}[${JSON.stringify(key)}]`;
+}
+
 /** Resolve the access path for a binding in the current context. */
 function resolveAccess(arg: ArgContext, bindingName: string): string {
-  return arg.directValue ?? `${arg.paramsVar}.${bindingName}`;
+  return arg.directValue ?? tsProp(arg.paramsVar, bindingName);
 }
 
 // -- Recursive descent --
@@ -166,7 +173,7 @@ function walkSequence(
   const childArg: ArgContext = needsScope
     ? {
         ...arg,
-        paramsVar: `${arg.paramsVar}.${binding!.name}`,
+        paramsVar: tsProp(arg.paramsVar, binding!.name),
         directValue: undefined,
         currentStructType: binding!.type,
         joinDepth: join !== undefined ? arg.joinDepth + 1 : arg.joinDepth,
@@ -193,7 +200,7 @@ function walkOptional(
 ): ArgResult {
   const binding = ctx.resolve(node);
   if (!binding) throw new Error("Missing binding for optional node");
-  const access = `${arg.paramsVar}.${binding.name}`;
+  const access = tsProp(arg.paramsVar, binding.name);
 
   // Compute child context based on the inner type
   let childArg: ArgContext;

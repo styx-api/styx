@@ -55,9 +55,54 @@ export function emitMetadata(ctx: CodegenContext, metaConst: string, cb: CodeBui
   cb.line(")");
 }
 
-/** Are all characters in `s` valid in a Python identifier (and `s[0]` not a digit)? */
+/**
+ * Python keywords that would cause a SyntaxError or silent miscompile if used
+ * as a class-body annotation key (e.g. `lambda: float` parses as a lambda
+ * expression statement, not a TypedDict field). The class-syntax check uses
+ * this to force functional syntax for those fields. Builtins like `int`/`str`
+ * are NOT in this set - those are valid class attribute names.
+ */
+const PY_KEYWORDS = new Set([
+  "False",
+  "None",
+  "True",
+  "and",
+  "as",
+  "assert",
+  "async",
+  "await",
+  "break",
+  "class",
+  "continue",
+  "def",
+  "del",
+  "elif",
+  "else",
+  "except",
+  "finally",
+  "for",
+  "from",
+  "global",
+  "if",
+  "import",
+  "in",
+  "is",
+  "lambda",
+  "nonlocal",
+  "not",
+  "or",
+  "pass",
+  "raise",
+  "return",
+  "try",
+  "while",
+  "with",
+  "yield",
+]);
+
+/** Can `s` be used as a class-attribute name in a TypedDict class body? */
 function isPyIdent(s: string): boolean {
-  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(s);
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(s) && !PY_KEYWORDS.has(s);
 }
 
 /**
@@ -296,6 +341,23 @@ export function pySigOptions(resolve: (t: BoundType) => string | undefined): Sig
   };
 }
 
+/**
+ * Scrub a Boutiques wire name into a valid Python host identifier. Replaces
+ * any non-`[A-Za-z0-9_]` character with `_`; prefixes `v_` if the result
+ * starts with a digit; appends a single trailing underscore when the scrubbed
+ * name matches a reserved word or shadowed built-in (matching v1 niwrap's
+ * `float_:` style). The caller is responsible for further deduping the result
+ * through a `Scope` so collisions with already-registered locals don't slip
+ * through.
+ */
+export function pyScrubIdent(name: string, reserved: ReadonlySet<string>): string {
+  let scrubbed = name.replace(/[^A-Za-z0-9_]/g, "_");
+  if (/^[0-9]/.test(scrubbed)) scrubbed = "v_" + scrubbed;
+  if (scrubbed === "") scrubbed = "_";
+  if (reserved.has(scrubbed)) scrubbed = scrubbed + "_";
+  return scrubbed;
+}
+
 /** Emit a sequence of `name: type [= default],` lines (one per entry) into `cb`. */
 function emitSigParams(entries: readonly SigEntry[], cb: CodeBuilder): void {
   for (const e of entries) {
@@ -386,7 +448,7 @@ export function emitParamsFactory(
       if (typeTag !== undefined) cb.line(`"@type": ${pyStr(typeTag)},`);
       for (const e of entries) {
         if (!e.isOptional || e.hasExplicitDefault) {
-          cb.line(`${pyStr(e.name)}: ${e.name},`);
+          cb.line(`${pyStr(e.wireKey)}: ${e.name},`);
         }
       }
     });
@@ -396,7 +458,7 @@ export function emitParamsFactory(
     for (const e of entries) {
       if (e.isOptional && !e.hasExplicitDefault) {
         cb.line(`if ${e.name} is not None:`);
-        cb.indent(() => cb.line(`params[${pyStr(e.name)}] = ${e.name}`));
+        cb.indent(() => cb.line(`params[${pyStr(e.wireKey)}] = ${e.name}`));
       }
     }
     cb.line("return params");

@@ -330,11 +330,21 @@ export function emitBuildOutputs(
   });
 }
 
+// Python keywords that can't be used as dataclass field names or kwarg keys.
+// Mirrors `PY_KEYWORDS` in emit.ts (kept local to avoid the import cycle).
+const PY_KEYWORDS = new Set([
+  "False", "None", "True", "and", "as", "assert", "async", "await", "break",
+  "class", "continue", "def", "del", "elif", "else", "except", "finally", "for",
+  "from", "global", "if", "import", "in", "is", "lambda", "nonlocal", "not",
+  "or", "pass", "raise", "return", "try", "while", "with", "yield",
+]);
+
 /** Sanitize an output name to a valid Python identifier. */
 function pyId(name: string): string {
   let s = name.replace(/[^a-zA-Z0-9_]/g, "_");
   if (/^\d/.test(s)) s = "_" + s;
   if (s === "") s = "_";
+  if (PY_KEYWORDS.has(s)) s = s + "_";
   return s;
 }
 

@@ -13,6 +13,7 @@ import {
   emitParamsFactory,
   emitTypeDeclarations,
   emitWrapperFunction,
+  tsScrubIdent,
   tsSigOptions,
 } from "./emit.js";
 import { collectFieldInfo } from "./types.js";
@@ -135,16 +136,20 @@ export function generateTypeScript(ctx: CodegenContext): string {
 
   // Pre-reserve module-level public names so any IR-derived names colliding
   // with them get suffix-bumped. `params` is intentionally NOT pre-reserved -
-  // `collectNamedTypes` claims it for the root struct just below.
+  // `collectNamedTypes` claims it for the root struct just below. Each name
+  // is scrubbed through `tsScrubIdent` first since the case helpers happily
+  // pass through digit-leading app ids.
+  const tsReservedSet = new Set(TS_RESERVED);
+  const reg = (name: string) => scope.add(tsScrubIdent(name, tsReservedSet));
   const names = {
-    params: publicNames.params,
-    outputs: scope.add(publicNames.outputs),
-    metadata: scope.add(publicNames.metadata),
-    cargs: scope.add(publicNames.cargs),
-    outputsFn: scope.add(publicNames.outputsFn),
-    paramsFn: rootIsStruct ? scope.add(publicNames.paramsFn) : "",
-    execute: rootIsStruct ? scope.add(publicNames.execute) : "",
-    wrapper: scope.add(publicNames.wrapper),
+    params: tsScrubIdent(publicNames.params, tsReservedSet),
+    outputs: reg(publicNames.outputs),
+    metadata: reg(publicNames.metadata),
+    cargs: reg(publicNames.cargs),
+    outputsFn: reg(publicNames.outputsFn),
+    paramsFn: rootIsStruct ? reg(publicNames.paramsFn) : "",
+    execute: rootIsStruct ? reg(publicNames.execute) : "",
+    wrapper: reg(publicNames.wrapper),
   };
 
   const { namedTypes, typeDecls } = collectNamedTypes(rootType, names.params, scope, pascalCase);
@@ -186,14 +191,19 @@ export function generateTypeScript(ctx: CodegenContext): string {
   }
 
   // Build the per-field SigEntry list once - the factory and kwarg wrapper
-  // both consume it. `rootType.kind === "struct"` check satisfies the
-  // `Extract` constraint when `rootIsStruct` is true.
+  // both consume it, so the host names registered here must satisfy both
+  // function scopes. Pre-reserve `params` (factory + wrapper body) and
+  // `runner` (wrapper signature) so a wire key matching either gets
+  // suffix-bumped. `rootType.kind === "struct"` check satisfies the `Extract`
+  // constraint when `rootIsStruct` is true.
   const rootTypeTag = appId ? `${pkg}/${appId}` : undefined;
+  const sigScope = scope.child(["params", "runner"]);
   const sigEntries =
     rootIsStruct && rootType.kind === "struct"
       ? buildSigEntries(
           rootType,
           collectFieldInfo(ctx, rootType),
+          (wireKey) => sigScope.add(tsScrubIdent(wireKey, tsReservedSet)),
           tsSigOptions(resolveTypeName(namedTypes)),
         )
       : [];
@@ -246,9 +256,14 @@ export function generateTypeScript(ctx: CodegenContext): string {
   return cb.toString();
 }
 
-/** Module name (file stem) for an app: snake_case of app.id, fallback `output`. */
+/**
+ * Module name (file stem) for an app: snake_case of app.id, fallback `output`.
+ * Scrubbed so digit-leading app ids (e.g. `3dPFM` -> `v_3d_pfm`) and keyword
+ * collisions don't break `export * from "./<mod>.js"` in the package index.
+ */
 export function appModuleName(meta: AppMeta | undefined): string {
-  return meta?.id ? snakeCase(meta.id) : "output";
+  if (!meta?.id) return "output";
+  return tsScrubIdent(snakeCase(meta.id), new Set(TS_RESERVED));
 }
 
 /**

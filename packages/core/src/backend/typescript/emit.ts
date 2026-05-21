@@ -100,7 +100,9 @@ export function emitTypeDeclarations(
             fieldType.kind === "optional"
               ? mapType(fieldType.inner, resolve) + " | null"
               : mapType(fieldType, resolve);
-          cb.line(`${fieldName}${optional}: ${mapped};`);
+          // Quote keys that aren't valid identifiers (e.g. `4d_input`). TS
+          // allows reserved-word identifiers as interface keys without quotes.
+          cb.line(`${tsObjKey(fieldName)}${optional}: ${mapped};`);
         }
       });
       cb.line("}");
@@ -168,6 +170,39 @@ export function tsSigOptions(resolve: (t: BoundType) => string | undefined): Sig
   };
 }
 
+/**
+ * Scrub a Boutiques wire name into a valid TypeScript host identifier.
+ * Mirrors Python's scrub: non-`[A-Za-z0-9_$]` replaced with `_`, digit
+ * prefixes get `v_`, reserved-word matches get a trailing `_`. Dedupe through
+ * a `Scope` for collisions with already-registered locals.
+ */
+export function tsScrubIdent(name: string, reserved: ReadonlySet<string>): string {
+  let scrubbed = name.replace(/[^A-Za-z0-9_$]/g, "_");
+  if (/^[0-9]/.test(scrubbed)) scrubbed = "v_" + scrubbed;
+  if (scrubbed === "") scrubbed = "_";
+  if (reserved.has(scrubbed)) scrubbed = scrubbed + "_";
+  return scrubbed;
+}
+
+const TS_IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/**
+ * Render a TypeScript property access path. Uses dot notation when the key is
+ * a valid identifier, bracket notation otherwise. (Wire keys like `4d_input`
+ * or `@type` can't be dot-accessed.)
+ */
+export function tsPropAccess(base: string, key: string): string {
+  return TS_IDENT_RE.test(key) ? `${base}.${key}` : `${base}[${JSON.stringify(key)}]`;
+}
+
+/**
+ * Render a TypeScript object-literal key. Bare ident when valid, quoted
+ * otherwise. (`name: ...` for `name`, `"4d_input": ...` for `4d_input`.)
+ */
+export function tsObjKey(key: string): string {
+  return TS_IDENT_RE.test(key) ? key : JSON.stringify(key);
+}
+
 /** Emit `name: type [= default],` lines (one per entry) into `cb`. */
 function emitSigParams(entries: readonly SigEntry[], cb: CodeBuilder): void {
   for (const e of entries) {
@@ -223,7 +258,7 @@ export function emitParamsFactory(
       if (typeTag !== undefined) cb.line(`"@type": ${JSON.stringify(typeTag)},`);
       for (const e of entries) {
         if (!e.isOptional || e.hasExplicitDefault) {
-          cb.line(`${e.name}: ${e.name},`);
+          cb.line(`${tsObjKey(e.wireKey)}: ${e.name},`);
         }
       }
     });
@@ -231,7 +266,7 @@ export function emitParamsFactory(
     for (const e of entries) {
       if (e.isOptional && !e.hasExplicitDefault) {
         cb.line(`if (${e.name} !== null) {`);
-        cb.indent(() => cb.line(`params.${e.name} = ${e.name};`));
+        cb.indent(() => cb.line(`${tsPropAccess("params", e.wireKey)} = ${e.name};`));
         cb.line("}");
       }
     }

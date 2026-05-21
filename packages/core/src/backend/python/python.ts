@@ -13,6 +13,7 @@ import {
   emitParamsFactory,
   emitTypeDeclarations,
   emitWrapperFunction,
+  pyScrubIdent,
   pySigOptions,
 } from "./emit.js";
 import { collectFieldInfo } from "./types.js";
@@ -153,16 +154,20 @@ export function generatePython(ctx: CodegenContext): string {
 
   // Pre-reserve module-level public names so any IR-derived names colliding
   // with them get suffix-bumped. `params` is intentionally NOT pre-reserved -
-  // `collectNamedTypes` claims it for the root struct just below.
+  // `collectNamedTypes` claims it for the root struct just below. Each name
+  // is scrubbed through `pyScrubIdent` first since the case helpers happily
+  // pass through digit-leading app ids like `3dvolreg.afni`.
+  const pyReservedSet = new Set(PY_RESERVED);
+  const reg = (name: string) => scope.add(pyScrubIdent(name, pyReservedSet));
   const names = {
-    params: publicNames.params,
-    outputs: scope.add(publicNames.outputs),
-    metadata: scope.add(publicNames.metadata),
-    cargs: scope.add(publicNames.cargs),
-    outputsFn: scope.add(publicNames.outputsFn),
-    paramsFn: rootIsStruct ? scope.add(publicNames.paramsFn) : "",
-    execute: rootIsStruct ? scope.add(publicNames.execute) : "",
-    wrapper: scope.add(publicNames.wrapper),
+    params: pyScrubIdent(publicNames.params, pyReservedSet),
+    outputs: reg(publicNames.outputs),
+    metadata: reg(publicNames.metadata),
+    cargs: reg(publicNames.cargs),
+    outputsFn: reg(publicNames.outputsFn),
+    paramsFn: rootIsStruct ? reg(publicNames.paramsFn) : "",
+    execute: rootIsStruct ? reg(publicNames.execute) : "",
+    wrapper: reg(publicNames.wrapper),
   };
 
   const { namedTypes, typeDecls } = collectNamedTypes(rootType, names.params, scope, pascalCase);
@@ -207,13 +212,18 @@ export function generatePython(ctx: CodegenContext): string {
   }
 
   // Build the per-field SigEntry list once - the factory and kwarg wrapper
-  // both consume it. `rootType` is narrowed by `rootIsStruct` for the
-  // `Extract` constraint.
+  // both consume it, so the host names registered here must satisfy both
+  // function scopes. Pre-reserve `params` (factory + wrapper body) and
+  // `runner` (wrapper signature) so a wire key matching either gets
+  // suffix-bumped. `rootType` is narrowed by `rootIsStruct` for the `Extract`
+  // constraint.
+  const sigScope = scope.child(["params", "runner"]);
   const sigEntries =
     rootIsStruct && rootType.kind === "struct"
       ? buildSigEntries(
           rootType,
           collectFieldInfo(ctx, rootType),
+          (wireKey) => sigScope.add(pyScrubIdent(wireKey, pyReservedSet)),
           pySigOptions(resolveTypeName(namedTypes)),
         )
       : [];
@@ -283,9 +293,14 @@ export function generatePython(ctx: CodegenContext): string {
   return cb.toString();
 }
 
-/** Module name (file stem) for an app: snake_case of app.id, fallback `output`. */
+/**
+ * Module name (file stem) for an app: snake_case of app.id, fallback `output`.
+ * Scrubbed so digit-leading app ids (e.g. `3dPFM` -> `v_3d_pfm`) and keyword
+ * collisions don't break `from .<mod> import *` in the package __init__.
+ */
 export function appModuleName(meta: AppMeta | undefined): string {
-  return meta?.id ? snakeCase(meta.id) : "output";
+  if (!meta?.id) return "output";
+  return pyScrubIdent(snakeCase(meta.id), new Set(PY_RESERVED));
 }
 
 /**
