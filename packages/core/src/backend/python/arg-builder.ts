@@ -232,10 +232,14 @@ function walkRepeat(
   const join = node.attrs.join ?? (arg.joinDepth > 0 ? "" : undefined);
   const access = resolveAccess(arg, binding.name);
 
-  // Count repeat: emit a counted for-loop.
+  // Count repeat: emit a counted for-loop. Inside a join the for-loop would
+  // be dropped into a list literal as raw text, so emit a comprehension.
   if (binding.type.kind === "count") {
     const inner = walk(node.attrs.node, ctx, arg);
     const v = `_i${loopVarCounter++}`;
+    if (join !== undefined && isExpr(inner)) {
+      return { expr: `${pyStr(join)}.join([${inner.expr} for ${v} in range(${access})])` };
+    }
     const cb = new CodeBuilder("    ");
     cb.line(`for ${v} in range(${access}):`);
     cb.indent(() => appendLines(cb, resultToStmt(inner)));
@@ -305,9 +309,21 @@ function walkAlternative(
     // Inside a join, the alternative's output must be an expression, not a
     // statement: an `if/else` block dropped into a `"".join([...])` list
     // literal is not valid Python. Emit a ternary when both arms are exprs.
-    if (arg.joinDepth > 0 && variants.every(isExpr)) {
+    if (arg.joinDepth > 0) {
+      if (!variants[1]) {
+        throw new Error(
+          "single-arm bool alternative inside a join: cannot produce an expression " +
+            "without ambiguous semantics (omitting the entry vs emitting empty string)",
+        );
+      }
+      if (!variants.every(isExpr)) {
+        throw new Error(
+          "bool alternative inside a join has statement-shaped variants; " +
+            "expected all arms to fold to expressions",
+        );
+      }
       const v0 = (variants[0] as Expr_).expr;
-      const v1 = variants[1] ? (variants[1] as Expr_).expr : pyStr("");
+      const v1 = (variants[1] as Expr_).expr;
       return { expr: `(${v0} if ${access} else ${v1})` };
     }
     const cb = new CodeBuilder("    ");
@@ -323,7 +339,13 @@ function walkAlternative(
   if (binding.type.kind === "union") {
     const unionType = binding.type;
     // Inside a join: chained ternary, same reason as bool above.
-    if (arg.joinDepth > 0 && variants.every(isExpr)) {
+    if (arg.joinDepth > 0) {
+      if (!variants.every(isExpr)) {
+        throw new Error(
+          "union alternative inside a join has statement-shaped variants; " +
+            "expected all arms to fold to expressions",
+        );
+      }
       let expr = pyStr("");
       for (let i = unionType.variants.length - 1; i >= 0; i--) {
         const variant = unionType.variants[i]!;

@@ -2,6 +2,7 @@ import type { BoundType, BoundVariant } from "../../bindings/index.js";
 import type { Expr } from "../../ir/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
+import { tsPropAccess } from "./emit.js";
 
 // -- Result types --
 
@@ -90,16 +91,9 @@ interface ArgContext {
   currentStructType?: BoundType;
 }
 
-const TS_IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
-
-/** Append a property key onto a base expression, choosing dot or bracket. */
-function tsProp(base: string, key: string): string {
-  return TS_IDENT_RE.test(key) ? `${base}.${key}` : `${base}[${JSON.stringify(key)}]`;
-}
-
 /** Resolve the access path for a binding in the current context. */
 function resolveAccess(arg: ArgContext, bindingName: string): string {
-  return arg.directValue ?? tsProp(arg.paramsVar, bindingName);
+  return arg.directValue ?? tsPropAccess(arg.paramsVar, bindingName);
 }
 
 // -- Recursive descent --
@@ -173,7 +167,7 @@ function walkSequence(
   const childArg: ArgContext = needsScope
     ? {
         ...arg,
-        paramsVar: tsProp(arg.paramsVar, binding!.name),
+        paramsVar: tsPropAccess(arg.paramsVar, binding!.name),
         directValue: undefined,
         currentStructType: binding!.type,
         joinDepth: join !== undefined ? arg.joinDepth + 1 : arg.joinDepth,
@@ -200,7 +194,7 @@ function walkOptional(
 ): ArgResult {
   const binding = ctx.resolve(node);
   if (!binding) throw new Error("Missing binding for optional node");
-  const access = tsProp(arg.paramsVar, binding.name);
+  const access = tsPropAccess(arg.paramsVar, binding.name);
 
   // Compute child context based on the inner type
   let childArg: ArgContext;
@@ -259,10 +253,16 @@ function walkRepeat(
   const join = node.attrs.join ?? (arg.joinDepth > 0 ? "" : undefined);
   const access = resolveAccess(arg, binding.name);
 
-  // Count repeat: emit a counted for-loop
+  // Count repeat: emit a counted for-loop. Inside a join the for-loop would
+  // be dropped into a list literal as raw text, so emit `Array.from` instead.
   if (binding.type.kind === "count") {
     const inner = walk(node.attrs.node, ctx, arg);
     const v = `i${loopVarCounter++}`;
+    if (join !== undefined && isExpr(inner)) {
+      return {
+        expr: `Array.from({length: ${access}}, (_, ${v}) => ${inner.expr}).join(${JSON.stringify(join)})`,
+      };
+    }
     const cb = new CodeBuilder("  ");
     cb.line(`for (let ${v} = 0; ${v} < ${access}; ${v}++) {`);
     cb.indent(() => appendLines(cb, resultToStmt(inner)));
@@ -334,9 +334,21 @@ function walkAlternative(
     // Inside a join, the alternative's output must be an expression, not a
     // statement: dropping an `if/else` block into a `[...].join("")` list
     // literal is not valid TypeScript. Emit a ternary when both arms are exprs.
-    if (arg.joinDepth > 0 && variants.every(isExpr)) {
+    if (arg.joinDepth > 0) {
+      if (!variants[1]) {
+        throw new Error(
+          "single-arm bool alternative inside a join: cannot produce an expression " +
+            "without ambiguous semantics (omitting the entry vs emitting empty string)",
+        );
+      }
+      if (!variants.every(isExpr)) {
+        throw new Error(
+          "bool alternative inside a join has statement-shaped variants; " +
+            "expected all arms to fold to expressions",
+        );
+      }
       const v0 = (variants[0] as Expr_).expr;
-      const v1 = variants[1] ? (variants[1] as Expr_).expr : '""';
+      const v1 = (variants[1] as Expr_).expr;
       return { expr: `(${access} ? ${v0} : ${v1})` };
     }
     const cb = new CodeBuilder("  ");
@@ -353,7 +365,13 @@ function walkAlternative(
   if (binding.type.kind === "union") {
     const unionType = binding.type;
     // Inside a join: chained ternary, same reason as bool above.
-    if (arg.joinDepth > 0 && variants.every(isExpr)) {
+    if (arg.joinDepth > 0) {
+      if (!variants.every(isExpr)) {
+        throw new Error(
+          "union alternative inside a join has statement-shaped variants; " +
+            "expected all arms to fold to expressions",
+        );
+      }
       let expr = '""';
       for (let i = unionType.variants.length - 1; i >= 0; i--) {
         const variant = unionType.variants[i]!;

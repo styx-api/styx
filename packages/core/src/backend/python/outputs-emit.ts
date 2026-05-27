@@ -9,7 +9,7 @@ import { outputGate } from "../../bindings/index.js";
 import type { Expr } from "../../ir/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
-import { emitDocstring } from "./emit.js";
+import { PY_KEYWORDS, emitDocstring } from "./emit.js";
 import { pyStr } from "./typemap.js";
 
 /**
@@ -329,15 +329,6 @@ export function emitBuildOutputs(
     }
   });
 }
-
-// Python keywords that can't be used as dataclass field names or kwarg keys.
-// Mirrors `PY_KEYWORDS` in emit.ts (kept local to avoid the import cycle).
-const PY_KEYWORDS = new Set([
-  "False", "None", "True", "and", "as", "assert", "async", "await", "break",
-  "class", "continue", "def", "del", "elif", "else", "except", "finally", "for",
-  "from", "global", "if", "import", "in", "is", "lambda", "nonlocal", "not",
-  "or", "pass", "raise", "return", "try", "while", "with", "yield",
-]);
 
 /** Sanitize an output name to a valid Python identifier. */
 function pyId(name: string): string {

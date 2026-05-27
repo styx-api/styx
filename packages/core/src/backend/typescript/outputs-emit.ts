@@ -9,7 +9,7 @@ import { outputGate } from "../../bindings/index.js";
 import type { Expr } from "../../ir/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
-import { emitJsDoc } from "./emit.js";
+import { emitJsDoc, tsPropAccess } from "./emit.js";
 
 /**
  * Field shape for a single resolved output.
@@ -109,7 +109,7 @@ function walkAccess(node: Expr, ctx: CodegenContext, base: string, out: AccessMa
         for (const child of node.attrs.nodes) {
           const childBinding = ctx.resolve(child);
           if (childBinding) {
-            walkAccess(child, ctx, `${base}.${childBinding.name}`, out);
+            walkAccess(child, ctx, tsPropAccess(base, childBinding.name), out);
           } else {
             walkAccess(child, ctx, base, out);
           }

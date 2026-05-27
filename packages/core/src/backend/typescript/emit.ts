@@ -88,7 +88,6 @@ export function emitTypeDeclarations(
           const fi = fieldInfo.get(fieldName);
           emitJsDoc(cb, fi?.doc);
 
-          const hasDefault = fi?.defaultValue !== undefined;
           const isOptional = fieldType.kind === "optional";
           // Fields with explicit defaults remain required in the interface; the
           // params-factory's signature default handles the omission case. This

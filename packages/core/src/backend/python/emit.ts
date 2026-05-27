@@ -62,7 +62,7 @@ export function emitMetadata(ctx: CodegenContext, metaConst: string, cb: CodeBui
  * this to force functional syntax for those fields. Builtins like `int`/`str`
  * are NOT in this set - those are valid class attribute names.
  */
-const PY_KEYWORDS = new Set([
+export const PY_KEYWORDS = new Set([
   "False",
   "None",
   "True",

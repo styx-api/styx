@@ -616,6 +616,17 @@ describe("execution - alternatives", () => {
     expect(args).toEqual(["[abc]"]);
   });
 
+  it("count repeat inside seqJoin concatenates per iteration", () => {
+    // A count-typed repeat (e.g. `-v -v -v` flag bumping verbosity) inside a
+    // parent join must produce an expression, not a for-loop statement.
+    const args = execute(
+      seq(seqJoin("", lit("["), rep(lit("v"), "verbose"), lit("]"))),
+      { verbose: 3 },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["[vvv]"]);
+  });
+
   it("non-join repeat inside seqJoin with multi-part body concatenates per iteration", () => {
     const args = execute(
       seq(seqJoin("", lit("["), rep(seq(lit(","), str("name")), "names"), lit("]"))),
@@ -626,9 +637,9 @@ describe("execution - alternatives", () => {
   });
 
   it("discriminated union with seqJoin variants inside seqJoin emits chained ternary", () => {
-    // Union variants must be Expr-shaped (seqJoin) for the chained-ternary
-    // form. Variants whose body is a non-join seq emit cargs.push() statements
-    // and would need hoisting, which we don't implement here.
+    // Variants fold to expressions either via own seqJoin OR via the
+    // non-join-seq-in-join fallback (walkSequence synthesizes join=""), so
+    // both shapes work as union arms inside an outer join.
     const args = execute(
       seq(
         seqJoin(

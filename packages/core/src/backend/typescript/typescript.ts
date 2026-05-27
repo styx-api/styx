@@ -27,55 +27,15 @@ import {
 import { mapType } from "./typemap.js";
 import { collectNamedTypes, resolveTypeName, structKey, unionKey } from "./types.js";
 
-const TS_RESERVED = [
-  "break",
-  "case",
-  "catch",
-  "class",
-  "const",
-  "continue",
-  "debugger",
-  "default",
-  "delete",
-  "do",
-  "else",
-  "enum",
-  "export",
-  "extends",
-  "false",
-  "finally",
-  "for",
-  "function",
-  "if",
-  "import",
-  "in",
-  "instanceof",
-  "new",
-  "null",
-  "return",
-  "super",
-  "switch",
-  "this",
-  "throw",
-  "true",
-  "try",
-  "typeof",
-  "undefined",
-  "var",
-  "void",
-  "while",
-  "with",
-  "yield",
-  "let",
-  "static",
-  "implements",
-  "interface",
-  "package",
-  "private",
-  "protected",
-  "public",
-  "type",
-];
+const TS_RESERVED: ReadonlySet<string> = new Set([
+  "break", "case", "catch", "class", "const", "continue", "debugger",
+  "default", "delete", "do", "else", "enum", "export", "extends", "false",
+  "finally", "for", "function", "if", "import", "in", "instanceof", "new",
+  "null", "return", "super", "switch", "this", "throw", "true", "try",
+  "typeof", "undefined", "var", "void", "while", "with", "yield", "let",
+  "static", "implements", "interface", "package", "private", "protected",
+  "public", "type",
+]);
 
 /**
  * Per-tool public symbol names emitted directly in the flat tool file. Wrapper
@@ -107,15 +67,18 @@ export function computePublicNames(appId: string | undefined): PublicNames {
       wrapper: "run",
     };
   }
+  // Pre-scrub digit-leading ids so derived case forms produce valid
+  // identifiers in a consistent case.
+  const id = /^[0-9]/.test(appId) ? "v_" + appId : appId;
   return {
-    params: pascalCase(appId),
-    outputs: pascalCase(appId) + "Outputs",
-    metadata: screamingSnakeCase(appId) + "_METADATA",
-    cargs: camelCase(appId) + "_cargs",
-    outputsFn: camelCase(appId) + "_outputs",
-    paramsFn: camelCase(appId) + "Params",
-    execute: camelCase(appId) + "Execute",
-    wrapper: camelCase(appId),
+    params: pascalCase(id),
+    outputs: pascalCase(id) + "Outputs",
+    metadata: screamingSnakeCase(id) + "_METADATA",
+    cargs: camelCase(id) + "_cargs",
+    outputsFn: camelCase(id) + "_outputs",
+    paramsFn: camelCase(id) + "Params",
+    execute: camelCase(id) + "Execute",
+    wrapper: camelCase(id),
   };
 }
 
@@ -139,10 +102,9 @@ export function generateTypeScript(ctx: CodegenContext): string {
   // `collectNamedTypes` claims it for the root struct just below. Each name
   // is scrubbed through `tsScrubIdent` first since the case helpers happily
   // pass through digit-leading app ids.
-  const tsReservedSet = new Set(TS_RESERVED);
-  const reg = (name: string) => scope.add(tsScrubIdent(name, tsReservedSet));
+  const reg = (name: string) => scope.add(tsScrubIdent(name, TS_RESERVED));
   const names = {
-    params: tsScrubIdent(publicNames.params, tsReservedSet),
+    params: tsScrubIdent(publicNames.params, TS_RESERVED),
     outputs: reg(publicNames.outputs),
     metadata: reg(publicNames.metadata),
     cargs: reg(publicNames.cargs),
@@ -203,7 +165,7 @@ export function generateTypeScript(ctx: CodegenContext): string {
       ? buildSigEntries(
           rootType,
           collectFieldInfo(ctx, rootType),
-          (wireKey) => sigScope.add(tsScrubIdent(wireKey, tsReservedSet)),
+          (wireKey) => sigScope.add(tsScrubIdent(wireKey, TS_RESERVED)),
           tsSigOptions(resolveTypeName(namedTypes)),
         )
       : [];
@@ -263,7 +225,7 @@ export function generateTypeScript(ctx: CodegenContext): string {
  */
 export function appModuleName(meta: AppMeta | undefined): string {
   if (!meta?.id) return "output";
-  return tsScrubIdent(snakeCase(meta.id), new Set(TS_RESERVED));
+  return tsScrubIdent(snakeCase(meta.id), TS_RESERVED);
 }
 
 /**

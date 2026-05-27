@@ -28,73 +28,21 @@ import { mapType } from "./typemap.js";
 import { collectNamedTypes, resolveTypeName, structKey, unionKey } from "./types.js";
 
 // Python reserved words + commonly-shadowed built-ins. Used to avoid collisions
-// when generating identifiers.
-const PY_RESERVED = [
-  "False",
-  "None",
-  "True",
-  "and",
-  "as",
-  "assert",
-  "async",
-  "await",
-  "break",
-  "class",
-  "continue",
-  "def",
-  "del",
-  "elif",
-  "else",
-  "except",
-  "finally",
-  "for",
-  "from",
-  "global",
-  "if",
-  "import",
-  "in",
-  "is",
-  "lambda",
-  "nonlocal",
-  "not",
-  "or",
-  "pass",
-  "raise",
-  "return",
-  "try",
-  "while",
-  "with",
-  "yield",
+// when generating identifiers. Includes keywords, common stdlib builtins, and
+// the styxdefs symbols we emit/import.
+const PY_RESERVED: ReadonlySet<string> = new Set([
+  "False", "None", "True", "and", "as", "assert", "async", "await", "break",
+  "class", "continue", "def", "del", "elif", "else", "except", "finally", "for",
+  "from", "global", "if", "import", "in", "is", "lambda", "nonlocal", "not",
+  "or", "pass", "raise", "return", "try", "while", "with", "yield",
   // Common builtins to avoid shadowing.
-  "list",
-  "dict",
-  "tuple",
-  "set",
-  "int",
-  "float",
-  "str",
-  "bool",
-  "type",
-  "print",
-  "open",
-  "input",
-  "range",
-  "len",
-  "id",
-  "object",
-  "Exception",
-  "ValueError",
-  "TypeError",
+  "list", "dict", "tuple", "set", "int", "float", "str", "bool", "type",
+  "print", "open", "input", "range", "len", "id", "object",
+  "Exception", "ValueError", "TypeError",
   // styxdefs symbols we emit/import.
-  "Runner",
-  "Execution",
-  "Metadata",
-  "InputPathType",
-  "OutputPathType",
-  "get_global_runner",
-  "dataclasses",
-  "typing",
-];
+  "Runner", "Execution", "Metadata", "InputPathType", "OutputPathType",
+  "get_global_runner", "dataclasses", "typing",
+]);
 
 /**
  * Per-tool public symbol names. With the flat `fsl/bet.py` layout each tool
@@ -125,15 +73,19 @@ export function computePublicNames(appId: string | undefined): PublicNames {
       wrapper: "run",
     };
   }
+  // Pre-scrub digit-leading ids (e.g. `3dPFM`) so all derived case forms
+  // produce valid Python identifiers in a consistent case (matches v1's
+  // `V_3D_PFM_METADATA` / `v_3d_pfm` style instead of mixed `v_3D_PFM`).
+  const id = /^[0-9]/.test(appId) ? "v_" + appId : appId;
   return {
-    params: pascalCase(appId),
-    outputs: pascalCase(appId) + "Outputs",
-    metadata: screamingSnakeCase(appId) + "_METADATA",
-    cargs: snakeCase(appId) + "_cargs",
-    outputsFn: snakeCase(appId) + "_outputs",
-    paramsFn: snakeCase(appId) + "_params",
-    execute: snakeCase(appId) + "_execute",
-    wrapper: snakeCase(appId),
+    params: pascalCase(id),
+    outputs: pascalCase(id) + "Outputs",
+    metadata: screamingSnakeCase(id) + "_METADATA",
+    cargs: snakeCase(id) + "_cargs",
+    outputsFn: snakeCase(id) + "_outputs",
+    paramsFn: snakeCase(id) + "_params",
+    execute: snakeCase(id) + "_execute",
+    wrapper: snakeCase(id),
   };
 }
 
@@ -157,10 +109,9 @@ export function generatePython(ctx: CodegenContext): string {
   // `collectNamedTypes` claims it for the root struct just below. Each name
   // is scrubbed through `pyScrubIdent` first since the case helpers happily
   // pass through digit-leading app ids like `3dvolreg.afni`.
-  const pyReservedSet = new Set(PY_RESERVED);
-  const reg = (name: string) => scope.add(pyScrubIdent(name, pyReservedSet));
+  const reg = (name: string) => scope.add(pyScrubIdent(name, PY_RESERVED));
   const names = {
-    params: pyScrubIdent(publicNames.params, pyReservedSet),
+    params: pyScrubIdent(publicNames.params, PY_RESERVED),
     outputs: reg(publicNames.outputs),
     metadata: reg(publicNames.metadata),
     cargs: reg(publicNames.cargs),
@@ -223,7 +174,7 @@ export function generatePython(ctx: CodegenContext): string {
       ? buildSigEntries(
           rootType,
           collectFieldInfo(ctx, rootType),
-          (wireKey) => sigScope.add(pyScrubIdent(wireKey, pyReservedSet)),
+          (wireKey) => sigScope.add(pyScrubIdent(wireKey, PY_RESERVED)),
           pySigOptions(resolveTypeName(namedTypes)),
         )
       : [];
@@ -300,7 +251,7 @@ export function generatePython(ctx: CodegenContext): string {
  */
 export function appModuleName(meta: AppMeta | undefined): string {
   if (!meta?.id) return "output";
-  return pyScrubIdent(snakeCase(meta.id), new Set(PY_RESERVED));
+  return pyScrubIdent(snakeCase(meta.id), PY_RESERVED);
 }
 
 /**

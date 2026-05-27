@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { generate, int, lit, opt, path, seq, str } from "./test-helpers.js";
+import { appModuleName } from "./python.js";
+import { generate, lit, opt, seq } from "./test-helpers.js";
 
 describe("Python name dodging - host vs wire", () => {
   it("scrubs reserved-word field names with trailing underscore", () => {
@@ -42,5 +43,46 @@ describe("Python name dodging - host vs wire", () => {
     // Wire key 'runner' must not collide with the wrapper's `runner` param
     expect(code).toMatch(/runner_2:\s*str/);
     expect(code).toMatch(/"runner":\s*runner_2/);
+  });
+
+  it("scrubs digit-leading app ids in public names (cargs, metadata, wrapper)", () => {
+    // `3dPFM` -> snake_case `3d_pfm` would start with a digit (invalid
+    // module/function name). The public-name scrub prepends `v_`.
+    const code = generate(seq(lit("3dPFM")), { app: { id: "3dPFM" } });
+    expect(code).toMatch(/def v_3d_pfm\b/);
+    expect(code).toMatch(/V_3D_PFM_METADATA\b/);
+    expect(code).toMatch(/def v_3d_pfm_cargs\b/);
+  });
+
+  it("scrubs digit-leading app ids in appModuleName for file name", () => {
+    expect(appModuleName({ id: "3dPFM" })).toBe("v_3d_pfm");
+    expect(appModuleName({ id: "lambda" })).toBe("lambda_");
+    expect(appModuleName({ id: "normal_tool" })).toBe("normal_tool");
+  });
+
+  it("scrubs Python keyword field names in the outputs dataclass", () => {
+    // An output named `lambda` would shadow the keyword and break the
+    // dataclass constructor. pyId appends a trailing underscore.
+    const code = generate(
+      seq(
+        lit("tool"),
+        {
+          kind: "str",
+          attrs: {},
+          meta: {
+            name: "x",
+            outputs: [
+              {
+                name: "lambda",
+                tokens: [{ kind: "literal", value: "out.nii" }],
+              },
+            ],
+          },
+        },
+      ),
+      { app: { id: "tool" } },
+    );
+    expect(code).toMatch(/lambda_:\s*OutputPathType/);
+    expect(code).toMatch(/lambda_=lambda__v/);
   });
 });
