@@ -338,6 +338,15 @@ function walkAlternative(
 
   if (binding.type.kind === "union") {
     const unionType = binding.type;
+    // A union may be pure-discriminated (every variant a struct with `@type`) or
+    // mixed (struct variants plus bare-literal variants, e.g. ants
+    // `Interpolation = "Linear" | MultiLabel | ...`). Pure-enum unions returned
+    // above. Dispatch struct variants on `@type`; a bare literal is its own value.
+    const structVariants = unionType.variants
+      .map((variant, i) => ({ variant, i }))
+      .filter((x) => x.variant.type.kind === "struct");
+    const hasLiteral = unionType.variants.some((v) => v.type.kind === "literal");
+
     // Inside a join: chained ternary, same reason as bool above.
     if (arg.joinDepth > 0) {
       if (!variants.every(isExpr)) {
@@ -346,21 +355,35 @@ function walkAlternative(
             "expected all arms to fold to expressions",
         );
       }
-      let expr = pyStr("");
-      for (let i = unionType.variants.length - 1; i >= 0; i--) {
-        const variant = unionType.variants[i]!;
+      let structExpr = pyStr("");
+      for (let k = structVariants.length - 1; k >= 0; k--) {
+        const { variant, i } = structVariants[k]!;
         const v = (variants[i] as Expr_).expr;
-        expr = `(${v} if ${access}["@type"] == ${pyStr(variant.name ?? "")} else ${expr})`;
+        structExpr = `(${v} if ${access}["@type"] == ${pyStr(variant.name ?? "")} else ${structExpr})`;
       }
-      return { expr };
+      if (!hasLiteral) return { expr: structExpr };
+      // Mixed: a dict value dispatches by `@type`; a bare literal is itself.
+      return { expr: `(${structExpr} if isinstance(${access}, dict) else str(${access}))` };
     }
+
     const cb = new CodeBuilder("    ");
-    for (let i = 0; i < unionType.variants.length; i++) {
-      const variant = unionType.variants[i]!;
-      const keyword = i === 0 ? "if" : "elif";
-      cb.line(`${keyword} ${access}["@type"] == ${pyStr(variant.name ?? "")}:`);
-      cb.indent(() => appendLines(cb, resultToStmt(variants[i]!)));
+    const emitStructDispatch = (): void => {
+      structVariants.forEach(({ variant, i }, k) => {
+        const keyword = k === 0 ? "if" : "elif";
+        cb.line(`${keyword} ${access}["@type"] == ${pyStr(variant.name ?? "")}:`);
+        cb.indent(() => appendLines(cb, resultToStmt(variants[i]!)));
+      });
+    };
+    if (!hasLiteral) {
+      emitStructDispatch();
+      return { stmt: cb.toString() };
     }
+    // Mixed union: branch on runtime shape (dict -> `@type` dispatch; else a
+    // bare literal used directly), mirroring the validator.
+    cb.line(`if isinstance(${access}, dict):`);
+    cb.indent(emitStructDispatch);
+    cb.line(`else:`);
+    cb.indent(() => appendLines(cb, resultToStmt({ expr: `str(${access})` })));
     return { stmt: cb.toString() };
   }
 

@@ -303,6 +303,19 @@ describe("Python generation - discriminated unions", () => {
     expect(code).toContain('cargs.append("--url")');
     expect(code).toContain('params["source"]["url"]');
   });
+
+  // Regression: a mixed union (struct + bare-literal variants, e.g. ants
+  // `Interpolation`) cannot dispatch with `params.x["@type"]` because the
+  // literal arms aren't dicts. cargs must branch on runtime shape.
+  it("emits a runtime-shape branch for mixed (struct + literal) unions", () => {
+    const code = generate(
+      seq(lit("cmd"), namedAlt("mode", lit("fast"), seq(lit("--full"), str("level")))),
+      { app: { id: "t" } },
+    );
+    expect(code).toContain('if isinstance(params["mode"], dict):');
+    expect(code).toContain('if params["mode"]["@type"] == "variant_1":');
+    expect(code).toContain('cargs.append(str(params["mode"]))');
+  });
 });
 
 describe("Python generation - public names / __all__", () => {
@@ -583,11 +596,7 @@ describe("Python generation - join", () => {
         seqJoin(
           ",",
           lit("X"),
-          namedAlt(
-            "kind",
-            seqJoin("=", lit("a"), str("v1")),
-            seqJoin("=", lit("b"), str("v2")),
-          ),
+          namedAlt("kind", seqJoin("=", lit("a"), str("v1")), seqJoin("=", lit("b"), str("v2"))),
         ),
       ),
     );

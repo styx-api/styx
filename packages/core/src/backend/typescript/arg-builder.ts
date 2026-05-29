@@ -364,6 +364,15 @@ function walkAlternative(
 
   if (binding.type.kind === "union") {
     const unionType = binding.type;
+    // A union may be pure-discriminated (every variant a struct with `@type`) or
+    // mixed (struct variants plus bare-literal variants, e.g. ants
+    // `Interpolation = "Linear" | MultiLabel | ...`). Pure-enum unions returned
+    // above. Dispatch struct variants on `@type`; a bare literal is its own value.
+    const structVariants = unionType.variants
+      .map((variant, i) => ({ variant, i }))
+      .filter((x) => x.variant.type.kind === "struct");
+    const hasLiteral = unionType.variants.some((v) => v.type.kind === "literal");
+
     // Inside a join: chained ternary, same reason as bool above.
     if (arg.joinDepth > 0) {
       if (!variants.every(isExpr)) {
@@ -372,28 +381,48 @@ function walkAlternative(
             "expected all arms to fold to expressions",
         );
       }
-      let expr = '""';
-      for (let i = unionType.variants.length - 1; i >= 0; i--) {
-        const variant = unionType.variants[i]!;
+      let structExpr = '""';
+      for (let k = structVariants.length - 1; k >= 0; k--) {
+        const { variant, i } = structVariants[k]!;
         const v = (variants[i] as Expr_).expr;
-        expr = `(${access}["@type"] === ${JSON.stringify(variant.name ?? "")} ? ${v} : ${expr})`;
+        structExpr = `(${access}["@type"] === ${JSON.stringify(variant.name ?? "")} ? ${v} : ${structExpr})`;
       }
-      return { expr };
+      if (!hasLiteral) return { expr: structExpr };
+      // Mixed: an object value dispatches by `@type`; a bare literal is itself.
+      return {
+        expr: `(typeof ${access} === "object" && ${access} !== null ? ${structExpr} : String(${access}))`,
+      };
     }
+
     const cb = new CodeBuilder("  ");
-    cb.line(`switch (${access}["@type"]) {`);
-    cb.indent(() => {
-      for (let i = 0; i < unionType.variants.length; i++) {
-        const variant = unionType.variants[i]!;
-        cb.line(`case ${JSON.stringify(variant.name)}: {`);
-        cb.indent(() => {
-          appendLines(cb, resultToStmt(variants[i]!));
-          cb.line("break;");
-        });
-        cb.line("}");
-      }
-    });
-    cb.line("}");
+    // `switch` (not an `if`/`else if` ===-chain): each `case` narrows the
+    // discriminated union, whereas a chain accumulates narrowing and TS rejects
+    // later arms (TS2367).
+    const emitStructSwitch = (): void => {
+      cb.line(`switch (${access}["@type"]) {`);
+      cb.indent(() => {
+        for (const { variant, i } of structVariants) {
+          cb.line(`case ${JSON.stringify(variant.name ?? "")}: {`);
+          cb.indent(() => {
+            appendLines(cb, resultToStmt(variants[i]!));
+            cb.line("break;");
+          });
+          cb.line("}");
+        }
+      });
+      cb.line("}");
+    };
+    if (!hasLiteral) {
+      emitStructSwitch();
+      return { stmt: cb.toString() };
+    }
+    // Mixed union: branch on runtime shape. `typeof === "object"` narrows to the
+    // struct variants; the `else` to the bare-literal members.
+    cb.line(`if (typeof ${access} === "object" && ${access} !== null) {`);
+    cb.indent(emitStructSwitch);
+    cb.line(`} else {`);
+    cb.indent(() => appendLines(cb, resultToStmt({ expr: `String(${access})` })));
+    cb.line(`}`);
     return { stmt: cb.toString() };
   }
 

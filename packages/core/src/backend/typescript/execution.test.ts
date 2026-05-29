@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   execute,
   float,
+  generate,
   int,
   lit,
   namedAlt,
@@ -527,6 +528,37 @@ describe("execution - alternatives", () => {
     expect(args).toEqual(["cmd", "--url", "https://example.com"]);
   });
 
+  // Regression: a mixed union (struct + bare-literal variants) is what ants
+  // `Interpolation` looks like. `params.x["@type"]` is invalid for the literal
+  // arms; cargs must branch on runtime shape (object vs literal).
+  it("mixed union (struct + bare-literal): literal arm uses the value directly", () => {
+    const args = execute(
+      seq(lit("cmd"), namedAlt("mode", lit("fast"), seq(lit("--full"), str("level")))),
+      { mode: "fast" },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd", "fast"]);
+  });
+
+  it("mixed union (struct + bare-literal): struct arm dispatches by @type", () => {
+    const args = execute(
+      seq(lit("cmd"), namedAlt("mode", lit("fast"), seq(lit("--full"), str("level")))),
+      { mode: { "@type": "variant_1", level: "high" } },
+      { app: { id: "t" } },
+    );
+    expect(args).toEqual(["cmd", "--full", "high"]);
+  });
+
+  it('mixed union emits a typeof === "object" branch in cargs', () => {
+    const code = generate(
+      seq(lit("cmd"), namedAlt("mode", lit("fast"), seq(lit("--full"), str("level")))),
+      { app: { id: "t" } },
+    );
+    expect(code).toContain('if (typeof params.mode === "object" && params.mode !== null) {');
+    expect(code).toContain('switch (params.mode["@type"]) {');
+    expect(code).toContain("cargs.push(String(params.mode));");
+  });
+
   it("alternative inside optional (present)", () => {
     const args = execute(
       seq(lit("cmd"), opt(namedAlt("mode", lit("fast"), lit("slow")))),
@@ -645,11 +677,7 @@ describe("execution - alternatives", () => {
         seqJoin(
           ",",
           lit("X"),
-          namedAlt(
-            "kind",
-            seqJoin("=", lit("a"), str("v1")),
-            seqJoin("=", lit("b"), str("v2")),
-          ),
+          namedAlt("kind", seqJoin("=", lit("a"), str("v1")), seqJoin("=", lit("b"), str("v2"))),
         ),
       ),
       { kind: { "@type": "variant_1", v2: "hello" } },
