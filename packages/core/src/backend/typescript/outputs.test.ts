@@ -9,6 +9,7 @@ import {
   path,
   rep,
   seq,
+  str,
 } from "./test-helpers.js";
 
 describe("typescript outputs - codegen", () => {
@@ -205,6 +206,81 @@ describe("typescript outputs - execution", () => {
       { app: { id: "tool" } },
     );
     expect(inspectOuts).toEqual({ converted: null });
+  });
+
+  // Regression: when multiple union arms declare the same output name (e.g.
+  // ants `antsApplyTransforms` -> `output_image_outfile` across 3 variants),
+  // the Outputs interface must collapse to one field; otherwise TS2300
+  // (duplicate identifier) and TS1117 (duplicate object literal property).
+  it("dedupes same-named outputs across union arms into one interface field", () => {
+    const armA = seq(lit("a"), path("aSrc"));
+    armA.meta = {
+      name: "a",
+      outputs: [{ name: "result", tokens: [{ kind: "ref", target: nodeRef("aSrc") }] }],
+    };
+    const armB = seq(lit("b"), path("bSrc"));
+    armB.meta = {
+      name: "b",
+      outputs: [{ name: "result", tokens: [{ kind: "ref", target: nodeRef("bSrc") }] }],
+    };
+    const root = seq(lit("tool"), namedAlt("mode", armA, armB));
+    const code = generate(root, { app: { id: "tool" } });
+    // One interface field, one initializer entry.
+    const interfaceMatches = code.match(/result: OutputPathType \| null;/g) ?? [];
+    expect(interfaceMatches.length).toBe(1);
+    const initMatches = code.match(/^\s*result: null,$/gm) ?? [];
+    expect(initMatches.length).toBe(1);
+    // But two variant-gated assignments, one per arm.
+    expect(code).toContain('if (params.mode["@type"] === "a") {');
+    expect(code).toContain('if (params.mode["@type"] === "b") {');
+  });
+
+  it("populates the deduped field from whichever union arm is selected", () => {
+    const armA = seq(lit("a"), path("aSrc"));
+    armA.meta = {
+      name: "a",
+      outputs: [{ name: "result", tokens: [{ kind: "ref", target: nodeRef("aSrc") }] }],
+    };
+    const armB = seq(lit("b"), path("bSrc"));
+    armB.meta = {
+      name: "b",
+      outputs: [{ name: "result", tokens: [{ kind: "ref", target: nodeRef("bSrc") }] }],
+    };
+    const root = seq(lit("tool"), namedAlt("mode", armA, armB));
+    const { outputs: aOuts } = executeWithOutputs(
+      root,
+      { mode: { "@type": "a", aSrc: "/data/a" } },
+      { app: { id: "tool" } },
+    );
+    expect(aOuts).toEqual({ result: "/data/a" });
+    const { outputs: bOuts } = executeWithOutputs(
+      root,
+      { mode: { "@type": "b", bSrc: "/data/b" } },
+      { app: { id: "tool" } },
+    );
+    expect(bOuts).toEqual({ result: "/data/b" });
+  });
+
+  // Regression: when an output ref points at a binding nested inside a
+  // binding-less wrapper sequence (the shape Boutiques produces for
+  // `command-line-flag` inputs like `seq(lit("-out"), str("out_file"))`),
+  // the access path must still be the struct-relative `params.<name>`, not
+  // `params`. The old structural walk dropped the name (-> TS2345 on flirt).
+  it("resolves output refs through binding-less wrapper sequences", () => {
+    const root = seq(lit("tool"), seq(lit("-out"), str("out_file")));
+    root.meta = {
+      outputs: [
+        {
+          name: "out",
+          tokens: [{ kind: "ref", target: nodeRef("out_file") }],
+        },
+      ],
+    };
+    const code = generate(root, { app: { id: "tool" } });
+    expect(code).toContain("execution.outputFile(params.out_file)");
+    expect(code).not.toMatch(/execution\.outputFile\(params[,)]/);
+    const { outputs } = executeWithOutputs(root, { out_file: "/data/x" }, { app: { id: "tool" } });
+    expect(outputs).toEqual({ out: "/data/x" });
   });
 
   it("applies a stripExtensions list to ref tokens", () => {

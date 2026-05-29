@@ -29,6 +29,52 @@ function outputShape(gate: GateAtom[]): OutputShape {
   return { kind: "single", optional };
 }
 
+/**
+ * Merge two shapes for outputs that share a field name across scopes/variants.
+ * Any iterated contributor makes the field a list; otherwise it is a single
+ * field that is optional if any contributor is gated.
+ */
+function mergeShape(a: OutputShape, b: OutputShape): OutputShape {
+  if (a.kind === "list" || b.kind === "list") return { kind: "list" };
+  return { kind: "single", optional: a.optional || b.optional };
+}
+
+/** One emitted Outputs field, deduped across same-named outputs. */
+interface OutputField {
+  /** Emitted field identifier (already quoted/escaped via `jsId`). */
+  id: string;
+  shape: OutputShape;
+  doc?: string;
+}
+
+/**
+ * Collect the unique Outputs fields in first-seen order, merging the shape and
+ * doc of any outputs that resolve to the same field id. Multiple scopes (e.g.
+ * the arms of a union output) routinely declare the same output name; without
+ * deduping, the interface and initializer would emit duplicate members.
+ */
+function collectOutputFields(ctx: CodegenContext): OutputField[] {
+  const byId = new Map<string, OutputField>();
+  for (const scope of ctx.outputScopes) {
+    const scopeBinding = ctx.bindings.get(scope.scope);
+    const scopeGate = scopeBinding?.gate ?? [];
+    for (const output of scope.outputs) {
+      const gate = outputGate(scopeGate, output, ctx.bindings);
+      const shape = outputShape(gate);
+      const id = jsId(output.name);
+      const doc = output.doc?.description ?? output.doc?.title;
+      const existing = byId.get(id);
+      if (existing) {
+        existing.shape = mergeShape(existing.shape, shape);
+        if (!existing.doc && doc) existing.doc = doc;
+      } else {
+        byId.set(id, { id, shape, doc });
+      }
+    }
+  }
+  return [...byId.values()];
+}
+
 function outputTypeExpr(shape: OutputShape): string {
   if (shape.kind === "list") return "OutputPathType[]";
   return shape.optional ? "OutputPathType | null" : "OutputPathType";
@@ -58,15 +104,9 @@ export function emitOutputsInterface(
 ): void {
   cb.line(`export interface ${outputsType} {`);
   cb.indent(() => {
-    for (const scope of ctx.outputScopes) {
-      const scopeBinding = ctx.bindings.get(scope.scope);
-      const scopeGate = scopeBinding?.gate ?? [];
-      for (const output of scope.outputs) {
-        const gate = outputGate(scopeGate, output, ctx.bindings);
-        const shape = outputShape(gate);
-        emitJsDoc(cb, output.doc?.description ?? output.doc?.title);
-        cb.line(`${jsId(output.name)}: ${outputTypeExpr(shape)};`);
-      }
+    for (const field of collectOutputFields(ctx)) {
+      emitJsDoc(cb, field.doc);
+      cb.line(`${field.id}: ${outputTypeExpr(field.shape)};`);
     }
   });
   cb.line(`}`);
@@ -82,82 +122,144 @@ export function emitOutputsInterface(
  */
 type AccessMap = Map<BindingId, string>;
 
+/**
+ * Scope state threaded through `walkAccess`, mirroring the arg-builder's
+ * `ArgContext`. A binding's access path is `paramsVar.<name>` (its name within
+ * the enclosing struct scope), not its structural position - so a named binding
+ * buried in a collapsed `seq(lit, T)` still resolves correctly. `paramsVar`
+ * only changes when entering a nested struct scope (struct sequence,
+ * struct-in-optional, complex-union variant).
+ */
+interface AccessCtx {
+  paramsVar: string;
+  /** Set when a wrapper collapsed a value onto its own path (see arg-builder). */
+  directValue?: string;
+  /** The struct type at the current scope level (prevents double-scoping). */
+  currentStructType?: BoundType;
+}
+
+function hasStructScope(type: BoundType): boolean {
+  switch (type.kind) {
+    case "optional":
+      return hasStructScope(type.inner);
+    case "list":
+      return hasStructScope(type.item);
+    case "struct":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function unwrapToStruct(type: BoundType): Extract<BoundType, { kind: "struct" }> | undefined {
+  switch (type.kind) {
+    case "optional":
+      return unwrapToStruct(type.inner);
+    case "list":
+      return unwrapToStruct(type.item);
+    case "struct":
+      return type;
+    default:
+      return undefined;
+  }
+}
+
+function resolveAccess(arg: AccessCtx, name: string): string {
+  return arg.directValue ?? tsPropAccess(arg.paramsVar, name);
+}
+
 function buildAccessMap(ctx: CodegenContext): AccessMap {
   const out: AccessMap = new Map();
-  walkAccess(ctx.expr, ctx, "params", out);
+  const rootBinding = ctx.resolve(ctx.expr);
+  walkAccess(ctx.expr, ctx, { paramsVar: "params", currentStructType: rootBinding?.type }, out);
   return out;
 }
 
-function walkAccess(node: Expr, ctx: CodegenContext, base: string, out: AccessMap): void {
+function walkAccess(node: Expr, ctx: CodegenContext, arg: AccessCtx, out: AccessMap): void {
   const binding = ctx.resolve(node);
 
   switch (node.kind) {
     case "literal":
+      return;
     case "int":
     case "float":
     case "str":
     case "path": {
-      if (binding) out.set(binding.id, base);
+      if (binding) out.set(binding.id, resolveAccess(arg, binding.name));
       return;
     }
     case "sequence": {
-      // Sequence may be a struct binding (scope) or a transparent collapse.
-      // For a struct binding, children are accessed via `base.<fieldName>`.
-      // Without a struct binding (collapsed seq), children inherit `base`.
-      if (binding && binding.type.kind === "struct") {
-        out.set(binding.id, base);
-        for (const child of node.attrs.nodes) {
-          const childBinding = ctx.resolve(child);
-          if (childBinding) {
-            walkAccess(child, ctx, tsPropAccess(base, childBinding.name), out);
-          } else {
-            walkAccess(child, ctx, base, out);
-          }
-        }
-      } else {
-        if (binding) out.set(binding.id, base);
-        for (const child of node.attrs.nodes) walkAccess(child, ctx, base, out);
+      let childArg = arg;
+      if (binding && hasStructScope(binding.type) && binding.type !== arg.currentStructType) {
+        const access = tsPropAccess(arg.paramsVar, binding.name);
+        out.set(binding.id, access);
+        childArg = {
+          paramsVar: access,
+          currentStructType: unwrapToStruct(binding.type) ?? arg.currentStructType,
+        };
+      } else if (binding) {
+        out.set(binding.id, arg.directValue ?? arg.paramsVar);
       }
+      for (const child of node.attrs.nodes) walkAccess(child, ctx, childArg, out);
       return;
     }
     case "optional": {
-      // The optional binding's own value lives at `base.<name>` when nested in
-      // a struct, or at `base` when collapsed. The arg-builder threads
-      // paramsVar through; here we mirror that by appending the binding name
-      // only when the optional has a distinct binding.
-      const access = binding ? base : base;
-      if (binding) {
-        out.set(binding.id, access);
-        // Children unwrap "through" the optional - same access path.
-        walkAccess(node.attrs.node, ctx, access, out);
-      } else {
-        walkAccess(node.attrs.node, ctx, base, out);
+      if (!binding) {
+        walkAccess(node.attrs.node, ctx, arg, out);
+        return;
       }
+      const access = tsPropAccess(arg.paramsVar, binding.name);
+      out.set(binding.id, access);
+      let childArg: AccessCtx;
+      if (hasStructScope(binding.type)) {
+        childArg = {
+          paramsVar: access,
+          currentStructType: unwrapToStruct(binding.type) ?? arg.currentStructType,
+        };
+      } else if (binding.type.kind === "optional" || binding.type.kind === "bool") {
+        childArg = { ...arg, directValue: access };
+      } else {
+        childArg = arg;
+      }
+      walkAccess(node.attrs.node, ctx, childArg, out);
       return;
     }
     case "repeat": {
-      // Repeat creates a list binding. The list itself lives at `base`. Inner
-      // bindings have no stable access (they're iteration variables), so we
-      // skip them here.
-      if (binding) out.set(binding.id, base);
+      // List/count binding lives at its own access path. Inner bindings are
+      // iteration-scoped (the `iter` gate atom binds a loop variable at emit
+      // time), so they have no stable path here.
+      if (binding) out.set(binding.id, resolveAccess(arg, binding.name));
       return;
     }
     case "alternative": {
-      // Union binding lives at `base`. For each variant arm, children's
-      // access depends on whether the variant is a complex struct. We
-      // record paths only for the union binding itself here; per-variant
-      // navigation happens at emit time via the `variant` gate atom.
-      if (binding) out.set(binding.id, base);
-      for (const alt of node.attrs.alts) {
-        const altBinding = ctx.resolve(alt);
-        if (altBinding && altBinding.type.kind === "struct") {
-          // Inside a variant arm, fields are accessed via the union's path
-          // (the discriminant check narrows the type).
-          walkAccess(alt, ctx, base, out);
-        } else {
-          walkAccess(alt, ctx, base, out);
-        }
+      if (!binding) {
+        for (const alt of node.attrs.alts) walkAccess(alt, ctx, arg, out);
+        return;
       }
+      const access = resolveAccess(arg, binding.name);
+      out.set(binding.id, access);
+      const isComplexUnion =
+        binding.type.kind === "union" &&
+        !binding.type.variants.every((v) => v.type.kind === "literal");
+      node.attrs.alts.forEach((alt, i) => {
+        if (isComplexUnion && binding.type.kind === "union") {
+          // A complex-union variant's fields are accessed via the union's path
+          // (the discriminant check narrows it), so scope into `access`.
+          const variantType = binding.type.variants[i]?.type;
+          walkAccess(
+            alt,
+            ctx,
+            {
+              paramsVar: access,
+              currentStructType:
+                variantType?.kind === "struct" ? variantType : arg.currentStructType,
+            },
+            out,
+          );
+        } else {
+          walkAccess(alt, ctx, arg, out);
+        }
+      });
       return;
     }
   }
@@ -339,17 +441,12 @@ export function emitBuildOutputs(
     };
 
     // Initialize the outputs object with defaults so wrapper code can assign or
-    // push into it without conditional construction.
+    // push into it without conditional construction. Deduped by field id so
+    // same-named outputs (e.g. union arms) yield one initializer entry.
     cb.line(`const outputs: ${outputsType} = {`);
     cb.indent(() => {
-      for (const scope of ctx.outputScopes) {
-        const scopeBinding = ctx.bindings.get(scope.scope);
-        const scopeGate = scopeBinding?.gate ?? [];
-        for (const output of scope.outputs) {
-          const gate = outputGate(scopeGate, output, ctx.bindings);
-          const shape = outputShape(gate);
-          cb.line(`${jsId(output.name)}: ${initialValue(shape)},`);
-        }
+      for (const field of collectOutputFields(ctx)) {
+        cb.line(`${field.id}: ${initialValue(field.shape)},`);
       }
     });
     cb.line(`};`);
