@@ -17,6 +17,7 @@ import {
   tsSigOptions,
 } from "./emit.js";
 import { collectFieldInfo } from "./types.js";
+import { emitValidate } from "./validate-emit.js";
 import {
   emitBuildOutputs,
   emitOutputsInterface,
@@ -50,6 +51,7 @@ export interface PublicNames {
   outputsFn: string;
   paramsFn: string;
   execute: string;
+  validate: string;
   wrapper: string;
 }
 
@@ -64,6 +66,7 @@ export function computePublicNames(appId: string | undefined): PublicNames {
       outputsFn: "outputs",
       paramsFn: "buildParams",
       execute: "execute",
+      validate: "validate",
       wrapper: "run",
     };
   }
@@ -78,6 +81,7 @@ export function computePublicNames(appId: string | undefined): PublicNames {
     outputsFn: camelCase(id) + "_outputs",
     paramsFn: camelCase(id) + "Params",
     execute: camelCase(id) + "Execute",
+    validate: camelCase(id) + "Validate",
     wrapper: camelCase(id),
   };
 }
@@ -111,6 +115,7 @@ export function generateTypeScript(ctx: CodegenContext): string {
     outputsFn: reg(publicNames.outputsFn),
     paramsFn: rootIsStruct ? reg(publicNames.paramsFn) : "",
     execute: rootIsStruct ? reg(publicNames.execute) : "",
+    validate: reg(publicNames.validate),
     wrapper: reg(publicNames.wrapper),
   };
 
@@ -178,6 +183,20 @@ export function generateTypeScript(ctx: CodegenContext): string {
     cb.blank();
   }
 
+  // Validation: walks the root binding and throws StyxValidationError on bad
+  // input. Called first thing in the dict-style execute (below).
+  emitValidate(
+    ctx,
+    rootType,
+    ctx.expr,
+    paramsType,
+    names.validate,
+    resolveTypeName(namedTypes),
+    scope,
+    cb,
+  );
+  cb.blank();
+
   emitBuildCargs(ctx, rootType, paramsType, names.cargs, cb);
   cb.blank();
 
@@ -197,6 +216,7 @@ export function generateTypeScript(ctx: CodegenContext): string {
     names.cargs,
     emitOutputs ? names.outputsFn : undefined,
     emitOutputs ? names.outputs : undefined,
+    names.validate,
     cb,
   );
   cb.blank();

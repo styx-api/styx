@@ -75,6 +75,7 @@ function runGenerated(
     getGlobalRunner: () => ({
       startExecution: () => mockExecution,
     }),
+    StyxValidationError: class StyxValidationError extends Error {},
   };
 
   const mod = { exports: {} as Record<string, unknown> };

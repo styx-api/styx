@@ -28,9 +28,10 @@ export function emitDocstring(cb: CodeBuilder, text?: string): void {
 
 export function emitImports(cb: CodeBuilder, emitOutputs: boolean): void {
   cb.line("import dataclasses");
+  cb.line("import pathlib");
   cb.line("import typing");
   cb.blank();
-  const fromStyxdefs = ["Execution", "InputPathType", "Metadata", "Runner"];
+  const fromStyxdefs = ["Execution", "InputPathType", "Metadata", "Runner", "StyxValidationError"];
   if (emitOutputs) fromStyxdefs.push("OutputPathType");
   cb.line(`from styxdefs import ${fromStyxdefs.join(", ")}, get_global_runner`);
 }
@@ -266,6 +267,7 @@ export function emitWrapperFunction(
   cargsFunc: string,
   outputsFunc: string | undefined,
   outputsType: string | undefined,
+  validateFunc: string | undefined,
   cb: CodeBuilder,
 ): void {
   const emitOutputs = outputsFunc !== undefined;
@@ -303,6 +305,9 @@ export function emitWrapperFunction(
     cb.line("Returns:");
     cb.line(emitOutputs ? "    Tool outputs (paths to files produced by the tool)." : "    None.");
     cb.line('"""');
+    // Validate the params dict first (the kwarg wrapper delegates here, so it
+    // gets validation transitively; the statically-typed kwargs don't need it).
+    if (validateFunc) cb.line(`${validateFunc}(params)`);
     cb.line("runner = runner if runner is not None else get_global_runner()");
     cb.line(`execution = runner.start_execution(${metaConst})`);
     cb.line("execution.params(params)");

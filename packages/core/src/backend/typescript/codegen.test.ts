@@ -24,7 +24,7 @@ describe("TypeScript generation - structure", () => {
     expect(code).toContain(
       'import type { Runner, Execution, Metadata, InputPathType } from "styxdefs"',
     );
-    expect(code).toContain('import { getGlobalRunner } from "styxdefs"');
+    expect(code).toContain('import { getGlobalRunner, StyxValidationError } from "styxdefs"');
   });
 
   it("emits metadata constant with Metadata type using tool-prefixed name", () => {
@@ -300,11 +300,13 @@ describe("TypeScript generation - cargs building", () => {
 
   it("emits for-of loop for list params with correct loop variable", () => {
     const code = generate(seq(rep(int("val"), "vals")));
-    const match = code.match(/for \(const (\w+) of params\.vals\)/);
+    // Scope to the cargs function: the validate function also loops over the list.
+    const cargs = code.slice(code.indexOf("export function cargs("));
+    const match = cargs.match(/for \(const (\w+) of params\.vals\)/);
     expect(match).toBeTruthy();
     const itemVar = match![1];
-    expect(code).toContain(`String(${itemVar})`);
-    expect(code).not.toContain("String(params.vals)");
+    expect(cargs).toContain(`String(${itemVar})`);
+    expect(cargs).not.toContain("String(params.vals)");
   });
 
   it("emits for loop for count params", () => {
@@ -637,15 +639,17 @@ describe("TypeScript generation - join", () => {
 
   it("joins repeat items into single arg with comma separator", () => {
     const code = generate(seq(repJoin(",", int("val"), "vals")));
-    expect(code).toContain(".map(");
-    expect(code).toContain('.join(",")');
-    expect(code).not.toContain("for (const");
+    const cargs = code.slice(code.indexOf("export function cargs("));
+    expect(cargs).toContain(".map(");
+    expect(cargs).toContain('.join(",")');
+    expect(cargs).not.toContain("for (const");
   });
 
   it("joins repeat items with space separator", () => {
     const code = generate(seq(repJoin(" ", str("item"), "items")));
-    expect(code).toContain('.join(" ")');
-    expect(code).not.toContain("for (const");
+    const cargs = code.slice(code.indexOf("export function cargs("));
+    expect(cargs).toContain('.join(" ")');
+    expect(cargs).not.toContain("for (const");
   });
 
   it("uses for-of loop when repeat has no join", () => {
@@ -685,11 +689,12 @@ describe("TypeScript generation - join", () => {
 
   it("handles nested: opt > seq > rep(join) > int", () => {
     const code = generate(seq(opt(seq(lit("--dims"), repJoin("x", int("dim"), "dims")))));
-    expect(code).toContain("if (params.dims != null)");
-    expect(code).toContain('cargs.push("--dims")');
-    expect(code).toContain('.join("x")');
-    expect(code).toContain(".map(");
-    expect(code).not.toContain("for (const");
+    const cargs = code.slice(code.indexOf("export function cargs("));
+    expect(cargs).toContain("if (params.dims != null)");
+    expect(cargs).toContain('cargs.push("--dims")');
+    expect(cargs).toContain('.join("x")');
+    expect(cargs).toContain(".map(");
+    expect(cargs).not.toContain("for (const");
   });
 
   it("handles joined sequence with path (uses execution.inputFile)", () => {

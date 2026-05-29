@@ -26,7 +26,7 @@ export function emitImports(cb: CodeBuilder, emitOutputs: boolean): void {
   const inputs = ["Runner", "Execution", "Metadata", "InputPathType"];
   if (emitOutputs) inputs.push("OutputPathType");
   cb.line(`import type { ${inputs.join(", ")} } from "styxdefs";`);
-  cb.line('import { getGlobalRunner } from "styxdefs";');
+  cb.line('import { getGlobalRunner, StyxValidationError } from "styxdefs";');
 }
 
 export function emitMetadata(ctx: CodegenContext, metaConst: string, cb: CodeBuilder): void {
@@ -351,6 +351,7 @@ export function emitWrapperFunction(
   cargsFunc: string,
   outputsFunc: string | undefined,
   outputsType: string | undefined,
+  validateFunc: string | undefined,
   cb: CodeBuilder,
 ): void {
   const appDoc = ctx.app?.doc;
@@ -388,6 +389,9 @@ export function emitWrapperFunction(
     `export function ${funcName}(params: ${paramsType}, runner: Runner | null = null): ${returnType} {`,
   );
   cb.indent(() => {
+    // Validate the params object first (the kwarg wrapper delegates here, so it
+    // gets validation transitively; the statically-typed kwargs don't need it).
+    if (validateFunc) cb.line(`${validateFunc}(params);`);
     cb.line("runner = runner ?? getGlobalRunner();");
     cb.line(`const execution = runner.startExecution(${metaConst});`);
     cb.line("execution.params(params);");

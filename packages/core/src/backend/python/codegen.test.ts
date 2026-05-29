@@ -180,10 +180,12 @@ describe("Python generation - cargs building", () => {
 
   it("emits for-in loop for list params with correct loop variable", () => {
     const code = generate(seq(rep(int("val"), "vals")));
-    const match = code.match(/for (\w+) in params\["vals"\]:/);
+    // Scope to the cargs function: the validate function also loops over the list.
+    const cargs = code.slice(code.indexOf("def cargs("));
+    const match = cargs.match(/for (\w+) in params\["vals"\]:/);
     expect(match).toBeTruthy();
     const itemVar = match![1];
-    expect(code).toContain(`str(${itemVar})`);
+    expect(cargs).toContain(`str(${itemVar})`);
   });
 
   it("emits range() loop for count params", () => {

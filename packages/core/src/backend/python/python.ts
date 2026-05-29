@@ -17,6 +17,7 @@ import {
   pySigOptions,
 } from "./emit.js";
 import { collectFieldInfo } from "./types.js";
+import { emitValidate } from "./validate-emit.js";
 import {
   emitBuildOutputs,
   emitOutputsClass,
@@ -56,6 +57,7 @@ export interface PublicNames {
   outputsFn: string;
   paramsFn: string;
   execute: string;
+  validate: string;
   wrapper: string;
 }
 
@@ -70,6 +72,7 @@ export function computePublicNames(appId: string | undefined): PublicNames {
       outputsFn: "outputs",
       paramsFn: "build_params",
       execute: "execute",
+      validate: "validate",
       wrapper: "run",
     };
   }
@@ -85,6 +88,7 @@ export function computePublicNames(appId: string | undefined): PublicNames {
     outputsFn: snakeCase(id) + "_outputs",
     paramsFn: snakeCase(id) + "_params",
     execute: snakeCase(id) + "_execute",
+    validate: snakeCase(id) + "_validate",
     wrapper: snakeCase(id),
   };
 }
@@ -118,6 +122,7 @@ export function generatePython(ctx: CodegenContext): string {
     outputsFn: reg(publicNames.outputsFn),
     paramsFn: rootIsStruct ? reg(publicNames.paramsFn) : "",
     execute: rootIsStruct ? reg(publicNames.execute) : "",
+    validate: reg(publicNames.validate),
     wrapper: reg(publicNames.wrapper),
   };
 
@@ -187,6 +192,20 @@ export function generatePython(ctx: CodegenContext): string {
     cb.blank();
   }
 
+  // Validation: walks the root binding and raises StyxValidationError on bad
+  // input. Called first thing in the dict-style execute (below).
+  emitValidate(
+    ctx,
+    rootType,
+    ctx.expr,
+    paramsType,
+    names.validate,
+    resolveTypeName(namedTypes),
+    scope,
+    cb,
+  );
+  cb.blank();
+
   emitBuildCargs(ctx, rootType, paramsType, names.cargs, cb);
   cb.blank();
 
@@ -206,6 +225,7 @@ export function generatePython(ctx: CodegenContext): string {
     names.cargs,
     emitOutputs ? names.outputsFn : undefined,
     emitOutputs ? names.outputs : undefined,
+    names.validate,
     cb,
   );
   cb.blank();
@@ -233,6 +253,7 @@ export function generatePython(ctx: CodegenContext): string {
     names.cargs,
     ...(emitOutputs ? [names.outputsFn] : []),
     ...(rootIsStruct ? [names.paramsFn, names.execute] : []),
+    names.validate,
     names.wrapper,
   ];
   cb.line("__all__ = [");

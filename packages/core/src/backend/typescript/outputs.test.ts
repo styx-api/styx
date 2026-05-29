@@ -201,7 +201,7 @@ describe("typescript outputs - execution", () => {
 
     const { outputs: inspectOuts } = executeWithOutputs(
       root,
-      { subcmd: "inspect" },
+      { subcmd: { "@type": "inspect", inspect: true } },
       { app: { id: "tool" } },
     );
     expect(inspectOuts).toEqual({ converted: null });
