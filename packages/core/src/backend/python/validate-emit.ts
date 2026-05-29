@@ -167,43 +167,42 @@ function emitUnion(
   wireKey: string,
   valueExpr: string,
 ): void {
-  // All-literal variants are an enum/choice (no `@type` discriminator), not a
-  // discriminated struct union: validate base type + membership.
-  if (unionType.variants.every((v) => v.type.kind === "literal")) {
-    const values = unionType.variants.map(
-      (v) => (v.type as Extract<BoundType, { kind: "literal" }>).value,
-    );
+  const litVariants = unionType.variants.filter((v) => v.type.kind === "literal");
+  const hasStruct = unionType.variants.some((v) => v.type.kind === "struct");
+
+  // Pure enum/choice: no struct variants, just literal values (no `@type`).
+  if (!hasStruct) {
+    const values = litVariants.map((v) => (v.type as Extract<BoundType, { kind: "literal" }>).value);
     const allStr = values.every((x) => typeof x === "string");
     checkType(e, valueExpr, allStr ? "str" : "(float, int)", wireKey, expectedType(e, unionType));
-    const rendered = values.map((x) => (typeof x === "string" ? pyStr(x) : pyNum(x))).join(", ");
-    e.cb.line(`if ${valueExpr} not in [${rendered}]:`);
-    e.cb.indent(() => raise(e, str("Parameter `" + wireKey + "` must be one of [" + rendered + "]")));
+    emitLiteralMembership(e, values, wireKey, valueExpr);
     return;
   }
 
-  e.cb.line(`if not isinstance(${valueExpr}, dict):`);
-  e.cb.indent(() => raise(e, wrongObjectTypeMsg(valueExpr)));
-  e.cb.line(`if "@type" not in ${valueExpr}:`);
-  e.cb.indent(() => raise(e, str("Params object is missing `@type`")));
-
-  const names = unionType.variants
-    .map((v) => v.name)
-    .filter((n): n is string => n !== undefined)
-    .map((n) => pyStr(n))
-    .join(", ");
-  e.cb.line(`if ${valueExpr}["@type"] not in [${names}]:`);
-  e.cb.indent(() =>
-    raise(e, str("Parameter `" + wireKey + "`s `@type` must be one of [" + names + "]")),
-  );
-
   const altNode = findAlternativeNode(node);
-  unionType.variants.forEach((variant, i) => {
-    const keyword = i === 0 ? "if" : "elif";
-    e.cb.line(`${keyword} ${valueExpr}["@type"] == ${pyStr(variant.name ?? "")}:`);
-    e.cb.indent(() => {
-      const variantType = variant.type;
-      if (variantType.kind === "struct") {
-        const fields = structFields(e.ctx, variantType, altNode?.attrs.alts[i]).filter(
+  const emitStructArm = (): void => {
+    // `valueExpr` is known to be a dict here.
+    e.cb.line(`if "@type" not in ${valueExpr}:`);
+    e.cb.indent(() => raise(e, str("Params object is missing `@type`")));
+    const names = unionType.variants
+      .filter((v) => v.type.kind === "struct")
+      .map((v) => v.name)
+      .filter((n): n is string => n !== undefined)
+      .map((n) => pyStr(n))
+      .join(", ");
+    e.cb.line(`if ${valueExpr}["@type"] not in [${names}]:`);
+    e.cb.indent(() =>
+      raise(e, str("Parameter `" + wireKey + "`s `@type` must be one of [" + names + "]")),
+    );
+    let first = true;
+    unionType.variants.forEach((variant, i) => {
+      const vt = variant.type;
+      if (vt.kind !== "struct") return;
+      const keyword = first ? "if" : "elif";
+      first = false;
+      e.cb.line(`${keyword} ${valueExpr}["@type"] == ${pyStr(variant.name ?? "")}:`);
+      e.cb.indent(() => {
+        const fields = structFields(e.ctx, vt, altNode?.attrs.alts[i]).filter(
           (f) => f.type.kind !== "literal",
         );
         if (fields.length === 0) {
@@ -211,11 +210,39 @@ function emitUnion(
         } else {
           for (const f of fields) emitField(e, f.name, f.type, f.node, f.hasDefault, valueExpr);
         }
-      } else {
-        e.cb.line("pass");
-      }
+      });
     });
+  };
+
+  // Pure discriminated union: every variant is a struct with an `@type`.
+  if (litVariants.length === 0) {
+    e.cb.line(`if not isinstance(${valueExpr}, dict):`);
+    e.cb.indent(() => raise(e, wrongObjectTypeMsg(valueExpr)));
+    emitStructArm();
+    return;
+  }
+
+  // Mixed union: a value is either a struct (dict with `@type`) or a bare
+  // literal. Branch on the runtime shape.
+  e.cb.line(`if isinstance(${valueExpr}, dict):`);
+  e.cb.indent(emitStructArm);
+  e.cb.line("else:");
+  e.cb.indent(() => {
+    const values = litVariants.map((v) => (v.type as Extract<BoundType, { kind: "literal" }>).value);
+    emitLiteralMembership(e, values, wireKey, valueExpr);
   });
+}
+
+/** Emit a `not in [...]` membership check over literal values. */
+function emitLiteralMembership(
+  e: Emit,
+  values: (string | number)[],
+  wireKey: string,
+  valueExpr: string,
+): void {
+  const rendered = values.map((x) => (typeof x === "string" ? pyStr(x) : pyNum(x))).join(", ");
+  e.cb.line(`if ${valueExpr} not in [${rendered}]:`);
+  e.cb.indent(() => raise(e, str("Parameter `" + wireKey + "` must be one of [" + rendered + "]")));
 }
 
 function checkType(e: Emit, valueExpr: string, pyType: string, wireKey: string, expected: string): void {

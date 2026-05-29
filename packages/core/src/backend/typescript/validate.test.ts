@@ -134,4 +134,18 @@ describe("TypeScript validation - unions", () => {
     expect(code).toContain('must be one of [\\"fast\\", \\"slow\\"]');
     expect(code).not.toContain('params.mode["@type"]');
   });
+
+  it("validates a mixed union (struct + bare-literal variants) by runtime shape", () => {
+    const code = generate(
+      seq(lit("tool"), namedAlt("mode", lit("fast"), seq(lit("--full"), str("level")))),
+    );
+    // object value -> dispatch struct variants by @type
+    expect(code).toContain('if (typeof params.mode === "object" && params.mode !== null) {');
+    expect(code).toContain('!["variant_1"].includes(params.mode["@type"])');
+    expect(code).toContain('switch (params.mode["@type"]) {');
+    expect(code).toContain('case "variant_1": {');
+    // bare value -> literal membership
+    expect(code).toContain("} else {");
+    expect(code).toContain('!["fast"].includes(params.mode)');
+  });
 });

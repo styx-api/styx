@@ -153,4 +153,18 @@ describe("Python validation - unions", () => {
     // enums are not treated as @type-discriminated dicts
     expect(code).not.toContain('params["mode"]["@type"]');
   });
+
+  it("validates a mixed union (struct + bare-literal variants) by runtime shape", () => {
+    const code = generate(
+      seq(lit("tool"), namedAlt("mode", lit("fast"), seq(lit("--full"), str("level")))),
+    );
+    // dict value -> dispatch struct variants by @type
+    expect(code).toContain('if isinstance(params["mode"], dict):');
+    expect(code).toContain('params["mode"]["@type"] not in ["variant_1"]');
+    expect(code).toContain('if params["mode"]["@type"] == "variant_1":');
+    expect(code).toContain('if not isinstance(params["mode"]["level"], str):');
+    // bare value -> literal membership
+    expect(code).toContain("else:");
+    expect(code).toContain('if params["mode"] not in ["fast"]:');
+  });
 });

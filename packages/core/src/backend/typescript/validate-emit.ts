@@ -155,61 +155,88 @@ function emitUnion(
   wireKey: string,
   access: string,
 ): void {
-  // All-literal variants are an enum/choice (no `@type` discriminator).
-  if (unionType.variants.every((v) => v.type.kind === "literal")) {
-    const values = unionType.variants.map(
-      (v) => (v.type as Extract<BoundType, { kind: "literal" }>).value,
-    );
+  const litVariants = unionType.variants.filter((v) => v.type.kind === "literal");
+  const hasStruct = unionType.variants.some((v) => v.type.kind === "struct");
+
+  // Pure enum/choice: no struct variants, just literal values (no `@type`).
+  if (!hasStruct) {
+    const values = litVariants.map((v) => (v.type as Extract<BoundType, { kind: "literal" }>).value);
     const allStr = values.every((x) => typeof x === "string");
     checkType(e, `typeof ${access} !== ${allStr ? '"string"' : '"number"'}`, wireKey, expectedType(e, unionType));
-    const rendered = values.map(renderLiteral);
-    // `.includes` (not a `!==`-chain): the value is typed as a closed literal
-    // union, and TS flags an exhaustive `!==`-chain as TS2367 (always false).
-    block(e, `![${rendered.join(", ")}].includes(${access})`, () =>
-      raise(e, "Parameter `" + wireKey + "` must be one of [" + rendered.join(", ") + "]"),
-    );
+    emitLiteralMembership(e, values, wireKey, access);
     return;
   }
 
-  block(e, `typeof ${access} !== "object" || ${access} === null`, () =>
-    raise(e, "Params object has the wrong type"),
-  );
-  block(e, `!("@type" in ${access})`, () => raise(e, "Params object is missing `@type`"));
-
-  const names = unionType.variants
-    .map((v) => v.name)
-    .filter((n): n is string => n !== undefined);
-  const rendered = names.map((n) => JSON.stringify(n));
-  // `.includes` rather than a `!==`-chain: the discriminant is a closed literal
-  // union and an exhaustive chain is rejected by TS as TS2367. `.includes` also
-  // leaves the union un-narrowed, so the per-variant dispatch below narrows it.
-  block(e, `![${rendered.join(", ")}].includes(${access}["@type"])`, () =>
-    raise(e, "Parameter `" + wireKey + "`s `@type` must be one of [" + rendered.join(", ") + "]"),
-  );
-
-  // Dispatch with `switch` (mirroring the cargs builder): a `switch` narrows
-  // each `case` correctly, whereas an `if`/`else if` chain on `===` accumulates
-  // narrowing and TS rejects later arms. The `.includes` membership check above
-  // already throws on an unknown `@type`, so no `default` arm is needed.
   const altNode = findAlternativeNode(node);
-  e.cb.line(`switch (${access}["@type"]) {`);
-  e.cb.indent(() => {
-    unionType.variants.forEach((variant, i) => {
-      e.cb.line(`case ${JSON.stringify(variant.name ?? "")}: {`);
-      e.cb.indent(() => {
-        const variantType = variant.type;
-        if (variantType.kind === "struct") {
-          const fields = structFields(e.ctx, variantType, altNode?.attrs.alts[i]).filter(
+  const emitStructArm = (): void => {
+    // `access` is known to be an object here.
+    block(e, `!("@type" in ${access})`, () => raise(e, "Params object is missing `@type`"));
+    const names = unionType.variants
+      .filter((v) => v.type.kind === "struct")
+      .map((v) => v.name)
+      .filter((n): n is string => n !== undefined)
+      .map((n) => JSON.stringify(n));
+    // `.includes` rather than a `!==`-chain: the discriminant is a closed literal
+    // union and an exhaustive chain is rejected by TS as TS2367. It also leaves
+    // the union un-narrowed, so the `switch` dispatch below narrows it.
+    block(e, `![${names.join(", ")}].includes(${access}["@type"])`, () =>
+      raise(e, "Parameter `" + wireKey + "`s `@type` must be one of [" + names.join(", ") + "]"),
+    );
+    // `switch` (mirroring the cargs builder): each `case` narrows correctly,
+    // whereas an `if`/`else if` chain on `===` accumulates narrowing and TS
+    // rejects later arms.
+    e.cb.line(`switch (${access}["@type"]) {`);
+    e.cb.indent(() => {
+      unionType.variants.forEach((variant, i) => {
+        const vt = variant.type;
+        if (vt.kind !== "struct") return;
+        e.cb.line(`case ${JSON.stringify(variant.name ?? "")}: {`);
+        e.cb.indent(() => {
+          const fields = structFields(e.ctx, vt, altNode?.attrs.alts[i]).filter(
             (f) => f.type.kind !== "literal",
           );
           for (const f of fields) emitField(e, f.name, f.type, f.node, f.hasDefault, access);
-        }
-        e.cb.line("break;");
+          e.cb.line("break;");
+        });
+        e.cb.line("}");
       });
-      e.cb.line("}");
     });
+    e.cb.line("}");
+  };
+
+  // Pure discriminated union: every variant is a struct with an `@type`.
+  if (litVariants.length === 0) {
+    block(e, `typeof ${access} !== "object" || ${access} === null`, () =>
+      raise(e, "Params object has the wrong type"),
+    );
+    emitStructArm();
+    return;
+  }
+
+  // Mixed union: a value is either a struct (dict with `@type`) or a bare
+  // literal. Branch on the runtime shape - `typeof === "object"` narrows to the
+  // struct members, the `else` to the literal members.
+  e.cb.line(`if (typeof ${access} === "object" && ${access} !== null) {`);
+  e.cb.indent(emitStructArm);
+  e.cb.line(`} else {`);
+  e.cb.indent(() => {
+    const values = litVariants.map((v) => (v.type as Extract<BoundType, { kind: "literal" }>).value);
+    emitLiteralMembership(e, values, wireKey, access);
   });
   e.cb.line("}");
+}
+
+/** Emit a `.includes`-based membership check over literal values. */
+function emitLiteralMembership(
+  e: Emit,
+  values: (string | number)[],
+  wireKey: string,
+  access: string,
+): void {
+  const rendered = values.map(renderLiteral);
+  block(e, `![${rendered.join(", ")}].includes(${access})`, () =>
+    raise(e, "Parameter `" + wireKey + "` must be one of [" + rendered.join(", ") + "]"),
+  );
 }
 
 function checkType(e: Emit, condition: string, wireKey: string, expected: string): void {
