@@ -23,17 +23,18 @@ flowchart LR
     end
 
     subgraph Backend
-        B1[Python]
-        B2[R]
-        B3[TypeScript]
-        B4[JSON Schema]
+        B1[TypeScript]
+        B2[Python]
+        B3[JSON Schema]
+        B4[Boutiques]
+        B5[R]
     end
 
     F1 & F2 & F3 --> IR1
     IR1 --> IR2 --> S1 --> S2
 
-    S2 --> B1 & B2 & B3 & B4
-    IR2 -.-> B1 & B2 & B3
+    S2 --> B1 & B2 & B3 & B4 & B5
+    IR2 -.-> B1 & B2 & B3 & B4
 ```
 
 ## Core Concepts
@@ -71,18 +72,19 @@ The IR is the skeleton of the command line; the bindings define the typed interf
 
 ## Styx 1 vs Styx 2
 
-|                     | Styx 1 (Python)                                                                          | Styx 2 (TypeScript)                                                                        |
-| ------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| **IR**              | Dataclass hierarchy (`Param[T]` with body types)                                         | Algebraic expr tree with `kind` discriminant                                               |
-| **Optimization**    | Minimal (string merging)                                                                 | Pass-based pipeline (flatten, simplify, canonicalize)                                      |
-| **Type resolution** | Direct mapping in frontend; each backend re-derives types via language provider protocol | Solver produces a universal `BoundType` tree; backends just translate it                   |
-| **Backends**        | Python mature, TS/R partial; each implements a complex `LanguageProvider` protocol       | TypeScript + JSON Schema complete; Python/R stubs; simpler since solver does heavy lifting |
-| **Output files**    | First-class: path templates with param refs, suffix stripping, fallbacks                 | Not yet modeled to the same degree                                                         |
+|                     | Styx 1 (Python)                                                                          | Styx 2 (TypeScript)                                                                                                            |
+| ------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| **IR**              | Dataclass hierarchy (`Param[T]` with body types)                                         | Algebraic expr tree with `kind` discriminant                                                                                   |
+| **Optimization**    | Minimal (string merging)                                                                 | Pass-based pipeline (flatten, simplify, canonicalize)                                                                          |
+| **Type resolution** | Direct mapping in frontend; each backend re-derives types via language provider protocol | Solver produces a universal `BoundType` tree; backends just translate it                                                       |
+| **Backends**        | Python mature, TS/R partial; each implements a complex `LanguageProvider` protocol       | TypeScript, JSON Schema, Python, Boutiques complete; R deferred; backends just translate solved bindings                       |
+| **Output files**    | First-class: path templates with param refs, suffix stripping, fallbacks                 | First-class via gate-on-binding: scope-by-IR-node bucketing, `ResolvedOutput` with path templates, suffix stripping, fallbacks |
 
-Key Styx 1 features to eventually match:
+Remaining Styx 1 parity gaps (tracked in detail under `niwrap-parity-plans.md`):
 
-- **Output path templates** - `"output-[X].nii.gz"` parsed into literal + `OutputParamReference` tokens with suffix stripping and fallbacks
-- **Conditional groups** - command-line args only emitted when at least one param in the group is set
+- **Stream outputs** (`stdout-output` / `stderr-output`) - Boutiques parse path exists, downstream IR shape not yet wired
+- **Mutable inputs** - tools that overwrite their input file (Boutiques `x-styx-mutable`) - solver and runner integration pending
+- **Boutiques constraint groups** - mutual exclusion, value-disables, value-requires - serialized round-trip deferred
 
 ## Roadmap
 
