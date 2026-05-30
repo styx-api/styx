@@ -90,7 +90,7 @@ The solver attaches everything a backend needs to a binding during the same walk
 | **Backends**        | Python mature, TS/R partial; each implements a complex `LanguageProvider` protocol       | TypeScript, JSON Schema, Python, Boutiques complete; R deferred; backends just translate solved bindings                       |
 | **Output files**    | First-class: path templates with param refs, suffix stripping, fallbacks                 | First-class via gate-on-binding: scope-by-IR-node bucketing, `ResolvedOutput` with path templates, suffix stripping, fallbacks |
 
-Remaining Styx 1 parity gaps (tracked in detail under `niwrap-parity-plans.md`):
+Styx 2 is an evolved **successor** to Styx 1, not a drop-in replacement: the goal is to cover all of Styx 1's functionality while improving on its design, so breaking changes from Styx 1's output shape are expected and acceptable. Styx 1 functionality not yet implemented in Styx 2:
 
 - **Stream outputs** (`stdout-output` / `stderr-output`) - Boutiques parse path exists, downstream IR shape not yet wired
 - **Mutable inputs** - tools that overwrite their input file (Boutiques `x-styx-mutable`) - solver and runner integration pending
