@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { createHighlighter, type Highlighter, type BundledLanguage } from "shiki";
+  import {
+    createHighlighter,
+    type Highlighter,
+    type BundledLanguage,
+    type LanguageRegistration,
+  } from "shiki";
   import { onMount } from "svelte";
   import { irGrammar, bindingsGrammar } from "./grammars.js";
 
@@ -27,8 +32,9 @@
         langs: ["json", "typescript", "python"],
       });
 
-      await highlighter.loadLanguage(irGrammar as any);
-      await highlighter.loadLanguage(bindingsGrammar as any);
+      // Hand-authored TextMate grammars; cast to shiki's registration shape.
+      await highlighter.loadLanguage(irGrammar as unknown as LanguageRegistration);
+      await highlighter.loadLanguage(bindingsGrammar as unknown as LanguageRegistration);
 
       grammarsLoaded = true;
     } catch (e) {
@@ -40,7 +46,7 @@
     if (highlighter && grammarsLoaded && code) {
       try {
         html = highlighter.codeToHtml(code, {
-          lang: lang as any,
+          lang: lang as string,
           theme: "github-dark",
         });
       } catch (_e) {
@@ -92,6 +98,7 @@
 
   {#if html}
     <div class="code-block">
+      <!-- eslint-disable-next-line svelte/no-at-html-tags -- trusted: shiki highlighter output or escapeHtml fallback -->
       {@html html}
     </div>
   {:else}

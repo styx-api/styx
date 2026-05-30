@@ -23,7 +23,7 @@
     <span class="label">{type === "errors" ? "Errors" : "Warnings"}</span>
     <span class="count">{messages.length}</span>
   </header>
-  {#each messages as msg}
+  {#each messages as msg, i (i)}
     <div class="message">
       <span class="msg-text">{msg.message}</span>
       {#if msg.location}

@@ -99,9 +99,9 @@
           disabled={loading !== null}
         >
           <option value="">{loading ? "Loading..." : "Load example"}</option>
-          {#each exampleGroups as group}
+          {#each exampleGroups as group (group.label)}
             <optgroup label={group.label}>
-              {#each group.examples as ex}
+              {#each group.examples as ex (ex.url)}
                 <option value={ex.url}>{ex.name}</option>
               {/each}
             </optgroup>

@@ -19,7 +19,7 @@
 </script>
 
 <div class="passes">
-  {#each passLabels as { key, label }}
+  {#each passLabels as { key, label } (key)}
     <label class:active={passes[key]}>
       <input type="checkbox" bind:checked={passes[key]} />
       <span>{label}</span>

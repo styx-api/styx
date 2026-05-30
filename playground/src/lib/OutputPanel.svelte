@@ -70,7 +70,7 @@
   {/if}
 
   <div class="tab-bar">
-    {#each tabs as tab}
+    {#each tabs as tab (tab.id)}
       <button class="tab" class:active={activeTab === tab.id} onclick={() => (activeTab = tab.id)}>
         {tab.label}
       </button>
@@ -82,7 +82,7 @@
 
   {#if fileNames.length > 1}
     <div class="sub-tab-bar">
-      {#each fileNames as name}
+      {#each fileNames as name (name)}
         <button
           class="sub-tab"
           class:active={activeFileName === name}

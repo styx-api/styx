@@ -3,6 +3,7 @@ import ts from "typescript-eslint";
 import svelte from "eslint-plugin-svelte";
 import svelteParser from "svelte-eslint-parser";
 import prettier from "eslint-config-prettier";
+import globals from "globals";
 
 export default [
   js.configs.recommended,
@@ -13,8 +14,15 @@ export default [
     rules: {
       "@typescript-eslint/no-unused-vars": [
         "error",
-        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" },
       ],
+    },
+  },
+  {
+    // The playground runs in the browser (Vite + Svelte 5).
+    files: ["playground/**/*.{ts,svelte}"],
+    languageOptions: {
+      globals: { ...globals.browser },
     },
   },
   {

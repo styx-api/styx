@@ -485,7 +485,7 @@ describe("Python generation - params factory & kwarg wrapper", () => {
     const code = generate(seq(lit("t"), str("name", longDoc)), { app: { id: "t" } });
     expect(code).toContain("\\");
     // Continuation indented 8 spaces beneath `    name:`.
-    expect(code).toMatch(/\n        \S+/);
+    expect(code).toMatch(/\n {8}\S+/);
   });
 
   it("injects `@type: NotRequired[Literal[<pkg>/<id>]]` on the root TypedDict + dict literal", () => {
