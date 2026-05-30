@@ -1,6 +1,7 @@
 import type { Binding, BindingId, BoundType, GateAtom, SolveResult } from "../bindings/index.js";
 import { createRegistry } from "../bindings/index.js";
 import type { Expr, Literal } from "../ir/index.js";
+import { assignAccessPaths } from "./assign-access.js";
 
 export interface SolveOptions {
   namingStrategy?: NamingStrategy;
@@ -112,7 +113,10 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
     type: BoundType,
     gate: GateAtom[],
   ): Binding {
-    const binding: Binding = { id, node, name, type, gate };
+    // `access` is filled by `assignAccessPaths` once all types have settled
+    // (sequence collapse-vs-struct and union arm retyping are only known after
+    // the full recursion). Start empty so the field is always present.
+    const binding: Binding = { id, node, name, type, gate, access: [] };
     registry.set(id, binding);
     nodeToBinding.set(node, binding);
     return binding;
@@ -261,5 +265,12 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
   }
 
   const resolve = (node: Expr) => nodeToBinding.get(node);
+
+  // Now that every binding's type has settled (sequence collapse, union arm
+  // retyping, root fixup), walk the IR once more to attach each binding's
+  // access path relative to top-level `params`. Backends render these paths
+  // instead of re-deriving them.
+  assignAccessPaths(expr, resolve);
+
   return { bindings: registry, resolve };
 }

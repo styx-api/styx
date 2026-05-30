@@ -1,6 +1,7 @@
 import type {
   Binding,
   BindingId,
+  BoundType,
   OutputDiagnostic,
   OutputScope,
   OutputValidationResult,
@@ -26,13 +27,40 @@ interface NameIndex {
   byName: Map<string, Binding>;
 }
 
+/**
+ * Whether a binding resolves to a value that can be interpolated into an output
+ * path token. Scalars/bool/count/literals (and optional/list wrappers of them)
+ * carry a concrete value; structs and complex unions do not.
+ *
+ * This drives the name-tie preference below: an unnamed multi-field struct
+ * inherits its first field's name (`findDeepName`), so a struct and its scalar
+ * field can share a name. An output ref always means the value, so the
+ * interpolable binding must win regardless of which sits shallower.
+ */
+function isInterpolable(type: BoundType): boolean {
+  switch (type.kind) {
+    case "optional":
+      return isInterpolable(type.inner);
+    case "list":
+      return isInterpolable(type.item);
+    case "struct":
+      return false;
+    case "union":
+      // Pure-enum unions are interpolable (the value is a literal); a union with
+      // any struct variant is not.
+      return type.variants.every((v) => isInterpolable(v.type));
+    default:
+      return true;
+  }
+}
+
 function indexBindingsByName(root: Expr, resolve: (n: Expr) => Binding | undefined): NameIndex {
   const byNameDepth = new Map<string, { binding: Binding; depth: number }>();
   function walk(node: Expr, depth: number): void {
     const binding = resolve(node);
     if (binding && depth > 0) {
       const existing = byNameDepth.get(binding.name);
-      if (!existing || depth < existing.depth) {
+      if (!existing || preferCandidate({ binding, depth }, existing)) {
         byNameDepth.set(binding.name, { binding, depth });
       }
     }
@@ -53,6 +81,21 @@ function indexBindingsByName(root: Expr, resolve: (n: Expr) => Binding | undefin
   const byName = new Map<string, Binding>();
   for (const [name, { binding }] of byNameDepth) byName.set(name, binding);
   return { byName };
+}
+
+/**
+ * Decide whether `cand` should replace `existing` for a shared name. An
+ * interpolable binding always beats a structured one (the struct/scalar name
+ * collision); otherwise the shallowest binding wins, as before.
+ */
+function preferCandidate(
+  cand: { binding: Binding; depth: number },
+  existing: { binding: Binding; depth: number },
+): boolean {
+  const candLeaf = isInterpolable(cand.binding.type);
+  const exLeaf = isInterpolable(existing.binding.type);
+  if (candLeaf !== exLeaf) return candLeaf;
+  return cand.depth < existing.depth;
 }
 
 /**

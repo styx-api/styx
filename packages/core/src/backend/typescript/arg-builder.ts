@@ -1,8 +1,8 @@
-import type { BoundType, BoundVariant } from "../../bindings/index.js";
+import type { Binding, BindingId, BoundType, BoundVariant } from "../../bindings/index.js";
 import type { Expr } from "../../ir/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
-import { tsPropAccess } from "./emit.js";
+import { renderAccess } from "./emit.js";
 
 // -- Result types --
 
@@ -28,37 +28,6 @@ function appendLines(cb: CodeBuilder, code: string): void {
 
 // -- Type helpers --
 
-/**
- * Whether a BoundType contains a struct that requires scoping
- * paramsVar when entering its wrapper (optional, repeat).
- */
-function hasStructScope(type: BoundType): boolean {
-  switch (type.kind) {
-    case "optional":
-      return hasStructScope(type.inner);
-    case "list":
-      return hasStructScope(type.item);
-    case "struct":
-      return true;
-    default:
-      return false;
-  }
-}
-
-/** Unwrap optional/list to find the inner struct type. */
-function unwrapToStruct(type: BoundType): Extract<BoundType, { kind: "struct" }> | undefined {
-  switch (type.kind) {
-    case "optional":
-      return unwrapToStruct(type.inner);
-    case "list":
-      return unwrapToStruct(type.item);
-    case "struct":
-      return type;
-    default:
-      return undefined;
-  }
-}
-
 function toStringExpr(type: BoundType, expr: string): string {
   if (type.kind === "scalar") {
     if (type.scalar === "str") return expr;
@@ -70,30 +39,23 @@ function toStringExpr(type: BoundType, expr: string): string {
 // -- Context passed down through recursion --
 
 interface ArgContext {
-  /** Base path for field access (e.g. "params", "params.range", "item0"). */
-  paramsVar: string;
   /** Join nesting depth (controls ternary vs if-statement for optionals). */
   joinDepth: number;
   /**
-   * When set, the next binding's value is directly at this path
-   * rather than at `paramsVar.bindingName`.
-   *
-   * This handles solver sequence collapse: when `seq(lit, T)` collapses to just T,
-   * the parent wrapper (optional, repeat) holds the value at its own access path.
-   * The child binding still exists with its original name, but that name isn't a
-   * valid access path - the value lives at `directValue` instead.
-   *
-   * Consumed by the first binding that uses it. Reset when entering scoped
-   * contexts (struct sequences, complex union variants).
+   * Loop variables bound by enclosing `repeat`-of-list nodes, keyed by the
+   * repeat binding's id. `renderAccess` consults this to resolve the `iter`
+   * segments in a binding's solver-assigned access path.
    */
-  directValue?: string;
-  /** The struct type at the current scope level (prevents double-scoping). */
-  currentStructType?: BoundType;
+  loopVars: ReadonlyMap<BindingId, string>;
 }
 
-/** Resolve the access path for a binding in the current context. */
-function resolveAccess(arg: ArgContext, bindingName: string): string {
-  return arg.directValue ?? tsPropAccess(arg.paramsVar, bindingName);
+/** Render a binding's solver-assigned access path in the current loop scope. */
+function accessOf(binding: Binding, arg: ArgContext): string {
+  return renderAccess(binding.access, (b) => {
+    const v = arg.loopVars.get(b);
+    if (v === undefined) throw new Error(`arg-builder: unbound loop variable for binding ${b}`);
+    return v;
+  });
 }
 
 // -- Recursive descent --
@@ -106,12 +68,11 @@ let loopVarCounter = 0;
  * Context flows down via the immutable `arg` parameter (access paths, join depth, etc.).
  * Results flow up via return values (expressions or statement blocks).
  */
-export function buildArgs(rootExpr: Expr, ctx: CodegenContext, rootType?: BoundType): ArgResult {
+export function buildArgs(rootExpr: Expr, ctx: CodegenContext, _rootType?: BoundType): ArgResult {
   loopVarCounter = 0;
   const initialCtx: ArgContext = {
-    paramsVar: "params",
     joinDepth: 0,
-    currentStructType: rootType,
+    loopVars: new Map(),
   };
   return walk(rootExpr, ctx, initialCtx);
 }
@@ -144,7 +105,7 @@ function walk(node: Expr, ctx: CodegenContext, arg: ArgContext): ArgResult {
 function walkTerminal(node: Expr, ctx: CodegenContext, arg: ArgContext): ArgResult {
   const binding = ctx.resolve(node);
   if (!binding) throw new Error(`Missing binding for terminal node: ${node.kind}`);
-  const access = resolveAccess(arg, binding.name);
+  const access = accessOf(binding, arg);
   return { expr: toStringExpr(binding.type, access) };
 }
 
@@ -153,7 +114,6 @@ function walkSequence(
   ctx: CodegenContext,
   arg: ArgContext,
 ): ArgResult {
-  const binding = ctx.resolve(node);
   // A non-join sequence inside an outer join must concatenate (rather than
   // push separate args) so it can stand in as a single Expr element of the
   // outer join. Boutiques produces this shape for `command-line-flag` inputs
@@ -161,20 +121,9 @@ function walkSequence(
   // around an opt(seq(lit(FLAG), value))).
   const join = node.attrs.join ?? (arg.joinDepth > 0 ? "" : undefined);
 
-  // Compute child context: scope into nested struct if needed
-  const needsScope =
-    binding && hasStructScope(binding.type) && binding.type !== arg.currentStructType;
-  const childArg: ArgContext = needsScope
-    ? {
-        ...arg,
-        paramsVar: tsPropAccess(arg.paramsVar, binding!.name),
-        directValue: undefined,
-        currentStructType: binding!.type,
-        joinDepth: join !== undefined ? arg.joinDepth + 1 : arg.joinDepth,
-      }
-    : join !== undefined
-      ? { ...arg, joinDepth: arg.joinDepth + 1 }
-      : arg;
+  // Struct scoping is already baked into each child's access path by the
+  // solver; here we only thread join depth (a codegen concern).
+  const childArg: ArgContext = join !== undefined ? { ...arg, joinDepth: arg.joinDepth + 1 } : arg;
 
   const parts = node.attrs.nodes.map((child) => walk(child, ctx, childArg));
 
@@ -194,30 +143,12 @@ function walkOptional(
 ): ArgResult {
   const binding = ctx.resolve(node);
   if (!binding) throw new Error("Missing binding for optional node");
-  const access = tsPropAccess(arg.paramsVar, binding.name);
+  const access = accessOf(binding, arg);
 
-  // Compute child context based on the inner type
-  let childArg: ArgContext;
-  if (hasStructScope(binding.type)) {
-    // Struct inside optional: scope paramsVar so children access fields directly
-    const inner = unwrapToStruct(binding.type);
-    childArg = {
-      ...arg,
-      paramsVar: access,
-      directValue: undefined,
-      currentStructType: inner ?? arg.currentStructType,
-    };
-  } else if (binding.type.kind === "optional" || binding.type.kind === "bool") {
-    // Collapsed non-struct: the value is at the optional's access path.
-    // The inner binding (scalar, union, list, count) was folded into the optional
-    // by the solver, so its name is a phantom - directValue tells the inner
-    // walker to use this path instead of paramsVar.bindingName.
-    childArg = { ...arg, directValue: access };
-  } else {
-    childArg = arg;
-  }
-
-  const inner = walk(node.attrs.node, ctx, childArg);
+  // The inner node's access path is solver-assigned (it either inherits this
+  // optional's path on a collapse, or scopes into it for a struct), so no scope
+  // context needs threading - only the existing loop scope and join depth.
+  const inner = walk(node.attrs.node, ctx, arg);
 
   // Inside a join context, emit as ternary expression
   if (arg.joinDepth > 0 && isExpr(inner)) {
@@ -251,7 +182,7 @@ function walkRepeat(
   // A non-join repeat inside an outer join concatenates rather than pushing
   // separate args, mirroring walkSequence's handling of bare non-join seqs.
   const join = node.attrs.join ?? (arg.joinDepth > 0 ? "" : undefined);
-  const access = resolveAccess(arg, binding.name);
+  const access = accessOf(binding, arg);
 
   // Count repeat: emit a counted for-loop. Inside a join the for-loop would
   // be dropped into a list literal as raw text, so emit `Array.from` instead.
@@ -270,16 +201,13 @@ function walkRepeat(
     return { stmt: cb.toString() };
   }
 
-  // List repeat: emit a for-of loop or .map().join()
-  const itemType = binding.type.kind === "list" ? binding.type.item : undefined;
-  const isScalar = !itemType || !hasStructScope(itemType);
+  // List repeat: emit a for-of loop or .map().join(). The loop variable is
+  // registered under this repeat's binding id so inner bindings' `iter`
+  // segments resolve to it via `renderAccess`.
   const loopVar = `item${loopVarCounter++}`;
-
   const childArg: ArgContext = {
     ...arg,
-    paramsVar: loopVar,
-    directValue: isScalar ? loopVar : undefined,
-    currentStructType: !isScalar && itemType?.kind === "struct" ? itemType : arg.currentStructType,
+    loopVars: new Map(arg.loopVars).set(binding.id, loopVar),
   };
 
   const inner = walk(node.attrs.node, ctx, childArg);
@@ -302,26 +230,11 @@ function walkAlternative(
 ): ArgResult {
   const binding = ctx.resolve(node);
   if (!binding) throw new Error("Missing binding for alternative node");
-  const access = resolveAccess(arg, binding.name);
+  const access = accessOf(binding, arg);
 
-  // For complex unions (struct variants), scope paramsVar into the union's
-  // access path so variant children resolve fields correctly (e.g. params.source.file)
-  const isComplexUnion =
-    binding.type.kind === "union" &&
-    !binding.type.variants.every((v: BoundVariant) => v.type.kind === "literal");
-
-  const variants = node.attrs.alts.map((alt, i) => {
-    if (isComplexUnion && binding.type.kind === "union") {
-      const variantType = binding.type.variants[i]?.type;
-      return walk(alt, ctx, {
-        ...arg,
-        paramsVar: access,
-        directValue: undefined,
-        currentStructType: variantType?.kind === "struct" ? variantType : arg.currentStructType,
-      });
-    }
-    return walk(alt, ctx, arg);
-  });
+  // Complex-union variant fields already carry the union's path in their
+  // solver-assigned access, so arms walk with the current context unchanged.
+  const variants = node.attrs.alts.map((alt) => walk(alt, ctx, arg));
 
   if (
     binding.type.kind === "union" &&

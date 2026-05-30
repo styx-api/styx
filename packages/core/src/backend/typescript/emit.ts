@@ -1,4 +1,4 @@
-import type { BoundType } from "../../bindings/index.js";
+import type { AccessPath, BindingId, BoundType } from "../../bindings/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
 import type { SigEntry, SigOptions } from "../sig-entries.js";
@@ -192,6 +192,25 @@ const TS_IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
  */
 export function tsPropAccess(base: string, key: string): string {
   return TS_IDENT_RE.test(key) ? `${base}.${key}` : `${base}[${JSON.stringify(key)}]`;
+}
+
+/**
+ * Render a solver-assigned `AccessPath` to a TypeScript expression. Starts from
+ * `params`; each `field` segment descends a property, and each `iter` segment
+ * resets the base to the loop variable bound to that repeat binding (resolved
+ * via `lookupLoopVar` - the `iter` gate atom's loop in outputs codegen, or the
+ * arg-builder's local loop). Both the arg-builder and the outputs emitter feed
+ * this one function instead of re-deriving paths.
+ */
+export function renderAccess(
+  path: AccessPath,
+  lookupLoopVar: (binding: BindingId) => string,
+): string {
+  let cur = "params";
+  for (const seg of path) {
+    cur = seg.kind === "field" ? tsPropAccess(cur, seg.name) : lookupLoopVar(seg.binding);
+  }
+  return cur;
 }
 
 /**

@@ -1,4 +1,6 @@
 export type {
+  AccessPath,
+  AccessSegment,
   Binding,
   BindingId,
   BindingRegistry,

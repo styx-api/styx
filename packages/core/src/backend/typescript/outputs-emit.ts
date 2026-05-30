@@ -6,10 +6,9 @@ import type {
   ResolvedToken,
 } from "../../bindings/index.js";
 import { outputGate } from "../../bindings/index.js";
-import type { Expr } from "../../ir/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
-import { emitJsDoc, tsPropAccess } from "./emit.js";
+import { emitJsDoc, renderAccess } from "./emit.js";
 
 /**
  * Field shape for a single resolved output.
@@ -113,167 +112,14 @@ export function emitOutputsInterface(
 }
 
 /**
- * Per-binding access-path map. Built by walking the IR with the same
- * context-threading logic the arg-builder uses, so output codegen sees the
- * same paths arg-building does for any given binding.
- *
- * Bindings inside `repeat`-driven lists are NOT in this map; their access is
- * a loop variable introduced by the surrounding `iter` gate atom.
- */
-type AccessMap = Map<BindingId, string>;
-
-/**
- * Scope state threaded through `walkAccess`, mirroring the arg-builder's
- * `ArgContext`. A binding's access path is `paramsVar.<name>` (its name within
- * the enclosing struct scope), not its structural position - so a named binding
- * buried in a collapsed `seq(lit, T)` still resolves correctly. `paramsVar`
- * only changes when entering a nested struct scope (struct sequence,
- * struct-in-optional, complex-union variant).
- */
-interface AccessCtx {
-  paramsVar: string;
-  /** Set when a wrapper collapsed a value onto its own path (see arg-builder). */
-  directValue?: string;
-  /** The struct type at the current scope level (prevents double-scoping). */
-  currentStructType?: BoundType;
-}
-
-function hasStructScope(type: BoundType): boolean {
-  switch (type.kind) {
-    case "optional":
-      return hasStructScope(type.inner);
-    case "list":
-      return hasStructScope(type.item);
-    case "struct":
-      return true;
-    default:
-      return false;
-  }
-}
-
-function unwrapToStruct(type: BoundType): Extract<BoundType, { kind: "struct" }> | undefined {
-  switch (type.kind) {
-    case "optional":
-      return unwrapToStruct(type.inner);
-    case "list":
-      return unwrapToStruct(type.item);
-    case "struct":
-      return type;
-    default:
-      return undefined;
-  }
-}
-
-function resolveAccess(arg: AccessCtx, name: string): string {
-  return arg.directValue ?? tsPropAccess(arg.paramsVar, name);
-}
-
-function buildAccessMap(ctx: CodegenContext): AccessMap {
-  const out: AccessMap = new Map();
-  const rootBinding = ctx.resolve(ctx.expr);
-  walkAccess(ctx.expr, ctx, { paramsVar: "params", currentStructType: rootBinding?.type }, out);
-  return out;
-}
-
-function walkAccess(node: Expr, ctx: CodegenContext, arg: AccessCtx, out: AccessMap): void {
-  const binding = ctx.resolve(node);
-
-  switch (node.kind) {
-    case "literal":
-      return;
-    case "int":
-    case "float":
-    case "str":
-    case "path": {
-      if (binding) out.set(binding.id, resolveAccess(arg, binding.name));
-      return;
-    }
-    case "sequence": {
-      let childArg = arg;
-      if (binding && hasStructScope(binding.type) && binding.type !== arg.currentStructType) {
-        const access = tsPropAccess(arg.paramsVar, binding.name);
-        out.set(binding.id, access);
-        childArg = {
-          paramsVar: access,
-          currentStructType: unwrapToStruct(binding.type) ?? arg.currentStructType,
-        };
-      } else if (binding) {
-        out.set(binding.id, arg.directValue ?? arg.paramsVar);
-      }
-      for (const child of node.attrs.nodes) walkAccess(child, ctx, childArg, out);
-      return;
-    }
-    case "optional": {
-      if (!binding) {
-        walkAccess(node.attrs.node, ctx, arg, out);
-        return;
-      }
-      const access = tsPropAccess(arg.paramsVar, binding.name);
-      out.set(binding.id, access);
-      let childArg: AccessCtx;
-      if (hasStructScope(binding.type)) {
-        childArg = {
-          paramsVar: access,
-          currentStructType: unwrapToStruct(binding.type) ?? arg.currentStructType,
-        };
-      } else if (binding.type.kind === "optional" || binding.type.kind === "bool") {
-        childArg = { ...arg, directValue: access };
-      } else {
-        childArg = arg;
-      }
-      walkAccess(node.attrs.node, ctx, childArg, out);
-      return;
-    }
-    case "repeat": {
-      // List/count binding lives at its own access path. Inner bindings are
-      // iteration-scoped (the `iter` gate atom binds a loop variable at emit
-      // time), so they have no stable path here.
-      if (binding) out.set(binding.id, resolveAccess(arg, binding.name));
-      return;
-    }
-    case "alternative": {
-      if (!binding) {
-        for (const alt of node.attrs.alts) walkAccess(alt, ctx, arg, out);
-        return;
-      }
-      const access = resolveAccess(arg, binding.name);
-      out.set(binding.id, access);
-      const isComplexUnion =
-        binding.type.kind === "union" &&
-        !binding.type.variants.every((v) => v.type.kind === "literal");
-      node.attrs.alts.forEach((alt, i) => {
-        if (isComplexUnion && binding.type.kind === "union") {
-          // A complex-union variant's fields are accessed via the union's path
-          // (the discriminant check narrows it), so scope into `access`.
-          const variantType = binding.type.variants[i]?.type;
-          walkAccess(
-            alt,
-            ctx,
-            {
-              paramsVar: access,
-              currentStructType:
-                variantType?.kind === "struct" ? variantType : arg.currentStructType,
-            },
-            out,
-          );
-        } else {
-          walkAccess(alt, ctx, arg, out);
-        }
-      });
-      return;
-    }
-  }
-}
-
-/**
  * Substitutions for ref access while inside an iteration loop. When emitting
  * `for (const item of foo)`, refs to `foo` inside should resolve to `item`.
+ * This is also how `iter` segments in a binding's access path are resolved.
  */
 type IterScope = Map<BindingId, string>;
 
 interface OutputEmitCtx {
   ctx: CodegenContext;
-  access: AccessMap;
   iter: IterScope;
 }
 
@@ -363,13 +209,24 @@ function presentCondition(type: BoundType | undefined, access: string): string {
 }
 
 function bindingAccess(id: BindingId, ec: OutputEmitCtx): string {
+  // The binding is itself the currently-iterated element (a `ref` to the list
+  // being looped, or a scalar list element): use its loop variable directly.
   const subst = ec.iter.get(id);
   if (subst) return subst;
-  const access = ec.access.get(id);
-  if (access) return access;
+  const binding = ec.ctx.bindings.get(id);
+  if (binding) {
+    // Solver-assigned path; `iter` segments resolve to the loop variable bound
+    // by the surrounding `iter` gate atom (always open by the time a ref to a
+    // binding under that repeat renders).
+    return renderAccess(binding.access, (b) => ec.iter.get(b) ?? unresolvedLoopVar(b));
+  }
   // Fallback: shouldn't happen for well-formed IR, but emit a comment-style
   // placeholder so the generated code surfaces the issue.
   return `/* unresolved binding ${id} */ null as any`;
+}
+
+function unresolvedLoopVar(binding: BindingId): string {
+  return `/* unresolved loop var ${binding} */ (null as any)`;
 }
 
 function renderPathExpr(tokens: ResolvedToken[], ec: OutputEmitCtx): string {
@@ -436,7 +293,6 @@ export function emitBuildOutputs(
     loopCounter = 0;
     const ec: OutputEmitCtx = {
       ctx,
-      access: buildAccessMap(ctx),
       iter: new Map(),
     };
 

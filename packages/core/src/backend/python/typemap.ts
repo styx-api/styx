@@ -1,4 +1,4 @@
-import type { BoundType } from "../../bindings/index.js";
+import type { AccessPath, BindingId, BoundType } from "../../bindings/index.js";
 
 /**
  * Map a BoundType to its Python type expression.
@@ -9,10 +9,7 @@ import type { BoundType } from "../../bindings/index.js";
  *
  * Python target: 3.10+ (uses `X | None`, `list[T]`, `int`/`str`/etc.).
  */
-export function mapType(
-  type: BoundType,
-  resolve: (type: BoundType) => string | undefined,
-): string {
+export function mapType(type: BoundType, resolve: (type: BoundType) => string | undefined): string {
   switch (type.kind) {
     case "scalar":
       return { int: "int", float: "float", str: "str", path: "InputPathType" }[type.scalar];
@@ -52,4 +49,21 @@ export function pyStr(value: string): string {
     if (value.charCodeAt(i) < 0x20) return JSON.stringify(value);
   }
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * Render a solver-assigned `AccessPath` to a Python expression. Starts from
+ * `params`; each `field` segment subscripts a key, and each `iter` segment
+ * resets the base to the loop variable bound to that repeat binding (resolved
+ * via `lookupLoopVar`). Mirrors the TypeScript `renderAccess`.
+ */
+export function renderAccess(
+  path: AccessPath,
+  lookupLoopVar: (binding: BindingId) => string,
+): string {
+  let cur = "params";
+  for (const seg of path) {
+    cur = seg.kind === "field" ? `${cur}[${pyStr(seg.name)}]` : lookupLoopVar(seg.binding);
+  }
+  return cur;
 }

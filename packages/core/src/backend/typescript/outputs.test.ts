@@ -76,6 +76,32 @@ describe("typescript outputs - codegen", () => {
     expect(code).toContain("for (const __o0 of params.inputs)");
     expect(code).toContain("outputs.outs.push");
   });
+
+  it("resolves outputs referencing a field inside a list-of-struct", () => {
+    // Regression: the inner struct field used to have no access-map entry (the
+    // old walkAccess stopped at `repeat`), so its ref rendered an unresolved
+    // placeholder. Solver-attached paths give it `iter(items) + field(file)`.
+    // References the first field `file`, which collides with the (derived) name
+    // of its enclosing struct - the ref must still reach the scalar field.
+    const root = seq(lit("tool"), rep(seq(path("file"), str("id")), "items"));
+    root.meta = {
+      outputs: [
+        {
+          name: "per_item",
+          tokens: [
+            { kind: "ref", target: nodeRef("file") },
+            { kind: "literal", value: ".out" },
+          ],
+        },
+      ],
+    };
+    const code = generate(root, { app: { id: "tool" } });
+    expect(code).not.toContain("unresolved binding");
+    expect(code).not.toContain("unresolved loop var");
+    expect(code).toContain("per_item: OutputPathType[]");
+    expect(code).toMatch(/for \(const __o\d+ of params\.items\)/);
+    expect(code).toMatch(/__o\d+\.file/);
+  });
 });
 
 describe("typescript outputs - execution", () => {
@@ -101,6 +127,32 @@ describe("typescript outputs - execution", () => {
     };
     const { outputs } = executeWithOutputs(root, { input: "/data/x" }, { app: { id: "tool" } });
     expect(outputs).toEqual({ out_file: "/data/x.out" });
+  });
+
+  it("emits one output per element for a field inside a list-of-struct", () => {
+    const root = seq(lit("tool"), rep(seq(path("file"), str("id")), "items"));
+    root.meta = {
+      outputs: [
+        {
+          name: "per_item",
+          tokens: [
+            { kind: "ref", target: nodeRef("file") },
+            { kind: "literal", value: ".out" },
+          ],
+        },
+      ],
+    };
+    const { outputs } = executeWithOutputs(
+      root,
+      {
+        items: [
+          { file: "/data/a", id: "a" },
+          { file: "/data/b", id: "b" },
+        ],
+      },
+      { app: { id: "tool" } },
+    );
+    expect(outputs).toEqual({ per_item: ["/data/a.out", "/data/b.out"] });
   });
 
   it("leaves a gated output null when the optional input is absent", () => {

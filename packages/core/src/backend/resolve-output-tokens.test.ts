@@ -21,6 +21,7 @@ function bind(id: string, gate: GateAtom[] = []): Binding {
     name: id,
     type: { kind: "scalar", scalar: "str" },
     gate,
+    access: [],
   };
 }
 

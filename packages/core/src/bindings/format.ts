@@ -1,5 +1,5 @@
 import type { Expr } from "../ir/node.js";
-import type { BindingRegistry, OutputValidationResult } from "./binding.js";
+import type { AccessPath, BindingRegistry, OutputValidationResult } from "./binding.js";
 import type { SolveResult } from "./index.js";
 import { outputGate } from "./output-gate.js";
 import type { GateAtom, OutputScope, ResolvedOutput, ResolvedToken } from "./resolved-output.js";
@@ -23,6 +23,14 @@ export function formatSolveResult(result: SolveResult, expr: Expr, extras?: Form
     sections.push("", "gates:");
     for (const b of gatedBindings) {
       sections.push(`  ${b.name}: ${formatGate(b.gate, result.bindings)}`);
+    }
+  }
+
+  const accessBindings = [...result.bindings.values()].filter((b) => b.access.length > 0);
+  if (accessBindings.length > 0) {
+    sections.push("", "access:");
+    for (const b of accessBindings) {
+      sections.push(`  ${b.name}: ${formatAccess(b.access, result.bindings)}`);
     }
   }
 
@@ -95,6 +103,20 @@ export function formatGateAtom(atom: GateAtom, bindings: BindingRegistry): strin
 export function formatGate(gate: GateAtom[], bindings: BindingRegistry): string {
   if (gate.length === 0) return "(unconditional)";
   return gate.map((a) => formatGateAtom(a, bindings)).join(" / ");
+}
+
+/**
+ * Render a binding's access path for debugging, e.g. `params.sub.x` or
+ * `<iter:things>.file`. An `iter` segment shows the repeat it loops, since the
+ * concrete loop variable is a backend emit-time detail.
+ */
+export function formatAccess(access: AccessPath, bindings: BindingRegistry): string {
+  let out = "params";
+  for (const seg of access) {
+    out =
+      seg.kind === "field" ? `${out}.${seg.name}` : `<iter:${bindingName(bindings, seg.binding)}>`;
+  }
+  return out;
 }
 
 function formatType(type: BoundType, indent = 0): string {

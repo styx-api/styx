@@ -68,6 +68,32 @@ describe("python outputs - codegen", () => {
     expect(code).toMatch(/outs_v\.append\(/);
   });
 
+  it("resolves outputs referencing a field inside a list-of-struct", () => {
+    // Regression: the inner struct field used to have no access-map entry (the
+    // old walkAccess stopped at `repeat`), so its ref rendered an unresolved
+    // placeholder. Solver-attached paths give it `iter(items) + field(file)`.
+    // References the first field `file`, which collides with the (derived) name
+    // of its enclosing struct - the ref must still reach the scalar field.
+    const root = seq(lit("tool"), rep(seq(path("file"), str("id")), "items"));
+    root.meta = {
+      outputs: [
+        {
+          name: "per_item",
+          tokens: [
+            { kind: "ref", target: nodeRef("file") },
+            { kind: "literal", value: ".out" },
+          ],
+        },
+      ],
+    };
+    const code = generate(root, { app: { id: "tool" } });
+    expect(code).not.toContain("unresolved binding");
+    expect(code).not.toContain("unresolved loop var");
+    expect(code).toContain("per_item: list[OutputPathType]");
+    expect(code).toMatch(/for __o\d+ in params\["items"\]:/);
+    expect(code).toMatch(/__o\d+\["file"\]/);
+  });
+
   it("emits gated output assignment under an is-not-None check", () => {
     const root = seq(lit("tool"), opt(path("input")));
     root.meta = {

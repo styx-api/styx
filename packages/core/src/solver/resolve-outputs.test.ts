@@ -52,6 +52,30 @@ describe("resolveOutputs", () => {
     expect(out.tokens[1]).toEqual({ kind: "literal", value: ".out" });
   });
 
+  it("resolves a ref to the scalar field, not the same-named enclosing struct", () => {
+    // An unnamed multi-field struct inherits its first field's name via
+    // findDeepName, so the struct binding and the `file` scalar both get the
+    // name "file". A ref must resolve to the interpolable scalar (whose access
+    // is the loop var + field), not the struct (whose access is the bare loop
+    // var), even though the struct sits shallower.
+    const fileNode = path("file");
+    const expr = withOutputs(seq(lit("cmd"), rep(seq(fileNode, str("id")), "items")), [
+      {
+        name: "out",
+        tokens: [
+          { kind: "ref", target: nodeRef("file") },
+          { kind: "literal", value: ".out" },
+        ],
+      },
+    ]);
+    const result = solve(expr);
+    const resolution = resolveOutputs(expr, result);
+    const out = resolution.scopes[0]!.outputs[0]!;
+    const fileBinding = result.resolve(fileNode)!;
+    expect(fileBinding.type.kind).toBe("scalar");
+    expect(out.tokens[0]).toEqual({ kind: "ref", binding: fileBinding.id });
+  });
+
   it("a ref to an optional-typed binding produces a present atom in the output gate", () => {
     const inner = opt(seq(lit("--out"), path("output")));
     const expr = withOutputs(seq(lit("cmd"), inner), [
