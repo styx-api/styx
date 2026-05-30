@@ -102,6 +102,37 @@ describe("typescript outputs - codegen", () => {
     expect(code).toMatch(/for \(const __o\d+ of params\.items\)/);
     expect(code).toMatch(/__o\d+\.file/);
   });
+
+  it("resolves an output owned by a variant of a repeated union (c3d -o pattern)", () => {
+    // Regression (c3d/c2d/c4d): an output attached to one variant of a repeated
+    // discriminated union is gated as `iter(operations) + variant(union,
+    // "output")`. The variant atom's union binding used to be absent from the
+    // bindings map, so the gate rendered an `unresolved binding` placeholder.
+    // Solver-owned access paths now register the union binding, so it resolves.
+    const outVar = seq(lit("-o"), str("outfile"));
+    outVar.meta = {
+      name: "output",
+      outputs: [
+        {
+          name: "out",
+          tokens: [
+            { kind: "ref", target: nodeRef("outfile") },
+            { kind: "literal", value: ".nii" },
+          ],
+        },
+      ],
+    };
+    const scaleVar = seq(lit("-s"), str("scale"));
+    scaleVar.meta = { name: "scaleop" };
+    const root = seq(lit("tool"), rep(namedAlt("op", outVar, scaleVar), "operations"));
+    const code = generate(root, { app: { id: "tool" } });
+    expect(code).not.toContain("unresolved binding");
+    expect(code).not.toContain("unresolved loop var");
+    expect(code).toContain("out: OutputPathType[]");
+    expect(code).toMatch(/for \(const __o\d+ of params\.operations\)/);
+    expect(code).toMatch(/__o\d+\["@type"\] === "output"/);
+    expect(code).toMatch(/__o\d+\.outfile/);
+  });
 });
 
 describe("typescript outputs - execution", () => {
