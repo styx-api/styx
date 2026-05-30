@@ -70,6 +70,16 @@ The key architectural improvement over Styx 1 is a clean separation of concerns 
 
 The IR is the skeleton of the command line; the bindings define the typed interface; the argument builder walks the IR and pulls from the parametrization to assemble the final invocation. In Styx 1, these concerns were entangled - each backend had to re-derive types from the IR via a complex `LanguageProvider` protocol. In Styx 2, backends receive both pieces pre-computed and just translate them into target language constructs.
 
+### Solver-owned facts
+
+The solver attaches everything a backend needs to a binding during the same walk that produces it, so backends never re-derive structural facts from the IR. Each `Binding` carries three:
+
+- **`type`** (`BoundType`) - the typed shape, for the parameter interface.
+- **`gate`** (`GateAtom[]`) - the wrapper layers from the root (`present` / `variant` / `iter`), so "is this binding conditionally active, and under what?" is pure data. Backends nest guards/loops in array order.
+- **`access`** (`AccessPath`) - where the binding's value lives relative to top-level `params`, as a segment list (`field(name)` | `iter(repeatBinding)`). A tiny per-language `renderAccess` turns it into `params.foo.bar` (TS) / `params["foo"]["bar"]` (Python); an `iter` segment resolves to the loop variable for that repeat. Assigned by a post-solve pass (`solver/assign-access.ts`) once all types have settled.
+
+`access` exists because the answer to "where does binding X live" was previously re-derived independently by the cargs builder and the outputs emitter, which drifted. Computing it once in the solver collapses both into a pure lookup; any future consumer (validators, codecs, completion) inherits it for free. Notably the segment set needs only `field` and `iter` - complex-union variant fields are plain `field` segments off the union's path (the `@type` discriminant lives in `gate`, not the access path), and wrapper collapses like `optional<scalar>` are expressed by a binding inheriting its parent's path.
+
 ## Styx 1 vs Styx 2
 
 |                     | Styx 1 (Python)                                                                          | Styx 2 (TypeScript)                                                                                                            |
