@@ -9,8 +9,8 @@ export function format(expr: Expr, meta?: AppMeta): string {
     if (meta.doc?.description) {
       lines.push(`  "${meta.doc.description}"`);
     }
-    if (meta.authors?.length) {
-      lines.push(`  authors: ${meta.authors.join(", ")}`);
+    if (meta.doc?.authors?.length) {
+      lines.push(`  authors: ${meta.doc.authors.join(", ")}`);
     }
     if (meta.container) {
       lines.push(`  container: ${meta.container.image}`);

@@ -437,14 +437,14 @@ export function emitParamsFactory(
   cb.indent(() => {
     // Docstring
     cb.line('"""');
-    cb.line("Build params.");
+    cb.line("Build parameters.");
     if (entries.length > 0) {
       cb.blank();
       emitArgsBlock(entries, cb);
     }
     cb.blank();
     cb.line("Returns:");
-    cb.line("    Params dictionary.");
+    cb.line("    Parameter dictionary.");
     cb.line('"""');
 
     // Build dict: required and explicitly-defaulted fields go into the literal

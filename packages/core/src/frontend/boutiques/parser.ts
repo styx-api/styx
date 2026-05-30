@@ -1,5 +1,6 @@
 import { nodeRef } from "../../ir/meta.js";
 import type { AppMeta, NodeMeta, NodeRef, Output, OutputToken } from "../../ir/meta.js";
+import type { Documentation } from "../../ir/types.js";
 import type {
   Alternative,
   Expr,
@@ -302,17 +303,17 @@ export class BoutiquesParser implements Frontend {
     const stdout = bt["stdout-output"];
     const stderr = bt["stderr-output"];
 
+    const doc: Documentation = {
+      ...(isString(name) && { title: name }),
+      ...(isString(description) && { description }),
+      ...(isString(author) && { authors: [author] }),
+      ...(isString(url) && { urls: [url] }),
+    };
+
     return {
       id,
       ...(isString(version) && { version }),
-      ...((isString(name) || isString(description)) && {
-        doc: {
-          ...(isString(name) && { title: name }),
-          ...(isString(description) && { description }),
-        },
-      }),
-      ...(isString(author) && { authors: [author] }),
-      ...(isString(url) && { urls: [url] }),
+      ...(Object.keys(doc).length > 0 && { doc }),
       ...(isObject(container) &&
         isString(container.image) && {
           container: {

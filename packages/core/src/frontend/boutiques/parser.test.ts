@@ -138,12 +138,12 @@ describe("BoutiquesParser", () => {
 
     it("extracts author", () => {
       const result = parse(minimalDescriptor({ author: "Jane Doe" }));
-      expect(result.meta?.authors).toEqual(["Jane Doe"]);
+      expect(result.meta?.doc?.authors).toEqual(["Jane Doe"]);
     });
 
     it("extracts url", () => {
       const result = parse(minimalDescriptor({ url: "https://example.com" }));
-      expect(result.meta?.urls).toEqual(["https://example.com"]);
+      expect(result.meta?.doc?.urls).toEqual(["https://example.com"]);
     });
 
     it("extracts container image", () => {
@@ -876,7 +876,7 @@ describe("BoutiquesParser", () => {
       const result = parse(betDescriptor);
       expect(result.errors).toHaveLength(0);
       expect(result.meta?.id).toBe("bet");
-      expect(result.meta?.authors).toEqual(["FMRIB Analysis Group, University of Oxford"]);
+      expect(result.meta?.doc?.authors).toEqual(["FMRIB Analysis Group, University of Oxford"]);
     });
 
     it("has correct structure", () => {

@@ -256,7 +256,7 @@ export function emitParamsFactory(
 ): void {
   // JSDoc
   cb.line("/**");
-  cb.line(" * Build params for the tool.");
+  cb.line(" * Build parameters.");
   if (entries.length > 0) cb.line(" *");
   emitJsDocParams(entries, cb);
   cb.line(" *");

@@ -128,8 +128,8 @@ class BoutiquesEmitter {
     if (rootName) bt.name = rootName;
     if (app.doc?.description) bt.description = app.doc.description;
     if (app.version) bt["tool-version"] = app.version;
-    if (app.authors?.[0]) bt.author = app.authors[0];
-    if (app.urls?.[0]) bt.url = app.urls[0];
+    if (app.doc?.authors?.[0]) bt.author = app.doc.authors[0];
+    if (app.doc?.urls?.[0]) bt.url = app.doc.urls[0];
     if (app.container) {
       bt["container-image"] = {
         image: app.container.image,

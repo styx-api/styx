@@ -55,8 +55,6 @@ export interface AppMeta {
   id?: string;
   version?: string;
   doc?: Documentation;
-  authors?: string[];
-  urls?: string[];
   container?: {
     image: string;
     type?: "docker" | "singularity";

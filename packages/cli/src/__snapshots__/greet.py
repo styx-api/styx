@@ -24,14 +24,14 @@ def greet_params(
     loud: bool = False,
 ) -> Greet:
     """
-    Build params.
+    Build parameters.
 
     Args:
         name: Person to greet.
         loud: Shout the greeting.
 
     Returns:
-        Params dictionary.
+        Parameter dictionary.
     """
     params: Greet = {
         "name": name,

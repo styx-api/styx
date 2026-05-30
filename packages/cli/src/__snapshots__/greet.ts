@@ -19,7 +19,7 @@ export interface Greet {
 }
 
 /**
- * Build params for the tool.
+ * Build parameters.
  *
  * @param name Person to greet.
  * @param loud Shout the greeting.
