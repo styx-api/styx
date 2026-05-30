@@ -65,10 +65,7 @@ export function structFields(
  * the transparent structural wrappers the solver may bury a binding under
  * (sequence/optional/repeat/alternative).
  */
-export function findNode(
-  node: Expr | undefined,
-  pred: (n: Expr) => boolean,
-): Expr | undefined {
+export function findNode(node: Expr | undefined, pred: (n: Expr) => boolean): Expr | undefined {
   if (!node) return undefined;
   if (pred(node)) return node;
   switch (node.kind) {

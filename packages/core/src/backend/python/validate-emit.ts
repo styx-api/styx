@@ -172,7 +172,9 @@ function emitUnion(
 
   // Pure enum/choice: no struct variants, just literal values (no `@type`).
   if (!hasStruct) {
-    const values = litVariants.map((v) => (v.type as Extract<BoundType, { kind: "literal" }>).value);
+    const values = litVariants.map(
+      (v) => (v.type as Extract<BoundType, { kind: "literal" }>).value,
+    );
     const allStr = values.every((x) => typeof x === "string");
     checkType(e, valueExpr, allStr ? "str" : "(float, int)", wireKey, expectedType(e, unionType));
     emitLiteralMembership(e, values, wireKey, valueExpr);
@@ -228,7 +230,9 @@ function emitUnion(
   e.cb.indent(emitStructArm);
   e.cb.line("else:");
   e.cb.indent(() => {
-    const values = litVariants.map((v) => (v.type as Extract<BoundType, { kind: "literal" }>).value);
+    const values = litVariants.map(
+      (v) => (v.type as Extract<BoundType, { kind: "literal" }>).value,
+    );
     emitLiteralMembership(e, values, wireKey, valueExpr);
   });
 }
@@ -245,7 +249,13 @@ function emitLiteralMembership(
   e.cb.indent(() => raise(e, str("Parameter `" + wireKey + "` must be one of [" + rendered + "]")));
 }
 
-function checkType(e: Emit, valueExpr: string, pyType: string, wireKey: string, expected: string): void {
+function checkType(
+  e: Emit,
+  valueExpr: string,
+  pyType: string,
+  wireKey: string,
+  expected: string,
+): void {
   e.cb.line(`if not isinstance(${valueExpr}, ${pyType}):`);
   e.cb.indent(() => raise(e, wrongTypeMsg(wireKey, valueExpr, expected)));
 }
@@ -257,7 +267,10 @@ function emitRange(e: Emit, node: Expr | undefined, wireKey: string, valueExpr: 
   if (minValue !== undefined && maxValue !== undefined) {
     e.cb.line(`if not (${pyNum(minValue)} <= ${valueExpr} <= ${pyNum(maxValue)}):`);
     e.cb.indent(() =>
-      raise(e, str(`Parameter \`${wireKey}\` must be between ${minValue} and ${maxValue} (inclusive)`)),
+      raise(
+        e,
+        str(`Parameter \`${wireKey}\` must be between ${minValue} and ${maxValue} (inclusive)`),
+      ),
     );
   } else if (minValue !== undefined) {
     e.cb.line(`if ${valueExpr} < ${pyNum(minValue)}:`);
@@ -277,18 +290,30 @@ function emitListLength(e: Emit, node: Expr | undefined, wireKey: string, valueE
     e.cb.indent(() =>
       raise(
         e,
-        str(`Parameter \`${wireKey}\` must contain between ${countMin} and ${countMax} elements (inclusive)`),
+        str(
+          `Parameter \`${wireKey}\` must contain between ${countMin} and ${countMax} elements (inclusive)`,
+        ),
       ),
     );
   } else if (countMin !== undefined) {
     e.cb.line(`if len(${valueExpr}) < ${countMin}:`);
     e.cb.indent(() =>
-      raise(e, str(`Parameter \`${wireKey}\` must contain at least ${countMin} ${plural("element", countMin)}`)),
+      raise(
+        e,
+        str(
+          `Parameter \`${wireKey}\` must contain at least ${countMin} ${plural("element", countMin)}`,
+        ),
+      ),
     );
   } else if (countMax !== undefined) {
     e.cb.line(`if len(${valueExpr}) > ${countMax}:`);
     e.cb.indent(() =>
-      raise(e, str(`Parameter \`${wireKey}\` must contain at most ${countMax} ${plural("element", countMax)}`)),
+      raise(
+        e,
+        str(
+          `Parameter \`${wireKey}\` must contain at most ${countMax} ${plural("element", countMax)}`,
+        ),
+      ),
     );
   }
 }

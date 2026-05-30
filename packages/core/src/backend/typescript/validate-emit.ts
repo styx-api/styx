@@ -41,7 +41,10 @@ export function emitValidate(
   cb: CodeBuilder,
 ): void {
   const e: Emit = { ctx, resolve, scope: scope.child(["params"]), cb };
-  emitJsDoc(cb, "Validate the parameters. Throws StyxValidationError if the parameters are invalid.");
+  emitJsDoc(
+    cb,
+    "Validate the parameters. Throws StyxValidationError if the parameters are invalid.",
+  );
   cb.line(`export function ${funcName}(params: ${paramsType}): void {`);
   cb.indent(() => emitRoot(e, rootType, rootNode));
   cb.line("}");
@@ -160,9 +163,16 @@ function emitUnion(
 
   // Pure enum/choice: no struct variants, just literal values (no `@type`).
   if (!hasStruct) {
-    const values = litVariants.map((v) => (v.type as Extract<BoundType, { kind: "literal" }>).value);
+    const values = litVariants.map(
+      (v) => (v.type as Extract<BoundType, { kind: "literal" }>).value,
+    );
     const allStr = values.every((x) => typeof x === "string");
-    checkType(e, `typeof ${access} !== ${allStr ? '"string"' : '"number"'}`, wireKey, expectedType(e, unionType));
+    checkType(
+      e,
+      `typeof ${access} !== ${allStr ? '"string"' : '"number"'}`,
+      wireKey,
+      expectedType(e, unionType),
+    );
     emitLiteralMembership(e, values, wireKey, access);
     return;
   }
@@ -220,7 +230,9 @@ function emitUnion(
   e.cb.indent(emitStructArm);
   e.cb.line(`} else {`);
   e.cb.indent(() => {
-    const values = litVariants.map((v) => (v.type as Extract<BoundType, { kind: "literal" }>).value);
+    const values = litVariants.map(
+      (v) => (v.type as Extract<BoundType, { kind: "literal" }>).value,
+    );
     emitLiteralMembership(e, values, wireKey, access);
   });
   e.cb.line("}");
@@ -277,11 +289,17 @@ function emitListLength(e: Emit, node: Expr | undefined, wireKey: string, access
     );
   } else if (countMin !== undefined) {
     block(e, `${access}.length < ${countMin}`, () =>
-      raise(e, `Parameter \`${wireKey}\` must contain at least ${countMin} ${plural("element", countMin)}`),
+      raise(
+        e,
+        `Parameter \`${wireKey}\` must contain at least ${countMin} ${plural("element", countMin)}`,
+      ),
     );
   } else if (countMax !== undefined) {
     block(e, `${access}.length > ${countMax}`, () =>
-      raise(e, `Parameter \`${wireKey}\` must contain at most ${countMax} ${plural("element", countMax)}`),
+      raise(
+        e,
+        `Parameter \`${wireKey}\` must contain at most ${countMax} ${plural("element", countMax)}`,
+      ),
     );
   }
 }

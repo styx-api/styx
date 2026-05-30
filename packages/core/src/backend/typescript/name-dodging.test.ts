@@ -5,7 +5,10 @@ import { generate, lit, opt, seq } from "./test-helpers.js";
 describe("TypeScript name dodging - host vs wire", () => {
   it("scrubs TS reserved-word field names with trailing underscore", () => {
     const code = generate(
-      seq(lit("cmd"), opt(seq(lit("--class"), { kind: "str", attrs: {}, meta: { name: "class" } }))),
+      seq(
+        lit("cmd"),
+        opt(seq(lit("--class"), { kind: "str", attrs: {}, meta: { name: "class" } })),
+      ),
       { app: { id: "tool" } },
     );
     // Signature uses scrubbed host name (class_); the wire key (class) stays
@@ -28,10 +31,9 @@ describe("TypeScript name dodging - host vs wire", () => {
   });
 
   it("dodges collisions with function-local names (runner/params)", () => {
-    const code = generate(
-      seq(lit("cmd"), { kind: "str", attrs: {}, meta: { name: "runner" } }),
-      { app: { id: "tool" } },
-    );
+    const code = generate(seq(lit("cmd"), { kind: "str", attrs: {}, meta: { name: "runner" } }), {
+      app: { id: "tool" },
+    });
     expect(code).toMatch(/runner_2:\s*string/);
     expect(code).toMatch(/runner:\s*runner_2/);
   });

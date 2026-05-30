@@ -79,7 +79,9 @@ describe("Python validation - scalar presence and isinstance", () => {
 
   it("gates fields with a default (flags) instead of requiring presence", () => {
     // A flag with defaultValue false -> None means 'use default', not invalid.
-    const code = generate(seq(lit("tool"), opt(lit("--loud"), { name: "loud", defaultValue: false })));
+    const code = generate(
+      seq(lit("tool"), opt(lit("--loud"), { name: "loud", defaultValue: false })),
+    );
     expect(code).toContain('if params.get("loud", None) is not None:');
     expect(code).not.toContain("`loud` must not be None");
     expect(code).toContain('if not isinstance(params["loud"], bool):');
@@ -114,7 +116,9 @@ describe("Python validation - numeric range", () => {
 
 describe("Python validation - list length", () => {
   it("emits a between-elements check and per-element type check", () => {
-    const code = generate(seq(lit("tool"), opt(seq(lit("-r"), listCount(str("items"), "items", 1, 3)))));
+    const code = generate(
+      seq(lit("tool"), opt(seq(lit("-r"), listCount(str("items"), "items", 1, 3)))),
+    );
     expect(code).toContain('if not isinstance(params["items"], list):');
     expect(code).toContain('if not (1 <= len(params["items"]) <= 3):');
     expect(code).toContain("Parameter `items` must contain between 1 and 3 elements (inclusive)");
@@ -132,7 +136,10 @@ describe("Python validation - list length", () => {
 describe("Python validation - unions", () => {
   it("validates discriminated union @type membership and recurses per variant", () => {
     const code = generate(
-      seq(lit("tool"), namedAlt("source", seq(lit("--file"), path("file")), seq(lit("--url"), str("url")))),
+      seq(
+        lit("tool"),
+        namedAlt("source", seq(lit("--file"), path("file")), seq(lit("--url"), str("url"))),
+      ),
     );
     expect(code).toContain('if not isinstance(params["source"], dict):');
     expect(code).toContain('if "@type" not in params["source"]:');

@@ -62,7 +62,9 @@ describe("TypeScript validation - scalar presence and isinstance", () => {
   });
 
   it("gates fields with a default (flags) instead of requiring presence", () => {
-    const code = generate(seq(lit("tool"), opt(lit("--loud"), { name: "loud", defaultValue: false })));
+    const code = generate(
+      seq(lit("tool"), opt(lit("--loud"), { name: "loud", defaultValue: false })),
+    );
     expect(code).toContain("if (params.loud != null) {");
     expect(code).not.toContain("`loud` must not be null");
     expect(code).toContain('if (typeof params.loud !== "boolean") {');
@@ -97,7 +99,9 @@ describe("TypeScript validation - numeric range", () => {
 
 describe("TypeScript validation - list length", () => {
   it("emits Array.isArray, a between-length check, and per-element check", () => {
-    const code = generate(seq(lit("tool"), opt(seq(lit("-r"), listCount(str("items"), "items", 1, 3)))));
+    const code = generate(
+      seq(lit("tool"), opt(seq(lit("-r"), listCount(str("items"), "items", 1, 3)))),
+    );
     expect(code).toContain("if (!Array.isArray(params.items)) {");
     expect(code).toContain("if (!(1 <= params.items.length && params.items.length <= 3)) {");
     expect(code).toContain("Parameter `items` must contain between 1 and 3 elements (inclusive)");
@@ -115,7 +119,10 @@ describe("TypeScript validation - list length", () => {
 describe("TypeScript validation - unions", () => {
   it("validates discriminated union @type membership and recurses per variant", () => {
     const code = generate(
-      seq(lit("tool"), namedAlt("source", seq(lit("--file"), path("file")), seq(lit("--url"), str("url")))),
+      seq(
+        lit("tool"),
+        namedAlt("source", seq(lit("--file"), path("file")), seq(lit("--url"), str("url"))),
+      ),
     );
     expect(code).toContain('if (!("@type" in params.source)) {');
     expect(code).toContain("Params object is missing `@type`");

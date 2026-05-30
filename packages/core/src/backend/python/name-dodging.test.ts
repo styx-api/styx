@@ -5,7 +5,10 @@ import { generate, lit, opt, seq } from "./test-helpers.js";
 describe("Python name dodging - host vs wire", () => {
   it("scrubs reserved-word field names with trailing underscore", () => {
     const code = generate(
-      seq(lit("ants"), opt(seq(lit("--float"), { kind: "str", attrs: {}, meta: { name: "float" } }))),
+      seq(
+        lit("ants"),
+        opt(seq(lit("--float"), { kind: "str", attrs: {}, meta: { name: "float" } })),
+      ),
       { app: { id: "tool" } },
     );
     // Signature uses scrubbed host name
@@ -27,7 +30,10 @@ describe("Python name dodging - host vs wire", () => {
 
   it("forces functional TypedDict syntax for Python keyword field names", () => {
     const code = generate(
-      seq(lit("topup"), opt(seq(lit("--lambda"), { kind: "float", attrs: {}, meta: { name: "lambda" } }))),
+      seq(
+        lit("topup"),
+        opt(seq(lit("--lambda"), { kind: "float", attrs: {}, meta: { name: "lambda" } })),
+      ),
       { app: { id: "tool" } },
     );
     expect(code).toMatch(/Tool = typing\.TypedDict\(/);
@@ -36,10 +42,9 @@ describe("Python name dodging - host vs wire", () => {
   });
 
   it("dodges collisions with function-local names (runner/params)", () => {
-    const code = generate(
-      seq(lit("cmd"), { kind: "str", attrs: {}, meta: { name: "runner" } }),
-      { app: { id: "tool" } },
-    );
+    const code = generate(seq(lit("cmd"), { kind: "str", attrs: {}, meta: { name: "runner" } }), {
+      app: { id: "tool" },
+    });
     // Wire key 'runner' must not collide with the wrapper's `runner` param
     expect(code).toMatch(/runner_2:\s*str/);
     expect(code).toMatch(/"runner":\s*runner_2/);
@@ -64,22 +69,19 @@ describe("Python name dodging - host vs wire", () => {
     // An output named `lambda` would shadow the keyword and break the
     // dataclass constructor. pyId appends a trailing underscore.
     const code = generate(
-      seq(
-        lit("tool"),
-        {
-          kind: "str",
-          attrs: {},
-          meta: {
-            name: "x",
-            outputs: [
-              {
-                name: "lambda",
-                tokens: [{ kind: "literal", value: "out.nii" }],
-              },
-            ],
-          },
+      seq(lit("tool"), {
+        kind: "str",
+        attrs: {},
+        meta: {
+          name: "x",
+          outputs: [
+            {
+              name: "lambda",
+              tokens: [{ kind: "literal", value: "out.nii" }],
+            },
+          ],
         },
-      ),
+      }),
       { app: { id: "tool" } },
     );
     expect(code).toMatch(/lambda_:\s*OutputPathType/);
