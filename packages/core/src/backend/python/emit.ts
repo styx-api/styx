@@ -268,6 +268,7 @@ export function emitWrapperFunction(
   outputsFunc: string | undefined,
   outputsType: string | undefined,
   validateFunc: string | undefined,
+  streams: { stdout?: string; stderr?: string },
   cb: CodeBuilder,
 ): void {
   const emitOutputs = outputsFunc !== undefined;
@@ -316,7 +317,10 @@ export function emitWrapperFunction(
     cb.line(`args = ${cargsFunc}(params, execution)`);
     if (emitOutputs) {
       cb.line(`out = ${outputsFunc}(params, execution)`);
-      cb.line("execution.run(args)");
+      const handlers: string[] = [];
+      if (streams.stdout) handlers.push(`handle_stdout=lambda s: out.${streams.stdout}.append(s)`);
+      if (streams.stderr) handlers.push(`handle_stderr=lambda s: out.${streams.stderr}.append(s)`);
+      cb.line(`execution.run(args${handlers.length ? ", " + handlers.join(", ") : ""})`);
       cb.line("return out");
     } else {
       cb.line("execution.run(args)");

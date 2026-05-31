@@ -66,6 +66,7 @@ function runGenerated(
   const mockExecution = {
     inputFile: (p: unknown) => String(p),
     outputFile: (p: unknown) => String(p),
+    mutableCopy: (p: unknown) => String(p),
     params: () => {},
     run: (args: string[]) => {
       capturedArgs = args;

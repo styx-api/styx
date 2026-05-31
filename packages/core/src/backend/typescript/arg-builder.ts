@@ -28,12 +28,28 @@ function appendLines(cb: CodeBuilder, code: string): void {
 
 // -- Type helpers --
 
-function toStringExpr(type: BoundType, expr: string): string {
+function toStringExpr(node: Expr, type: BoundType, expr: string): string {
   if (type.kind === "scalar") {
     if (type.scalar === "str") return expr;
-    if (type.scalar === "path") return `execution.inputFile(${expr})`;
+    if (type.scalar === "path") return pathArg(node, expr);
   }
   return `String(${expr})`;
+}
+
+/**
+ * Command-line value for a path input via `execution.inputFile`. The styxdefs
+ * signature is `inputFile(hostFile, resolveParent?, mutable?)`, so `mutable`
+ * requires supplying `resolveParent` positionally first. `mutable=true` tells
+ * the runner to stage a writable COPY (original untouched) and return the copy's
+ * command-line path; the outputs builder surfaces that same copy's host path via
+ * `execution.mutableCopy`.
+ */
+function pathArg(node: Expr, expr: string): string {
+  if (node.kind !== "path") return `execution.inputFile(${expr})`;
+  const { resolveParent, mutable } = node.attrs;
+  if (mutable) return `execution.inputFile(${expr}, ${resolveParent ? "true" : "false"}, true)`;
+  if (resolveParent) return `execution.inputFile(${expr}, true)`;
+  return `execution.inputFile(${expr})`;
 }
 
 // -- Context passed down through recursion --
@@ -106,7 +122,7 @@ function walkTerminal(node: Expr, ctx: CodegenContext, arg: ArgContext): ArgResu
   const binding = ctx.resolve(node);
   if (!binding) throw new Error(`Missing binding for terminal node: ${node.kind}`);
   const access = accessOf(binding, arg);
-  return { expr: toStringExpr(binding.type, access) };
+  return { expr: toStringExpr(node, binding.type, access) };
 }
 
 function walkSequence(
