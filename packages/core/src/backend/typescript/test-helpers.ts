@@ -107,7 +107,7 @@ function runGenerated(
  * user-facing `wrapper` name when there's no struct root (the wrapper IS
  * dict-style in that case).
  */
-function executeExport(ctx: CodegenContext): string {
+export function executeExport(ctx: CodegenContext): string {
   const publicNames = computePublicNames(ctx.app?.id);
   const rootBinding = ctx.resolve(ctx.expr);
   // Mirror the codegen: only a real struct root produces the internal
