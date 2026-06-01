@@ -1,25 +1,15 @@
 <script lang="ts">
+  import { PASS_REGISTRY, type PassConfig } from "./passes.js";
+
   interface Props {
-    passes: {
-      flatten: boolean;
-      simplify: boolean;
-      removeEmpty: boolean;
-      canonicalize: boolean;
-    };
+    passes: PassConfig;
   }
 
   let { passes = $bindable() }: Props = $props();
-
-  const passLabels: { key: keyof typeof passes; label: string }[] = [
-    { key: "flatten", label: "Flatten" },
-    { key: "simplify", label: "Simplify" },
-    { key: "removeEmpty", label: "Remove Empty" },
-    { key: "canonicalize", label: "Canonicalize" },
-  ];
 </script>
 
 <div class="passes">
-  {#each passLabels as { key, label } (key)}
+  {#each PASS_REGISTRY as { key, label } (key)}
     <label class:active={passes[key]}>
       <input type="checkbox" bind:checked={passes[key]} />
       <span>{label}</span>

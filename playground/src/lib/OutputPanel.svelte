@@ -1,35 +1,23 @@
 <script lang="ts">
-  import { solve, resolveOutputs, createContext, type ParseResult } from "@styx/core";
-  import { tabs, type SolvedParseResult } from "./tabs.js";
+  import { tabs } from "./tabs.js";
+  import type { CompileOutcome } from "./compiler.js";
   import Messages from "./Messages.svelte";
   import CodeBlock from "./CodeBlock.svelte";
 
   interface Props {
-    result:
-      | { ok: true; value: ParseResult; timeMs: number }
-      | { ok: false; error: string; timeMs: number };
+    outcome: CompileOutcome;
   }
 
-  let { result }: Props = $props();
+  let { outcome }: Props = $props();
   let activeTab = $state(tabs[0].id);
   let subTabSelections = $state<Record<string, string>>({});
 
   const activeTabDef = $derived(tabs.find((t) => t.id === activeTab) ?? tabs[0]);
 
-  // Solve once per input change, not per tab switch
-  const solved: SolvedParseResult | null = $derived.by(() => {
-    if (!result.ok) return null;
-    const parseResult = result.value;
-    const solveResult = solve(parseResult.expr);
-    const outputs = resolveOutputs(parseResult.expr, solveResult);
-    const ctx = createContext(parseResult.expr, solveResult, outputs, { app: parseResult.meta });
-    return { parseResult, solveResult, ctx };
-  });
-
   const output = $derived.by(() => {
-    if (!solved) return null;
+    if (outcome.status !== "ok") return null;
     try {
-      return { ok: true as const, files: activeTabDef.compute(solved) };
+      return { ok: true as const, files: activeTabDef.compute(outcome.compilation) };
     } catch (e) {
       return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
     }
@@ -54,8 +42,8 @@
 </script>
 
 <div class="output">
-  {#if result.ok}
-    {@const { errors, warnings } = result.value}
+  {#if outcome.status === "ok"}
+    {@const { errors, warnings } = outcome.compilation.parse}
 
     {#if errors.length > 0 || warnings.length > 0}
       <div class="messages-container">
@@ -75,8 +63,8 @@
         {tab.label}
       </button>
     {/each}
-    {#if result.timeMs > 0}
-      <span class="timing">{result.timeMs.toFixed(0)}ms</span>
+    {#if outcome.status !== "empty" && outcome.timeMs > 0}
+      <span class="timing">{outcome.timeMs.toFixed(0)}ms</span>
     {/if}
   </div>
 
@@ -95,12 +83,10 @@
   {/if}
 
   <div class="content">
-    {#if !result.ok}
-      {#if result.error}
-        <Messages type="errors" messages={[{ message: result.error }]} />
-      {:else}
-        <div class="empty">Load an example or paste a descriptor to begin.</div>
-      {/if}
+    {#if outcome.status === "empty"}
+      <div class="empty">Load an example or paste a descriptor to begin.</div>
+    {:else if outcome.status === "error"}
+      <Messages type="errors" messages={[{ message: outcome.error }]} />
     {:else if output?.ok}
       <CodeBlock code={activeFileContent} lang={activeTabDef.lang} />
     {:else if output && !output.ok}

@@ -5,23 +5,16 @@ import {
   JsonSchemaBackend,
   PythonBackend,
   TypeScriptBackend,
-  type ParseResult,
-  type CodegenContext,
-  type SolveResult,
 } from "@styx/core";
+import type { Backend } from "@styx/core";
 import type { BundledLanguage } from "shiki";
-
-export interface SolvedParseResult {
-  parseResult: ParseResult;
-  solveResult: SolveResult;
-  ctx: CodegenContext;
-}
+import type { Compilation, SolvedParseResult } from "./compiler.js";
 
 export interface TabDef {
   id: string;
   label: string;
   lang: BundledLanguage | "ir" | "bindings";
-  compute: (solved: SolvedParseResult) => Map<string, string>;
+  compute: (c: Compilation) => Map<string, string>;
 }
 
 const boutiquesBackend = new BoutiquesBackend();
@@ -33,48 +26,73 @@ function single(name: string, content: string): Map<string, string> {
   return new Map([[name, content]]);
 }
 
-export const tabs: TabDef[] = [
+/** Unwrap the guarded solve, throwing its error so the tab renders it. */
+function solved(c: Compilation): SolvedParseResult {
+  if (!c.solved.ok) throw new Error(c.solved.error);
+  return c.solved.value;
+}
+
+/**
+ * Emit a backend's per-tool file(s) plus, for backends with a package tier,
+ * the suite-level wrapper for a synthesized one-app package (e.g. Python's
+ * `__init__.py`, TypeScript's `index.ts`). The wrapper files appear as
+ * additional sub-tabs; backends without `emitPackage` just yield the app file.
+ */
+function emitWithPackage(backend: Backend, c: Compilation): Map<string, string> {
+  const app = backend.emitApp(solved(c).ctx);
+  const files = new Map(app.files);
+  if (backend.emitPackage) {
+    for (const [name, content] of backend.emitPackage({}, [app]).files) {
+      files.set(name, content);
+    }
+  }
+  return files;
+}
+
+export const tabs: [TabDef, ...TabDef[]] = [
   {
     id: "ir",
     label: "IR",
     lang: "ir",
-    compute: ({ parseResult }) => single("ir", format(parseResult.expr)),
+    compute: (c) => single("ir", format(c.parse.expr)),
   },
   {
     id: "bindings",
     label: "Bindings",
     lang: "bindings",
-    compute: ({ solveResult, parseResult, ctx }) =>
-      single(
+    compute: (c) => {
+      const { solveResult, parseResult, ctx } = solved(c);
+      return single(
         "bindings",
         formatSolveResult(solveResult, parseResult.expr, {
           scopes: ctx.outputScopes,
           diagnostics: ctx.outputDiagnostics,
         }),
-      ),
+      );
+    },
   },
   {
     id: "schema",
     label: "JSON Schema",
     lang: "json",
-    compute: ({ ctx }) => jsonSchemaBackend.emitApp(ctx).files,
+    compute: (c) => emitWithPackage(jsonSchemaBackend, c),
   },
   {
     id: "typescript",
     label: "TypeScript",
     lang: "typescript" as BundledLanguage,
-    compute: ({ ctx }) => typescriptBackend.emitApp(ctx).files,
+    compute: (c) => emitWithPackage(typescriptBackend, c),
   },
   {
     id: "python",
     label: "Python",
     lang: "python" as BundledLanguage,
-    compute: ({ ctx }) => pythonBackend.emitApp(ctx).files,
+    compute: (c) => emitWithPackage(pythonBackend, c),
   },
   {
     id: "boutiques",
     label: "Boutiques",
     lang: "json",
-    compute: ({ ctx }) => boutiquesBackend.emitApp(ctx).files,
+    compute: (c) => emitWithPackage(boutiquesBackend, c),
   },
 ];
