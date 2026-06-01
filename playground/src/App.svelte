@@ -1,58 +1,21 @@
 <script lang="ts">
-  import { compile, detectFormat } from "@styx/core";
-  import type { FormatName, ParseResult } from "@styx/core";
-  import { createPipeline, flatten, simplify, removeEmpty, canonicalize } from "@styx/core";
+  import { detectFormat } from "@styx/core";
+  import type { FormatName } from "@styx/core";
   import { onMount } from "svelte";
   import InputPanel from "./lib/InputPanel.svelte";
   import OutputPanel from "./lib/OutputPanel.svelte";
   import PassToggles from "./lib/PassToggles.svelte";
+  import { runCompile } from "./lib/compiler.js";
+  import { defaultPassConfig, type PassConfig } from "./lib/passes.js";
   import { defaultExample, exampleGroups } from "./lib/examples.js";
 
   let input = $state<string>("");
   let loading = $state<string | null>(null);
-  let passes = $state({
-    flatten: true,
-    simplify: true,
-    removeEmpty: true,
-    canonicalize: false,
-  });
+  let passes = $state<PassConfig>({ ...defaultPassConfig });
 
   const detectedFormat = $derived<FormatName | null>(input ? detectFormat(input) : null);
 
-  type CompileResult =
-    | { ok: true; value: ParseResult; timeMs: number }
-    | { ok: false; error: string; timeMs: number };
-
-  const result: CompileResult = $derived.by(() => {
-    if (!input) return { ok: false, error: "", timeMs: 0 };
-
-    const start = performance.now();
-    try {
-      const parseResult = compile(input);
-
-      const availablePasses = [];
-      if (passes.flatten) availablePasses.push(flatten);
-      if (passes.simplify) availablePasses.push(simplify);
-      if (passes.removeEmpty) availablePasses.push(removeEmpty);
-      if (passes.canonicalize) availablePasses.push(canonicalize);
-
-      if (availablePasses.length > 0) {
-        const pipeline = createPipeline(availablePasses, { fixpoint: true });
-        const passResult = pipeline.apply(parseResult.expr);
-        parseResult.expr = passResult.expr;
-
-        if (passResult.warnings) {
-          parseResult.warnings.push(...passResult.warnings.map((w) => ({ message: w })));
-        }
-      }
-
-      const timeMs = performance.now() - start;
-      return { ok: true as const, value: parseResult, timeMs };
-    } catch (e) {
-      const timeMs = performance.now() - start;
-      return { ok: false as const, error: e instanceof Error ? e.message : String(e), timeMs };
-    }
-  });
+  const outcome = $derived(runCompile(input, passes));
 
   async function loadExample(url: string) {
     loading = url;
@@ -111,7 +74,7 @@
       <InputPanel bind:input />
     </section>
     <section class="panel">
-      <OutputPanel {result} />
+      <OutputPanel {outcome} />
     </section>
   </main>
 </div>

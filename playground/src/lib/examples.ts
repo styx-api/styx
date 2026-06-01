@@ -1,9 +1,14 @@
-export interface ExampleGroup {
-  label: string;
-  examples: { name: string; url: string }[];
+export interface Example {
+  name: string;
+  url: string;
 }
 
-export const exampleGroups: ExampleGroup[] = [
+export interface ExampleGroup {
+  label: string;
+  examples: [Example, ...Example[]];
+}
+
+export const exampleGroups: [ExampleGroup, ...ExampleGroup[]] = [
   {
     label: "Boutiques",
     examples: [
