@@ -22,6 +22,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.0.3",
+    "styxdefs": "^0.2.0",
     "tsdown": "^0.20.1"
   }
 }
