@@ -371,6 +371,7 @@ export function emitWrapperFunction(
   outputsFunc: string | undefined,
   outputsType: string | undefined,
   validateFunc: string | undefined,
+  streams: { stdout?: string; stderr?: string },
   cb: CodeBuilder,
 ): void {
   const appDoc = ctx.app?.doc;
@@ -419,7 +420,21 @@ export function emitWrapperFunction(
     cb.line(`const args = ${cargsFunc}(params, execution);`);
     if (emitOutputs) {
       cb.line(`const out = ${outputsFunc}(params, execution);`);
-      cb.line("execution.run(args);");
+      const { stdout, stderr } = streams;
+      if (stdout || stderr) {
+        // run(cargs, handleStdout?, handleStderr?): pass `undefined` for an
+        // absent stdout handler so a stderr-only handler lands in position 3.
+        const runArgs = ["args"];
+        runArgs.push(
+          stdout ? `(s: string): void => { ${tsPropAccess("out", stdout)}.push(s); }` : "undefined",
+        );
+        if (stderr) {
+          runArgs.push(`(s: string): void => { ${tsPropAccess("out", stderr)}.push(s); }`);
+        }
+        cb.line(`execution.run(${runArgs.join(", ")});`);
+      } else {
+        cb.line("execution.run(args);");
+      }
       cb.line("return out;");
     } else {
       cb.line("execution.run(args);");

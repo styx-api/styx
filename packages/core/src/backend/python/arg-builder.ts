@@ -28,12 +28,27 @@ function appendLines(cb: CodeBuilder, code: string): void {
 
 // -- Type helpers --
 
-function toStringExpr(type: BoundType, expr: string): string {
+function toStringExpr(node: Expr, type: BoundType, expr: string): string {
   if (type.kind === "scalar") {
     if (type.scalar === "str") return expr;
-    if (type.scalar === "path") return `execution.input_file(${expr})`;
+    if (type.scalar === "path") return pathArg(node, expr);
   }
   return `str(${expr})`;
+}
+
+/**
+ * Command-line value for a path input via `execution.input_file`, threading the
+ * path node's `resolve_parent` / `mutable` attrs as keyword args. `mutable=True`
+ * tells the runner to stage a writable COPY (original untouched) and return the
+ * copy's command-line path; the outputs builder surfaces that same copy's host
+ * path via `execution.mutable_copy`.
+ */
+function pathArg(node: Expr, expr: string): string {
+  if (node.kind !== "path") return `execution.input_file(${expr})`;
+  let extra = "";
+  if (node.attrs.resolveParent) extra += ", resolve_parent=True";
+  if (node.attrs.mutable) extra += ", mutable=True";
+  return `execution.input_file(${expr}${extra})`;
 }
 
 // -- Context passed down through recursion --
@@ -106,7 +121,7 @@ function walkTerminal(node: Expr, ctx: CodegenContext, arg: ArgContext): ArgResu
   const binding = ctx.resolve(node);
   if (!binding) throw new Error(`Missing binding for terminal node: ${node.kind}`);
   const access = accessOf(binding, arg);
-  return { expr: toStringExpr(binding.type, access) };
+  return { expr: toStringExpr(node, binding.type, access) };
 }
 
 function walkSequence(

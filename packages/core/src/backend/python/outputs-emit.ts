@@ -6,10 +6,20 @@ import type {
   ResolvedToken,
 } from "../../bindings/index.js";
 import { outputGate } from "../../bindings/index.js";
+import type { Documentation, Expr } from "../../ir/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
 import { PY_KEYWORDS, emitDocstring } from "./emit.js";
 import { pyStr, renderAccess } from "./typemap.js";
+
+/**
+ * A `ResolvedOutput` plus a `mutable` marker. A mutable input file is surfaced
+ * as an output: its single ref token points at the input binding, and the
+ * builder emits `execution.mutable_copy(<value>)` (the host path of the writable
+ * copy the runner staged for the matching `input_file(..., mutable=True)` call)
+ * instead of `execution.output_file(...)`.
+ */
+type EmittedOutput = ResolvedOutput & { mutable?: boolean };
 
 /**
  * Field shape for a single resolved output.
@@ -61,29 +71,129 @@ interface OutputField {
  */
 function collectOutputFields(ctx: CodegenContext): OutputField[] {
   const byId = new Map<string, OutputField>();
+  const add = (output: EmittedOutput, scopeGate: GateAtom[]): void => {
+    const gate = outputGate(scopeGate, output, ctx.bindings);
+    const shape = outputShape(gate);
+    const id = pyId(output.name);
+    const doc = output.doc?.description ?? output.doc?.title;
+    const existing = byId.get(id);
+    if (existing) {
+      existing.shape = mergeShape(existing.shape, shape);
+      if (!existing.doc && doc) existing.doc = doc;
+    } else {
+      byId.set(id, { id, shape, doc });
+    }
+  };
   for (const scope of ctx.outputScopes) {
     const scopeBinding = ctx.bindings.get(scope.scope);
     const scopeGate = scopeBinding?.gate ?? [];
-    for (const output of scope.outputs) {
-      const gate = outputGate(scopeGate, output, ctx.bindings);
-      const shape = outputShape(gate);
-      const id = pyId(output.name);
-      const doc = output.doc?.description ?? output.doc?.title;
-      const existing = byId.get(id);
-      if (existing) {
-        existing.shape = mergeShape(existing.shape, shape);
-        if (!existing.doc && doc) existing.doc = doc;
-      } else {
-        byId.set(id, { id, shape, doc });
-      }
-    }
+    for (const output of scope.outputs) add(output, scopeGate);
   }
+  // Mutable inputs surface as outputs; their binding gate is absolute (rooted),
+  // so the scope gate is empty.
+  for (const output of collectMutableOutputs(ctx)) add(output, []);
   return [...byId.values()];
 }
 
 /** Has any scope in the context attached at least one output? */
 export function hasAnyOutputs(ctx: CodegenContext): boolean {
   return ctx.outputScopes.some((s) => s.outputs.length > 0);
+}
+
+/** A captured stream (stdout/stderr) surfaced as a `list[str]` Outputs field. */
+interface StreamField {
+  id: string;
+  doc?: string;
+}
+
+/**
+ * The stdout/stderr fields declared by the app metadata, in declaration order
+ * (stdout before stderr). Stream outputs are app-level: they are never gated
+ * (always present when the tool runs), so they bypass the solver/gating
+ * machinery and surface as plain `list[str]` fields the wrapper appends to via
+ * `handle_stdout` / `handle_stderr`.
+ */
+function streamFields(ctx: CodegenContext): StreamField[] {
+  const out: StreamField[] = [];
+  // Seed with the file/mutable output field ids so a stream whose name collides
+  // with a real output (e.g. an output literally named "stdout") is bumped
+  // rather than emitting a duplicate dataclass field / repeated constructor kwarg.
+  const used = new Set<string>(collectOutputFields(ctx).map((f) => f.id));
+  const add = (name: string, doc?: string): void => {
+    let id = pyId(name);
+    while (used.has(id)) id += "_";
+    used.add(id);
+    out.push({ id, doc });
+  };
+  const so = ctx.app?.stdout;
+  const se = ctx.app?.stderr;
+  if (so) add(so.name, so.doc?.description ?? so.doc?.title);
+  if (se) add(se.name, se.doc?.description ?? se.doc?.title);
+  return out;
+}
+
+/** Does the app declare any stdout/stderr stream output? */
+export function hasStreamOutputs(ctx: CodegenContext): boolean {
+  return !!(ctx.app?.stdout || ctx.app?.stderr);
+}
+
+/** Field ids for stdout/stderr (in declaration order), for wrapper wiring. */
+export function streamFieldIds(ctx: CodegenContext): { stdout?: string; stderr?: string } {
+  const fields = streamFields(ctx);
+  const res: { stdout?: string; stderr?: string } = {};
+  let idx = 0;
+  if (ctx.app?.stdout) res.stdout = fields[idx++]!.id;
+  if (ctx.app?.stderr) res.stderr = fields[idx++]!.id;
+  return res;
+}
+
+/**
+ * Synthesize one output per mutable file input. Each is a `ResolvedOutput` with
+ * a single ref token to the input binding and the `mutable` marker. The input
+ * binding's solver-assigned gate fully encodes its ancestry (optional/variant/
+ * iterated), so `outputGate([], ...)` yields the correct shape and gating for
+ * free - no scope bucket needed.
+ */
+export function collectMutableOutputs(ctx: CodegenContext): EmittedOutput[] {
+  const out: EmittedOutput[] = [];
+  const seen = new Set<BindingId>();
+  const walk = (node: Expr, inheritedDoc?: Documentation): void => {
+    if (node.kind === "path") {
+      if (node.attrs.mutable) {
+        const binding = ctx.resolve(node);
+        if (binding && !seen.has(binding.id)) {
+          seen.add(binding.id);
+          const doc = node.meta?.doc ?? inheritedDoc;
+          out.push({
+            name: binding.name,
+            tokens: [{ kind: "ref", binding: binding.id }],
+            ...(doc && { doc }),
+            mutable: true,
+          });
+        }
+      }
+      return;
+    }
+    switch (node.kind) {
+      case "sequence":
+        for (const child of node.attrs.nodes) walk(child);
+        break;
+      case "optional":
+      case "repeat":
+        walk(node.attrs.node, node.meta?.doc ?? inheritedDoc);
+        break;
+      case "alternative":
+        for (const alt of node.attrs.alts) walk(alt, node.meta?.doc ?? inheritedDoc);
+        break;
+    }
+  };
+  walk(ctx.expr);
+  return out;
+}
+
+/** Does the tool have any mutable file input (surfaced as an output)? */
+export function hasMutableInputs(ctx: CodegenContext): boolean {
+  return collectMutableOutputs(ctx).length > 0;
 }
 
 /** Emit `@dataclasses.dataclass\nclass <outputsType>:` declaration. */
@@ -93,13 +203,18 @@ export function emitOutputsClass(ctx: CodegenContext, outputsType: string, cb: C
   cb.indent(() => {
     emitDocstring(cb, "Output paths produced by the tool.");
     const fields = collectOutputFields(ctx);
-    if (fields.length === 0) {
+    const streams = streamFields(ctx);
+    if (fields.length === 0 && streams.length === 0) {
       cb.line("pass");
       return;
     }
     for (const field of fields) {
       cb.line(`${field.id}: ${outputTypeExpr(field.shape)}`);
       if (field.doc) emitDocstring(cb, field.doc);
+    }
+    for (const s of streams) {
+      cb.line(`${s.id}: list[str]`);
+      if (s.doc) emitDocstring(cb, s.doc);
     }
   });
 }
@@ -222,7 +337,7 @@ function renderRefValue(tok: Extract<ResolvedToken, { kind: "ref" }>, ec: Output
  * (except for required-single fields, which declare at the assignment).
  */
 function emitOneOutput(
-  output: ResolvedOutput,
+  output: EmittedOutput,
   gate: GateAtom[],
   fieldShape: OutputShape,
   localVar: string,
@@ -234,7 +349,11 @@ function emitOneOutput(
   function nest(remaining: GateAtom[], child: OutputEmitCtx): void {
     if (remaining.length === 0) {
       const pathExpr = renderPathExpr(output.tokens, child);
-      const call = `execution.output_file(${pathExpr})`;
+      // A mutable input's writable copy is surfaced via mutable_copy (its host
+      // path); a regular output resolves a local path via output_file.
+      const call = output.mutable
+        ? `execution.mutable_copy(${pathExpr})`
+        : `execution.output_file(${pathExpr})`;
       if (fieldShape.kind === "list") {
         cb.line(`${localVar}.append(${call})`);
       } else if (fieldShape.optional) {
@@ -296,23 +415,29 @@ export function emitBuildOutputs(
       else if (f.shape.optional) cb.line(`${localVar}: OutputPathType | None = None`);
     }
 
+    const emitContributor = (output: EmittedOutput, scopeGate: GateAtom[]): void => {
+      const gate = outputGate(scopeGate, output, ctx.bindings);
+      const id = pyId(output.name);
+      const field = fields.find((f) => f.id === id)!;
+      emitOneOutput(output, gate, field.shape, localVarOf.get(id)!, ec, cb);
+    };
     for (const scope of ctx.outputScopes) {
       const scopeBinding = ctx.bindings.get(scope.scope);
       const scopeGate = scopeBinding?.gate ?? [];
-      for (const output of scope.outputs) {
-        const gate = outputGate(scopeGate, output, ctx.bindings);
-        const id = pyId(output.name);
-        const field = fields.find((f) => f.id === id)!;
-        emitOneOutput(output, gate, field.shape, localVarOf.get(id)!, ec, cb);
-      }
+      for (const output of scope.outputs) emitContributor(output, scopeGate);
     }
+    for (const output of collectMutableOutputs(ctx)) emitContributor(output, []);
 
-    if (fields.length === 0) {
+    const streams = streamFields(ctx);
+    if (fields.length === 0 && streams.length === 0) {
       cb.line(`return ${outputsType}()`);
     } else {
       cb.line(`return ${outputsType}(`);
       cb.indent(() => {
         for (const f of fields) cb.line(`${f.id}=${localVarOf.get(f.id)},`);
+        // Stream fields start empty; the wrapper appends to them via the
+        // handle_stdout / handle_stderr callbacks passed to execution.run.
+        for (const s of streams) cb.line(`${s.id}=[],`);
       });
       cb.line(")");
     }
