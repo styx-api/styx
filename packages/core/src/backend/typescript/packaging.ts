@@ -1,7 +1,30 @@
 import type { ProjectMeta } from "../../manifest/index.js";
 import type { EmittedPackage } from "../backend.js";
 import { CodeBuilder } from "../code-builder.js";
+import { Scope } from "../scope.js";
 import { STYXDEFS_COMPAT } from "../styxdefs-compat.js";
+
+// JS keywords that are illegal as the binding name in `export * as <name>`
+// (`default` is intentionally allowed - it is valid there).
+const NS_RESERVED = [
+  "import",
+  "export",
+  "class",
+  "function",
+  "const",
+  "let",
+  "var",
+  "return",
+  "new",
+  "delete",
+  "typeof",
+  "void",
+  "in",
+  "instanceof",
+  "enum",
+  "extends",
+  "super",
+];
 
 function description(proj: ProjectMeta): string {
   if (proj.doc?.description) return proj.doc.description;
@@ -75,8 +98,12 @@ export function generateRootIndex(packages: EmittedPackage[]): string {
     .filter((name): name is string => !!name)
     .sort();
 
+  // Dodge namespace collisions (two dirs cleaning to the same identifier, or a
+  // dir named like a keyword) the same way per-tool names are dodged.
+  const nsScope = new Scope(NS_RESERVED);
   for (const dir of dirs) {
-    cb.line(`export * as ${nsIdent(dir)} from "./${dir}/index.js";`);
+    const ns = nsScope.add(nsIdent(dir));
+    cb.line(`export * as ${ns} from "./${dir}/index.js";`);
   }
 
   return cb.toString() + "\n";

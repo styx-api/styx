@@ -38,6 +38,17 @@ describe("TypeScript emitProject packaging", () => {
     expect(index).toContain('export * as fsl from "./fsl/index.js";');
   });
 
+  it("dodges namespace identifiers that clean to the same name", () => {
+    const dup = new TypeScriptBackend().emitProject(proj, [
+      emptyPkg({ name: "a-b" }),
+      emptyPkg({ name: "a_b" }),
+    ]);
+    const index = dup.files.get("index.ts")!;
+    // Both clean to `a_b`; the second is suffix-bumped so the barrel stays valid.
+    expect(index).toContain('export * as a_b from "./a-b/index.js";');
+    expect(index).toContain('export * as a_b_2 from "./a_b/index.js";');
+  });
+
   it("emits a tsconfig.json targeting dist/", () => {
     const tsconfig = JSON.parse(out.files.get("tsconfig.json")!);
     expect(tsconfig.compilerOptions.outDir).toBe("./dist");
