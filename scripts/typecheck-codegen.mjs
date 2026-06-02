@@ -33,12 +33,17 @@ const tsProject = path.join(outDir, "typescript", "tsconfig.json");
 // (unsupported format, stub, etc.), so a silently-dropped fixture would leave
 // nothing for the type-checkers to catch and the gate would falsely pass.
 // Asserting the expected outputs exist makes a dropped tool a hard failure.
-const expectedFiles = [
-  "python/suite/dwi2response.py",
-  "python/suite/shapes.py",
-  "typescript/suite/dwi2response.ts",
-  "typescript/suite/shapes.ts",
+const expectedTools = [
+  "dwi2response",
+  "shapes",
+  "denoise_image",
+  "ants_apply_transforms",
+  "mutate",
 ];
+const expectedFiles = expectedTools.flatMap((t) => [
+  `python/suite/${t}.py`,
+  `typescript/suite/${t}.ts`,
+]);
 
 /** Run a command inheriting stdio; return its exit status (1 on spawn error). */
 function run(label, cmd, args) {

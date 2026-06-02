@@ -1,0 +1,10 @@
+{
+  "name": "mutate",
+  "source": {
+    "type": "boutiques",
+    "path": "boutiques.json"
+  },
+  "docs": {
+    "description": "Hand-written tool with a mutable File input. A mutable input is staged as a writable copy (input_file(mutable=True) on the command line) and ALSO surfaces as an OutputPathType field via mutable_copy, so it exercises both the cargs and Outputs codegen paths for the mutable primitive."
+  }
+}

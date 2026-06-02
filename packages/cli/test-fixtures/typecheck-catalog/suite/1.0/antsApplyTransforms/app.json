@@ -1,0 +1,10 @@
+{
+  "name": "antsApplyTransforms",
+  "source": {
+    "type": "boutiques",
+    "path": "boutiques.json"
+  },
+  "docs": {
+    "description": "Vendored ANTs antsApplyTransforms descriptor. Exercises a mixed (struct + bare-literal) union: the `interpolation` field has both literal arms (e.g. Linear, NearestNeighbor) and struct arms (e.g. BSpline[order]). cargs must branch on runtime shape (isinstance dict) because the literal arms are not dicts and have no `@type`."
+  }
+}
