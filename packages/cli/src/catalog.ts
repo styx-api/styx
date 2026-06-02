@@ -11,6 +11,8 @@ import type { Documentation, PackageMeta, ProjectMeta } from "@styx/core";
 export interface CatalogProject {
   meta: ProjectMeta;
   packages: CatalogPackage[];
+  /** Non-fatal issues found while walking the catalog (e.g. skipped stub apps). */
+  warnings: string[];
 }
 
 export interface CatalogPackage {
@@ -100,13 +102,24 @@ export function detectLevel(dir: string): CatalogLevel | null {
   return null;
 }
 
-function loadApp(appDir: string): CatalogApp | null {
+/**
+ * Load one app descriptor. When `warnings` is supplied (catalog-walk mode), a
+ * stub app (`app.json` present but no `source.path`) is skipped with a warning
+ * instead of aborting the whole build - real catalogs list not-yet-wrapped tools
+ * alongside wrapped ones. Without `warnings` (a direct single-app target) the
+ * missing source is a hard error, since the user pointed straight at it.
+ */
+function loadApp(appDir: string, warnings?: string[]): CatalogApp | null {
   const appJsonPath = path.join(appDir, "app.json");
   if (!exists(appJsonPath)) return null;
   const app = readJson<AppJson>(appJsonPath);
   const name = app.name ?? path.basename(appDir);
   const sourceRel = app.source?.path;
   if (!sourceRel) {
+    if (warnings) {
+      warnings.push(`${appJsonPath}: skipped (no source.path - not yet wrapped)`);
+      return null;
+    }
     throw new Error(`${appJsonPath}: missing source.path`);
   }
   return {
@@ -116,7 +129,7 @@ function loadApp(appDir: string): CatalogApp | null {
   };
 }
 
-function loadVersion(versionDir: string): CatalogPackage | null {
+function loadVersion(versionDir: string, warnings?: string[]): CatalogPackage | null {
   const versionPath = path.join(versionDir, "version.json");
   if (!exists(versionPath)) return null;
   const version = readJson<VersionJson>(versionPath);
@@ -126,7 +139,7 @@ function loadVersion(versionDir: string): CatalogPackage | null {
   for (const appName of appNames) {
     const appDir = path.join(versionDir, appName);
     if (!isDir(appDir)) continue;
-    const app = loadApp(appDir);
+    const app = loadApp(appDir, warnings);
     if (app) apps.push(app);
   }
 
@@ -152,7 +165,7 @@ function loadVersion(versionDir: string): CatalogPackage | null {
   };
 }
 
-function loadPackage(pkgDir: string): CatalogPackage | null {
+function loadPackage(pkgDir: string, warnings?: string[]): CatalogPackage | null {
   const pkgPath = path.join(pkgDir, "package.json");
   if (!exists(pkgPath)) return null;
   const pkg = readJson<PackageJson>(pkgPath);
@@ -162,7 +175,7 @@ function loadPackage(pkgDir: string): CatalogPackage | null {
   const versionDir = path.join(pkgDir, versionName);
   if (!isDir(versionDir)) return null;
 
-  const loaded = loadVersion(versionDir);
+  const loaded = loadVersion(versionDir, warnings);
   if (!loaded) return null;
 
   return {
@@ -202,13 +215,15 @@ export function loadCatalog(root: string): CatalogProject {
     );
   }
 
+  const warnings: string[] = [];
+
   if (level === "project") {
     const project = readJson<ProjectJson>(path.join(root, "project.json"));
     const packageNames = project.packages ?? listSubdirs(root);
     const packages: CatalogPackage[] = [];
     for (const name of packageNames) {
       const pkgDir = path.join(root, name);
-      const pkg = loadPackage(pkgDir);
+      const pkg = loadPackage(pkgDir, warnings);
       if (pkg) packages.push(pkg);
     }
     return {
@@ -219,22 +234,23 @@ export function loadCatalog(root: string): CatalogProject {
         license: project.license ? { description: project.license } : undefined,
       },
       packages,
+      warnings,
     };
   }
 
   if (level === "package") {
-    const pkg = loadPackage(root);
+    const pkg = loadPackage(root, warnings);
     if (!pkg) throw new Error(`${root}: package.json present but no resolvable version`);
-    return { meta: { name: pkg.meta.name }, packages: [pkg] };
+    return { meta: { name: pkg.meta.name }, packages: [pkg], warnings };
   }
 
   if (level === "version") {
-    const pkg = loadVersion(root);
+    const pkg = loadVersion(root, warnings);
     if (!pkg) throw new Error(`${root}: version.json present but failed to load`);
-    return { meta: { name: pkg.meta.name }, packages: [pkg] };
+    return { meta: { name: pkg.meta.name }, packages: [pkg], warnings };
   }
 
-  // level === "app"
+  // level === "app": a direct single-app target, so a missing source is fatal.
   const app = loadApp(root);
   if (!app) throw new Error(`${root}: app.json present but missing source.path`);
   return {
@@ -245,5 +261,6 @@ export function loadCatalog(root: string): CatalogProject {
         apps: [app],
       },
     ],
+    warnings,
   };
 }

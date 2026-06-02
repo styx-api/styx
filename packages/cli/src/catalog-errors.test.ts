@@ -62,12 +62,22 @@ describe("loadCatalog: missing source.path in app.json", () => {
     expect(() => loadCatalog(tmp)).toThrow(/app\.json: missing source\.path/);
   });
 
-  it("surfaces during a project-level walk too", () => {
+  it("skips a sourceless stub during a project-level walk and warns", () => {
+    // Real catalogs (niwrap) list not-yet-wrapped tools alongside wrapped ones;
+    // a stub must not abort the whole build - it is skipped with a warning.
     writeFile("project.json", JSON.stringify({ name: "p", packages: ["pkg"] }));
     writeFile("pkg/package.json", JSON.stringify({ name: "pkg", default: "1" }));
-    writeFile("pkg/1/version.json", JSON.stringify({ name: "1", apps: ["tool"] }));
-    writeFile("pkg/1/tool/app.json", JSON.stringify({ name: "tool" }));
-    expect(() => loadCatalog(tmp)).toThrow(/missing source\.path/);
+    writeFile("pkg/1/version.json", JSON.stringify({ name: "1", apps: ["wrapped", "stub"] }));
+    writeFile(
+      "pkg/1/wrapped/app.json",
+      JSON.stringify({ name: "wrapped", source: { path: "x.json" } }),
+    );
+    writeFile("pkg/1/stub/app.json", JSON.stringify({ name: "stub" }));
+
+    const cat = loadCatalog(tmp);
+    expect(cat.packages[0]!.apps.map((a) => a.name)).toEqual(["wrapped"]);
+    expect(cat.warnings).toHaveLength(1);
+    expect(cat.warnings[0]).toMatch(/stub[\\/]app\.json: skipped \(no source\.path/);
   });
 });
 

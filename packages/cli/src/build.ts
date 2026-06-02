@@ -11,6 +11,7 @@ import {
   type EmitResult,
   type EmittedApp,
   type EmittedPackage,
+  type FormatName,
   type PackageMeta,
   type ProjectMeta,
 } from "@styx/core";
@@ -18,6 +19,9 @@ import {
 import { loadCatalog, type CatalogProject } from "./catalog.js";
 
 export type BuildMode = "scripts" | "single" | "multi";
+
+/** Frontend formats the compiler can parse; others are skipped with a warning. */
+const SUPPORTED_FORMATS: ReadonlySet<string> = new Set<FormatName>(["boutiques", "argdump"]);
 
 export interface BuildOptions {
   /** Single-descriptor input file (mutually exclusive with `catalog`). */
@@ -69,7 +73,7 @@ export function build(options: BuildOptions): BuildResult {
 function buildSingle(inputPath: string, options: BuildOptions): BuildResult {
   const result: BuildResult = { files: [], errors: [], warnings: [] };
 
-  const ctx = readAndCompile(inputPath, undefined, undefined, result);
+  const ctx = readAndCompile(inputPath, undefined, undefined, undefined, result);
   if (!ctx) return result;
 
   for (const backend of options.backends) {
@@ -94,6 +98,7 @@ function buildCatalog(catalogPath: string, options: BuildOptions): BuildResult {
     result.errors.push(e instanceof Error ? e.message : String(e));
     return result;
   }
+  result.warnings.push(...catalog.warnings);
 
   for (const backend of options.backends) {
     runBackendOverCatalog(backend, catalog, options.mode, options.out, result);
@@ -109,6 +114,7 @@ function buildCatalog(catalogPath: string, options: BuildOptions): BuildResult {
  */
 function readAndCompile(
   sourcePath: string,
+  format: string | undefined,
   pkg: PackageMeta | undefined,
   proj: ProjectMeta | undefined,
   result: BuildResult,
@@ -121,7 +127,14 @@ function readAndCompile(
     return null;
   }
 
-  const parsed = compile(source, sourcePath);
+  // Honor the catalog's declared format when it's one we support, so we don't
+  // fall back to content sniffing (and get a clearer error if it mis-parses).
+  const parsed = compile(
+    source,
+    format && SUPPORTED_FORMATS.has(format)
+      ? { filename: sourcePath, format: format as FormatName }
+      : sourcePath,
+  );
   for (const e of parsed.errors) result.errors.push(`${sourcePath}: ${e.message}`);
   for (const w of parsed.warnings) result.warnings.push(`${sourcePath}: ${w.message}`);
 
@@ -154,7 +167,16 @@ function runBackendOverCatalog(
     const appsEmitted: EmittedApp[] = [];
 
     for (const app of pkg.apps) {
-      const ctx = readAndCompile(app.sourcePath, pkg.meta, catalog.meta, result);
+      // A tool can declare a format we have no frontend for yet (e.g. Workbench).
+      // Skip it with a warning rather than failing the whole catalog build.
+      if (app.sourceFormat && !SUPPORTED_FORMATS.has(app.sourceFormat)) {
+        result.warnings.push(
+          `${app.sourcePath}: skipped (unsupported source format "${app.sourceFormat}")`,
+        );
+        continue;
+      }
+
+      const ctx = readAndCompile(app.sourcePath, app.sourceFormat, pkg.meta, catalog.meta, result);
       if (!ctx) continue;
 
       const emitted = backend.emitApp(ctx);
@@ -164,6 +186,15 @@ function runBackendOverCatalog(
       for (const [name, content] of emitted.files) {
         result.files.push({ path: path.join(backendRoot, pkgDir, name), content });
       }
+    }
+
+    // A suite whose every tool was skipped (e.g. all-Workbench) emits nothing;
+    // don't synthesize an empty package or wire it into the project metadata.
+    if (appsEmitted.length === 0) {
+      if (pkg.apps.length > 0) {
+        result.warnings.push(`${pkgDir}: no tools emitted, package skipped`);
+      }
+      continue;
     }
 
     if (mode !== "scripts" && backend.emitPackage) {
@@ -176,7 +207,7 @@ function runBackendOverCatalog(
     }
   }
 
-  if (mode === "multi" && backend.emitProject) {
+  if (mode === "multi" && backend.emitProject && packagesEmitted.length > 0) {
     const projEmit = backend.emitProject(catalog.meta, packagesEmitted);
     appendEmitMessages(result, projEmit, backend, catalog.meta.name);
     for (const [name, content] of projEmit.files) {
