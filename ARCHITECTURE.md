@@ -9,7 +9,8 @@ flowchart LR
     subgraph Frontend
         F1[Boutiques]
         F2[Argparse]
-        F3[...]
+        F3[Workbench]
+        F4[...]
     end
 
     subgraph IR
@@ -30,7 +31,7 @@ flowchart LR
         B5[R]
     end
 
-    F1 & F2 & F3 --> IR1
+    F1 & F2 & F3 & F4 --> IR1
     IR1 --> IR2 --> S1 --> S2
 
     S2 --> B1 & B2 & B3 & B4 & B5
@@ -90,19 +91,18 @@ The solver attaches everything a backend needs to a binding during the same walk
 | **Backends**        | Python mature, TS/R partial; each implements a complex `LanguageProvider` protocol       | TypeScript, JSON Schema, Python, Boutiques complete; R deferred; backends just translate solved bindings                       |
 | **Output files**    | First-class: path templates with param refs, suffix stripping, fallbacks                 | First-class via gate-on-binding: scope-by-IR-node bucketing, `ResolvedOutput` with path templates, suffix stripping, fallbacks |
 
-Styx 2 is an evolved **successor** to Styx 1, not a drop-in replacement: the goal is to cover all of Styx 1's functionality while improving on its design, so breaking changes from Styx 1's output shape are expected and acceptable. Styx 1 functionality not yet implemented in Styx 2:
+Styx 2 is an evolved **successor** to Styx 1, not a drop-in replacement: the goal is to cover all of Styx 1's functionality while improving on its design, so breaking changes from Styx 1's output shape are expected and acceptable. Stream outputs (`stdout-output` / `stderr-output`) and mutable inputs (which surface as outputs via a writable copy) are implemented. Styx 1 functionality not yet implemented in Styx 2:
 
-- **Stream outputs** (`stdout-output` / `stderr-output`) - Boutiques parse path exists, downstream IR shape not yet wired
-- **Mutable inputs** - tools that overwrite their input file (Boutiques `x-styx-mutable`) - solver and runner integration pending
 - **Boutiques constraint groups** - mutual exclusion, value-disables, value-requires - serialized round-trip deferred
 
 ## Roadmap
 
-Long-term, Boutiques shifts from being the primary frontend to primarily a **backend** (for cross-compatibility and bootstrapping NiWrap onto the new compiler). Planned frontends:
+Long-term, Boutiques shifts from being the primary frontend to primarily a **backend** (for cross-compatibility and bootstrapping NiWrap onto the new compiler). Frontends:
 
-- **Custom TypeScript-types-like language** - the intended primary way to define CLI specs
-- **Serialized Python argparse** - parse argparse definitions
-- **Boutiques** (current) - remains as both a frontend and a backend
+- **Boutiques** - remains as both a frontend and a backend
+- **Serialized Python argparse** (`argdump`) - implemented
+- **Connectome Workbench** (`workbench`) - implemented; covers NiWrap's `wb_command` suite
+- **Custom TypeScript-types-like language** (planned) - the intended primary way to define CLI specs
 
 ## Ecosystem Context
 
