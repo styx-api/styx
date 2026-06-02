@@ -75,7 +75,7 @@ describe("Python generation - type declarations", () => {
 
   it("maps optional to nullable field", () => {
     const code = generate(seq(opt(str("name"))));
-    expect(code).toMatch(/name: str \| None/);
+    expect(code).toMatch(/name: typing\.NotRequired\[str \| None\]/);
   });
 
   it("maps repeat to list type", () => {
@@ -86,6 +86,73 @@ describe("Python generation - type declarations", () => {
   it("maps literal union (alternative of literals) to typing.Literal union", () => {
     const code = generate(seq(alt(lit("a"), lit("b"), lit("c"))));
     expect(code).toMatch(/typing\.Literal\["a"\]\s*\|\s*typing\.Literal\["b"\]/);
+  });
+});
+
+describe("Python generation - TypedDict NotRequired (mypy cleanliness)", () => {
+  // The params factory builds the initial dict literal with only required +
+  // explicitly-defaulted fields, then conditionally adds optional-without-default
+  // fields (`if x is not None: params["x"] = x`). Those conditionally-set fields
+  // must be NotRequired in the TypedDict, or mypy flags "Missing keys" at the
+  // factory's dict literal. The classification mirrors the factory exactly:
+  // optional && !hasExplicitDefault.
+
+  it("marks optional-without-default fields NotRequired", () => {
+    const code = generate(seq(lit("t"), str("name"), opt(str("opt_name"))), { app: { id: "t" } });
+    // Required field: bare, no NotRequired.
+    expect(code).toMatch(/^ {4}name: str$/m);
+    // Optional-without-default field: NotRequired.
+    expect(code).toMatch(/opt_name: typing\.NotRequired\[str \| None\]/);
+  });
+
+  it("keeps explicitly-defaulted optional fields required (factory always writes them)", () => {
+    const code = generate(
+      seq(lit("t"), opt(seq(lit("-v")), { name: "verbose", defaultValue: false })),
+      { app: { id: "t" } },
+    );
+    // Defaulted field is nullable but required - no NotRequired wrapper.
+    expect(code).toMatch(/verbose: bool \| None/);
+    expect(code).not.toMatch(/verbose: typing\.NotRequired/);
+  });
+
+  it("keeps required (non-optional, no default) fields required", () => {
+    const code = generate(seq(lit("t"), str("name")), { app: { id: "t" } });
+    expect(code).toMatch(/^ {4}name: str$/m);
+    expect(code).not.toMatch(/name: typing\.NotRequired/);
+  });
+
+  it("marks optional list fields NotRequired", () => {
+    const code = generate(seq(lit("t"), opt(rep(str("item"), "items"))), { app: { id: "t" } });
+    expect(code).toMatch(/items: typing\.NotRequired\[list\[str\] \| None\]/);
+  });
+
+  it("marks optional fields NotRequired inside a functional-syntax TypedDict (non-ident key)", () => {
+    // A `@type` discriminator forces the functional `TypedDict(...)` syntax; the
+    // NotRequired wrapping must apply there too.
+    const code = generate(seq(lit("bet"), opt(str("frac"))), {
+      app: { id: "bet" },
+      package: { name: "fsl" },
+    });
+    expect(code).toMatch(/"frac": typing\.NotRequired\[str \| None\]/);
+  });
+
+  it("binds NotRequired optional fields to a narrowed .get() local in cargs", () => {
+    // Since the field is NotRequired, the factory omits it when None. The cargs
+    // builder binds the value to a local read via `.get()` (a bare subscript would
+    // KeyError when the caller omits the key) and reuses that local - one lookup,
+    // absent-safe, and mypy can narrow it.
+    const code = generate(seq(lit("t"), opt(seq(lit("-n"), int("nthreads")))), {
+      app: { id: "t" },
+    });
+    const m = code.match(/(\w+) = params\.get\("nthreads"\)/);
+    expect(m).toBeTruthy();
+    const v = m![1];
+    expect(code).toContain(`if ${v} is not None:`);
+    expect(code).toContain(`cargs.append(str(${v}))`);
+    // No re-subscript of the omittable key outside the factory's own conditional set.
+    expect(code).not.toContain('cargs.append(str(params["nthreads"]))');
+    // The factory genuinely omits the key (justifying the .get() read).
+    expect(code).toMatch(/if nthreads is not None:\s*\n\s*params\["nthreads"\] = nthreads/);
   });
 });
 
@@ -126,7 +193,7 @@ describe("Python generation - docstrings", () => {
   it("emits docstring for optional scalar field (doc on inner terminal)", () => {
     const code = generate(seq(lit("cmd"), opt(seq(lit("--out"), str("output", "Output path")))));
     expect(code).toContain('"""Output path"""');
-    expect(code).toMatch(/output: str \| None/);
+    expect(code).toMatch(/output: typing\.NotRequired\[str \| None\]/);
   });
 
   it("emits docstrings for fields inside repeat struct", () => {
@@ -168,9 +235,11 @@ describe("Python generation - cargs building", () => {
     expect(code).toContain('cargs.append(execution.input_file(params["infile"]))');
   });
 
-  it("emits is-not-None check for optional params", () => {
+  it("binds optional params to a narrowed local read via .get() (key may be absent)", () => {
     const code = generate(seq(opt(str("name"))));
-    expect(code).toContain('if params["name"] is not None:');
+    const m = code.match(/(\w+) = params\.get\("name"\)/);
+    expect(m).toBeTruthy();
+    expect(code).toContain(`if ${m![1]} is not None:`);
   });
 
   it("emits truthy check for bool flags", () => {
@@ -195,9 +264,14 @@ describe("Python generation - cargs building", () => {
 
   it("handles nested optional with flag and value", () => {
     const code = generate(seq(opt(seq(lit("-f"), float("threshold")))));
-    expect(code).toContain('if params["threshold"] is not None:');
+    // The optional binds a narrowed local via .get() (absent-safe, single lookup);
+    // both the guard and the inner value read use that local.
+    const m = code.match(/(\w+) = params\.get\("threshold"\)/);
+    expect(m).toBeTruthy();
+    const v = m![1];
+    expect(code).toContain(`if ${v} is not None:`);
     expect(code).toContain('cargs.append("-f")');
-    expect(code).toContain('cargs.append(str(params["threshold"]))');
+    expect(code).toContain(`cargs.append(str(${v}))`);
   });
 
   it("handles literal union alternative as str() append", () => {
@@ -217,7 +291,8 @@ describe("Python generation - complex IR", () => {
       ),
     );
     expect(code).toContain("input: str");
-    expect(code).toMatch(/threshold: float \| None/);
+    // Optional-no-default -> NotRequired; defaulted optional (verbose) stays required.
+    expect(code).toMatch(/threshold: typing\.NotRequired\[float \| None\]/);
     expect(code).toMatch(/verbose: bool \| None/);
     expect(code).toContain('cargs.append("tool")');
     expect(code).toContain('if params["verbose"]:');
@@ -225,10 +300,13 @@ describe("Python generation - complex IR", () => {
 
   it("handles repeat inside optional", () => {
     const code = generate(seq(opt(seq(lit("-c"), rep(float("coord"), "coords")))));
-    expect(code).toMatch(/coords: list\[float\] \| None/);
-    expect(code).toContain('if params["coords"] is not None:');
-    const match = code.match(/for (\w+) in params\["coords"\]:/);
-    expect(match).toBeTruthy();
+    expect(code).toMatch(/coords: typing\.NotRequired\[list\[float\] \| None\]/);
+    const m = code.match(/(\w+) = params\.get\("coords"\)/);
+    expect(m).toBeTruthy();
+    const v = m![1];
+    expect(code).toContain(`if ${v} is not None:`);
+    // The for-loop iterates the narrowed local, not a re-subscript.
+    expect(code).toContain(`for item0 in ${v}:`);
   });
 
   it("handles alternative with non-literal variants (discriminated union)", () => {
@@ -302,6 +380,60 @@ describe("Python generation - discriminated unions", () => {
     expect(code).toContain('execution.input_file(params["source"]["file"])');
     expect(code).toContain('cargs.append("--url")');
     expect(code).toContain('params["source"]["url"]');
+  });
+
+  // Regression (mrtrix dwi2response): a union variant contains a union-typed
+  // field, and that inner union is shared across sibling variants. The inner
+  // union is discovered deep under the FIRST variant but also referenced by a
+  // LATER sibling - the old reverse-discovery emission ordered the later
+  // variant's TypedDict BEFORE the inner union alias, so Python (eager type
+  // evaluation) raised NameError at import and mypy flagged "used before
+  // definition". The topological sort must declare every type after its
+  // dependencies.
+  it("orders a union-inside-union-variant alias before all of its users", () => {
+    const wmAlgo = () => namedAlt("wm_algo", lit("fa"), lit("tax"), lit("tournier"));
+    const code = generate(
+      seq(
+        lit("dwi2response"),
+        namedAlt(
+          "algorithm",
+          // First variant discovers the inner `wm_algo` union deep.
+          seq(lit("dhollander"), path("input"), opt(seq(lit("-wm_algo"), wmAlgo()))),
+          seq(lit("fa"), path("input")),
+          // A later sibling references the SAME (deduped) inner union.
+          seq(lit("msmt_5tt"), path("input"), opt(seq(lit("-wm_algo"), wmAlgo()))),
+        ),
+      ),
+      { app: { id: "dwi2response" } },
+    );
+
+    // The literal-union alias (e.g. Dwi2responseWmAlgo = Literal["fa"] | ...)
+    // must be declared before every field that references it.
+    const aliasName = code.match(/^(\w+) = typing\.Literal\["fa"\]/m)?.[1];
+    expect(aliasName).toBeTruthy();
+    const defIdx = code.indexOf(`${aliasName} = typing.Literal`);
+    const refs = [...code.matchAll(new RegExp(`"wm_algo": typing\\.\\w+\\[${aliasName}`, "g"))];
+    // dhollander + msmt_5tt both reference it.
+    expect(refs.length).toBeGreaterThanOrEqual(2);
+    for (const r of refs) expect(r.index!).toBeGreaterThan(defIdx);
+
+    // The top-level discriminated-union alias (`Algorithm = A | B | ...`) must
+    // come after every variant TypedDict it lists.
+    const unionLine = code.match(/^(\w+) = (\w+(?: \| \w+)+)$/m);
+    const unionFull = unionLine?.[0];
+    const unionRhs = unionLine?.[2];
+    expect(unionRhs).toBeTruthy();
+    const unionIdx = code.indexOf(unionFull!);
+    for (const variant of unionRhs!.split(" | ")) {
+      const variantDef = code.search(
+        new RegExp(
+          `^(?:${variant} = typing\\.TypedDict|class ${variant}\\(typing\\.TypedDict)`,
+          "m",
+        ),
+      );
+      expect(variantDef).toBeGreaterThanOrEqual(0);
+      expect(variantDef).toBeLessThan(unionIdx);
+    }
   });
 
   // Regression: a mixed union (struct + bare-literal variants, e.g. ants
@@ -554,7 +686,10 @@ describe("Python generation - join", () => {
 
   it("handles optional wrapping a joined sequence", () => {
     const code = generate(seq(opt(seqJoin("=", lit("--output"), str("path")))));
-    expect(code).toContain('if params["path"] is not None:');
+    // Optional at statement level binds a narrowed local via .get(), then guards.
+    const m = code.match(/(\w+) = params\.get\("path"\)/);
+    expect(m).toBeTruthy();
+    expect(code).toContain(`if ${m![1]} is not None:`);
     expect(code).toContain('"=".join(');
     const pushCount = (code.match(/cargs\.append/g) || []).length;
     expect(pushCount).toBe(1);
@@ -562,7 +697,9 @@ describe("Python generation - join", () => {
 
   it("handles repeat with join inside optional", () => {
     const code = generate(seq(opt(seq(lit("-c"), repJoin(",", float("coord"), "coords")))));
-    expect(code).toContain('if params["coords"] is not None:');
+    const m = code.match(/(\w+) = params\.get\("coords"\)/);
+    expect(m).toBeTruthy();
+    expect(code).toContain(`if ${m![1]} is not None:`);
     expect(code).toContain('",".join(');
     expect(code).toContain('cargs.append("-c")');
   });
@@ -596,9 +733,12 @@ describe("Python generation - join", () => {
         ),
       ),
     );
-    expect(code).toMatch(/"0" if params\["inv"\] else "1"/);
     // The optional wraps the inner seqJoin into a ternary inside the outer join.
-    expect(code).toMatch(/if params\["inv"\] is not None else ""/);
+    // A walrus binds the narrowed local read via .get() (key may be absent); the
+    // lazy ternary only evaluates the inner expr (which uses the local) when present.
+    const m = code.match(/\((\w+) := params\.get\("inv"\)\) is not None else ""/);
+    expect(m).toBeTruthy();
+    expect(code).toContain(`"0" if ${m![1]} else "1"`);
   });
 
   it("discriminated union with seqJoin variants inside seqJoin emits chained ternary", () => {

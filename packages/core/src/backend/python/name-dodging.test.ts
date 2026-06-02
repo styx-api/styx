@@ -37,7 +37,7 @@ describe("Python name dodging - host vs wire", () => {
       { app: { id: "tool" } },
     );
     expect(code).toMatch(/Tool = typing\.TypedDict\(/);
-    expect(code).toMatch(/"lambda":\s*float\s*\|\s*None/);
+    expect(code).toMatch(/"lambda":\s*typing\.NotRequired\[float\s*\|\s*None\]/);
     expect(code).toMatch(/lambda_:\s*float\s*\|\s*None/);
   });
 

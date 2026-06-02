@@ -140,7 +140,11 @@ describe("python outputs - codegen", () => {
       ],
     };
     const code = generate(root, { app: { id: "tool" } });
-    expect(code).toContain('if params["input"] is not None:');
+    // Optional present-gate binds a narrowed local read via .get() (the key is
+    // NotRequired / may be absent), then guards on it.
+    const m = code.match(/(\w+) = params\.get\("input"\)/);
+    expect(m).toBeTruthy();
+    expect(code).toContain(`if ${m![1]} is not None:`);
     expect(code).toContain("out_file_v = execution.output_file(");
   });
 

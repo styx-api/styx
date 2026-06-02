@@ -3,6 +3,7 @@ import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
 import type { SigEntry, SigOptions } from "../sig-entries.js";
 import { snakeCase } from "../string-case.js";
+import { structKey, unionKey } from "../type-keys.js";
 import type { ArgResult } from "./arg-builder.js";
 import { buildArgs, resultToStmt } from "./arg-builder.js";
 import { mapType, pyStr } from "./typemap.js";
@@ -161,11 +162,21 @@ function emitStructTypedDict(
     }
     const fi = fieldInfo.get(fieldName);
     const hasDefault = fi?.defaultValue !== undefined;
+    const isOptional = fieldType.kind === "optional";
     let typeExpr = mapType(fieldType, resolve);
     // Fields with defaults are nullable: missing/None means "use the default".
     // Mirrors the TS backend's `field?:` semantics on TypedDict-like shapes.
     if (hasDefault && !typeExpr.includes("None")) {
       typeExpr = `${typeExpr} | None`;
+    }
+    // Optional-without-default fields are only set conditionally by the params
+    // factory (`if x is not None: params["x"] = x`), so they're absent from the
+    // initial dict literal. Mark them NotRequired so mypy doesn't flag "Missing
+    // keys" at every factory's dict literal. Mirrors the factory's classification
+    // exactly: `isOptional && !hasExplicitDefault` <-> conditional set. Defaulted
+    // and required fields stay required - the factory always writes them.
+    if (isOptional && !hasDefault) {
+      typeExpr = `typing.NotRequired[${typeExpr}]`;
     }
     typedEntries.push({ key: fieldName, type: typeExpr, doc: fi?.doc });
   }
@@ -198,6 +209,53 @@ function emitStructTypedDict(
   }
 }
 
+/** Structural identity key for a NamedType (only structs/unions are collected). */
+function declKey(type: BoundType): string | undefined {
+  if (type.kind === "struct") return structKey(type);
+  if (type.kind === "union") return unionKey(type);
+  return undefined;
+}
+
+/**
+ * Collect the keys of every named struct/union directly referenced by `type`'s
+ * emitted expression. Wrappers (optional/list) are transparent; a nested
+ * struct/union is its own declaration, so we record its key and stop. This is
+ * the dependency edge set used to order declarations.
+ */
+function collectRefs(type: BoundType, namedTypes: Map<string, string>, out: Set<string>): void {
+  switch (type.kind) {
+    case "optional":
+      collectRefs(type.inner, namedTypes, out);
+      break;
+    case "list":
+      collectRefs(type.item, namedTypes, out);
+      break;
+    case "struct": {
+      const k = structKey(type);
+      if (namedTypes.has(k)) out.add(k);
+      break;
+    }
+    case "union": {
+      const k = unionKey(type);
+      if (namedTypes.has(k)) out.add(k);
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+/** Direct named-type dependencies of one declaration (its field/variant types). */
+function declDeps(type: BoundType, namedTypes: Map<string, string>): Set<string> {
+  const out = new Set<string>();
+  if (type.kind === "struct") {
+    for (const fieldType of Object.values(type.fields)) collectRefs(fieldType, namedTypes, out);
+  } else if (type.kind === "union") {
+    for (const v of type.variants) collectRefs(v.type, namedTypes, out);
+  }
+  return out;
+}
+
 export function emitTypeDeclarations(
   typeDecls: NamedType[],
   namedTypes: Map<string, string>,
@@ -208,11 +266,43 @@ export function emitTypeDeclarations(
 ): void {
   const resolve = resolveTypeName(namedTypes);
 
-  // Python evaluates type expressions eagerly (no hoisting like TS), so we
-  // emit declarations in reverse-discovery order: leaves before roots. The
-  // walker pushes parents before children, so reversing yields a topological
-  // order suitable for evaluation.
-  const ordered = [...typeDecls].reverse();
+  // Python evaluates type expressions eagerly (no hoisting like TS): a name
+  // must be defined before any declaration references it. The collector yields
+  // types in forward-discovery order (parents before children); the old
+  // emission just reversed that, but reverse-discovery breaks for shared types
+  // in a DAG - e.g. a union arm discovered deep under the FIRST variant that is
+  // also referenced by a LATER sibling arm ends up emitted after its user.
+  // Instead, do a real topological sort over the dependency graph (post-order
+  // DFS so a type is emitted only after every type it references). Back-edges
+  // from a cycle are ignored - the recursion guard breaks them, and recursive
+  // descriptor types don't occur in practice.
+  const byKey = new Map<string, NamedType>();
+  for (const decl of typeDecls) {
+    const k = declKey(decl.type);
+    if (k !== undefined) byKey.set(k, decl);
+  }
+
+  const ordered: NamedType[] = [];
+  const visited = new Set<string>();
+  const onStack = new Set<string>();
+  function emitInOrder(key: string): void {
+    if (visited.has(key)) return;
+    const decl = byKey.get(key);
+    if (decl === undefined) return;
+    onStack.add(key);
+    for (const dep of declDeps(decl.type, namedTypes)) {
+      if (!onStack.has(dep)) emitInOrder(dep);
+    }
+    onStack.delete(key);
+    visited.add(key);
+    ordered.push(decl);
+  }
+  // Drive from the original discovery order so independent declarations keep a
+  // stable, deterministic relative order.
+  for (const decl of typeDecls) {
+    const k = declKey(decl.type);
+    if (k !== undefined) emitInOrder(k);
+  }
 
   for (const { name, type } of ordered) {
     if (type.kind === "struct") {
