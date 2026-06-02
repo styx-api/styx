@@ -100,9 +100,11 @@ function buildCatalog(catalogPath: string, options: BuildOptions): BuildResult {
   }
   result.warnings.push(...catalog.warnings);
 
-  for (const backend of options.backends) {
-    runBackendOverCatalog(backend, catalog, options.mode, options.out, result);
-  }
+  // Skip/empty warnings are backend-independent, so only the first backend pass
+  // records them - otherwise they'd be duplicated once per backend.
+  options.backends.forEach((backend, i) => {
+    runBackendOverCatalog(backend, catalog, options.mode, options.out, result, i === 0);
+  });
   return result;
 }
 
@@ -158,6 +160,7 @@ function runBackendOverCatalog(
   mode: BuildMode,
   outRoot: string,
   result: BuildResult,
+  recordWarnings: boolean,
 ): void {
   const backendRoot = path.resolve(outRoot, backend.target);
   const packagesEmitted: EmittedPackage[] = [];
@@ -165,14 +168,18 @@ function runBackendOverCatalog(
   for (const pkg of catalog.packages) {
     const pkgDir = pkg.meta.name ?? "package";
     const appsEmitted: EmittedApp[] = [];
+    let skipped = 0;
 
     for (const app of pkg.apps) {
       // A tool can declare a format we have no frontend for yet (e.g. Workbench).
       // Skip it with a warning rather than failing the whole catalog build.
       if (app.sourceFormat && !SUPPORTED_FORMATS.has(app.sourceFormat)) {
-        result.warnings.push(
-          `${app.sourcePath}: skipped (unsupported source format "${app.sourceFormat}")`,
-        );
+        skipped++;
+        if (recordWarnings) {
+          result.warnings.push(
+            `${app.sourcePath}: skipped (unsupported source format "${app.sourceFormat}")`,
+          );
+        }
         continue;
       }
 
@@ -190,9 +197,10 @@ function runBackendOverCatalog(
 
     // A suite whose every tool was skipped (e.g. all-Workbench) emits nothing;
     // don't synthesize an empty package or wire it into the project metadata.
+    // Only warn when emptiness is due to skips - genuine failures already errored.
     if (appsEmitted.length === 0) {
-      if (pkg.apps.length > 0) {
-        result.warnings.push(`${pkgDir}: no tools emitted, package skipped`);
+      if (recordWarnings && skipped > 0 && skipped === pkg.apps.length) {
+        result.warnings.push(`${pkgDir}: all ${skipped} tool(s) skipped, package omitted`);
       }
       continue;
     }
