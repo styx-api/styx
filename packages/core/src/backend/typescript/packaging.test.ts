@@ -32,10 +32,21 @@ describe("TypeScript emitProject packaging", () => {
     expect(pkg.type).toBe("module");
   });
 
-  it("emits a root barrel re-exporting each suite", () => {
+  it("emits a root barrel namespacing each suite", () => {
     const index = out.files.get("index.ts");
-    expect(index).toContain('export * from "./ants/index.js";');
-    expect(index).toContain('export * from "./fsl/index.js";');
+    expect(index).toContain('export * as ants from "./ants/index.js";');
+    expect(index).toContain('export * as fsl from "./fsl/index.js";');
+  });
+
+  it("dodges namespace identifiers that clean to the same name", () => {
+    const dup = new TypeScriptBackend().emitProject(proj, [
+      emptyPkg({ name: "a-b" }),
+      emptyPkg({ name: "a_b" }),
+    ]);
+    const index = dup.files.get("index.ts")!;
+    // Both clean to `a_b`; the second is suffix-bumped so the barrel stays valid.
+    expect(index).toContain('export * as a_b from "./a-b/index.js";');
+    expect(index).toContain('export * as a_b_2 from "./a_b/index.js";');
   });
 
   it("emits a tsconfig.json targeting dist/", () => {

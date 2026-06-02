@@ -17,9 +17,13 @@ export interface NamedType {
  * to a hint string (derived from the root name or field/variant names).
  *
  * @param rootType - The root BoundType to walk.
- * @param rootName - The hint for the root type's name.
+ * @param rootName - The hint for the root type's name (already tool-qualified).
  * @param scope - Symbol scope for collision avoidance.
  * @param nameTransform - Converts a hint string to a type name (e.g. pascalCase, snake_case).
+ * @param nestedPrefix - Prepended to every NON-root type name so a suite's flat
+ *   barrel (`export * from`/`from .x import *`) can't collide two tools' types
+ *   that share a local field/variant name (e.g. `Outputtype`). Pass the tool's
+ *   type prefix (its root name); defaults to "" for single-tool emission.
  * @returns `namedTypes` maps structural keys to assigned names, `typeDecls` lists declarations in order.
  */
 export function collectNamedTypes(
@@ -27,20 +31,25 @@ export function collectNamedTypes(
   rootName: string,
   scope: Scope,
   nameTransform: (hint: string) => string,
+  nestedPrefix = "",
 ): { namedTypes: Map<string, string>; typeDecls: NamedType[] } {
   const namedTypes = new Map<string, string>();
   const typeDecls: NamedType[] = [];
 
-  function visit(type: BoundType, hint: string): void {
+  function nameFor(hint: string, isRoot: boolean): string {
+    return scope.add(isRoot ? nameTransform(hint) : nestedPrefix + nameTransform(hint));
+  }
+
+  function visit(type: BoundType, hint: string, isRoot: boolean): void {
     switch (type.kind) {
       case "struct": {
         const key = structKey(type);
         if (!namedTypes.has(key)) {
-          const name = scope.add(nameTransform(hint));
+          const name = nameFor(hint, isRoot);
           namedTypes.set(key, name);
           typeDecls.push({ name, type });
           for (const [fieldName, fieldType] of Object.entries(type.fields)) {
-            visit(fieldType, fieldName);
+            visit(fieldType, fieldName, false);
           }
         }
         break;
@@ -48,27 +57,29 @@ export function collectNamedTypes(
       case "union": {
         const key = unionKey(type);
         if (!namedTypes.has(key)) {
-          const name = scope.add(nameTransform(hint));
+          const name = nameFor(hint, isRoot);
           namedTypes.set(key, name);
           typeDecls.push({ name, type });
           for (const v of type.variants) {
-            visit(v.type, v.name ?? hint);
+            visit(v.type, v.name ?? hint, false);
           }
         }
         break;
       }
+      // Wrappers are transparent: an optional/list at the root still names its
+      // inner type as the root (no prefix), matching the pre-prefix behavior.
       case "optional":
-        visit(type.inner, hint);
+        visit(type.inner, hint, isRoot);
         break;
       case "list":
-        visit(type.item, hint);
+        visit(type.item, hint, isRoot);
         break;
       default:
         break;
     }
   }
 
-  visit(rootType, rootName);
+  visit(rootType, rootName, true);
   return { namedTypes, typeDecls };
 }
 

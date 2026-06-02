@@ -157,9 +157,11 @@ export function computePublicNames(appId: string | undefined): PublicNames {
   };
 }
 
-export function generatePython(ctx: CodegenContext): string {
+export function generatePython(ctx: CodegenContext, packageScope?: Scope): string {
   const cb = new CodeBuilder("    ");
-  const scope = new Scope(PY_RESERVED);
+  // A package-shared scope keeps top-level names unique across every tool in the
+  // suite's `from .x import *` re-exports; without one a per-tool scope suffices.
+  const scope = packageScope ?? new Scope(PY_RESERVED);
 
   const appId = ctx.app?.id;
   const pkg = ctx.package?.name;
@@ -190,7 +192,15 @@ export function generatePython(ctx: CodegenContext): string {
     wrapper: reg(publicNames.wrapper),
   };
 
-  const { namedTypes, typeDecls } = collectNamedTypes(rootType, names.params, scope, pascalCase);
+  // Prefix nested type names with the tool's root name so a suite's flat
+  // `from .x import *` re-exports don't shadow same-named types across tools.
+  const { namedTypes, typeDecls } = collectNamedTypes(
+    rootType,
+    names.params,
+    scope,
+    pascalCase,
+    appId ? names.params : "",
+  );
 
   names.params =
     (rootType.kind === "struct" ? namedTypes.get(structKey(rootType)) : undefined) ??
@@ -371,8 +381,8 @@ export class PythonBackend implements Backend {
   readonly name = "python";
   readonly target = "python";
 
-  emitApp(ctx: CodegenContext): EmittedApp {
-    const code = generatePython(ctx);
+  emitApp(ctx: CodegenContext, scope?: Scope): EmittedApp {
+    const code = generatePython(ctx, scope);
     const fileName = `${appModuleName(ctx.app)}.py`;
     return {
       meta: ctx.app,
@@ -380,6 +390,10 @@ export class PythonBackend implements Backend {
       errors: [],
       warnings: [],
     };
+  }
+
+  newPackageScope(): Scope {
+    return new Scope(PY_RESERVED);
   }
 
   emitPackage(pkg: PackageMeta, apps: EmittedApp[]): EmittedPackage {

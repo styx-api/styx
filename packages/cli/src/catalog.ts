@@ -134,7 +134,9 @@ function loadVersion(versionDir: string, warnings?: string[]): CatalogPackage | 
   if (!exists(versionPath)) return null;
   const version = readJson<VersionJson>(versionPath);
 
-  const appNames = version.apps ?? listSubdirs(versionDir);
+  // Sort the directory fallback so app order (and thus any shared-scope name
+  // dodging) is deterministic regardless of filesystem iteration order.
+  const appNames = version.apps ?? listSubdirs(versionDir).sort();
   const apps: CatalogApp[] = [];
   for (const appName of appNames) {
     const appDir = path.join(versionDir, appName);
