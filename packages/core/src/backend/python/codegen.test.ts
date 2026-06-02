@@ -420,11 +420,16 @@ describe("Python generation - discriminated unions", () => {
     // The top-level discriminated-union alias (`Algorithm = A | B | ...`) must
     // come after every variant TypedDict it lists.
     const unionLine = code.match(/^(\w+) = (\w+(?: \| \w+)+)$/m);
-    expect(unionLine).toBeTruthy();
-    const unionIdx = code.indexOf(unionLine![0]);
-    for (const variant of unionLine![2].split(" | ")) {
+    const unionFull = unionLine?.[0];
+    const unionRhs = unionLine?.[2];
+    expect(unionRhs).toBeTruthy();
+    const unionIdx = code.indexOf(unionFull!);
+    for (const variant of unionRhs!.split(" | ")) {
       const variantDef = code.search(
-        new RegExp(`^(?:${variant} = typing\\.TypedDict|class ${variant}\\(typing\\.TypedDict)`, "m"),
+        new RegExp(
+          `^(?:${variant} = typing\\.TypedDict|class ${variant}\\(typing\\.TypedDict)`,
+          "m",
+        ),
       );
       expect(variantDef).toBeGreaterThanOrEqual(0);
       expect(variantDef).toBeLessThan(unionIdx);
