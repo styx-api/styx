@@ -5,6 +5,6 @@
     "path": "boutiques.json"
   },
   "docs": {
-    "description": "Hand-written tool covering the common scalar/flag/count/list/optional shapes - notably optional-without-default fields, which the params factory omits and which must be typed typing.NotRequired so cargs/outputs reads stay KeyError-safe and mypy-clean."
+    "description": "Hand-written tool covering the common scalar/flag/list/optional shapes - notably optional-without-default fields, which the params factory omits and which must be typed typing.NotRequired so cargs/outputs reads stay KeyError-safe and mypy-clean."
   }
 }

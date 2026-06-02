@@ -16,7 +16,7 @@ union-output `never` collapses, indexability.
 | Tool           | Shape it guards                                                                                                                                                                                                                                                                                                      |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `dwi2response` | Vendored mrtrix descriptor: a discriminated union of sub-command structs where several variants share a nested literal-union field (`wm_algo`). This nested-union-inside-union ordering regressed the Python backend (NameError at import + ~200 mypy errors) and is fixed by the type-declaration topological sort. |
-| `shapes`       | Scalars (int/float/str/file), an optional boolean flag, a repeatable flag (count), a repeatable list, optional-without-default fields (the `typing.NotRequired` path), and an output file.                                                                                                                           |
+| `shapes`       | Scalars (int/float/str/file), an optional boolean flag, a required list (`list[float]`), an optional repeatable list, optional-without-default fields (the `typing.NotRequired` path), and an output file.                                                                                                           |
 
 ## Adding a fixture
 

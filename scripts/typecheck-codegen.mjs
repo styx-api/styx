@@ -29,6 +29,17 @@ const tscBin = path.join(repoRoot, "node_modules", "typescript", "bin", "tsc");
 const pyDir = path.join(outDir, "python");
 const tsProject = path.join(outDir, "typescript", "tsconfig.json");
 
+// Files every run MUST emit. The CLI exits 0 even when it *skips* a tool
+// (unsupported format, stub, etc.), so a silently-dropped fixture would leave
+// nothing for the type-checkers to catch and the gate would falsely pass.
+// Asserting the expected outputs exist makes a dropped tool a hard failure.
+const expectedFiles = [
+  "python/suite/dwi2response.py",
+  "python/suite/shapes.py",
+  "typescript/suite/dwi2response.ts",
+  "typescript/suite/shapes.ts",
+];
+
 /** Run a command inheriting stdio; return its exit status (1 on spawn error). */
 function run(label, cmd, args) {
   process.stdout.write(`\n→ ${label}\n  ${cmd} ${args.join(" ")}\n`);
@@ -66,6 +77,17 @@ const gen = run("generate", process.execPath, [
 ]);
 if (gen !== 0) {
   process.stderr.write("\nFAIL: codegen did not complete.\n");
+  process.exit(1);
+}
+
+// Guard against a silently-skipped fixture (CLI exits 0 on skips).
+const missing = expectedFiles.filter((rel) => !existsSync(path.join(outDir, rel)));
+if (missing.length > 0) {
+  process.stderr.write(
+    `\nFAIL: expected generated files are missing (fixture skipped?):\n` +
+      missing.map((m) => `  - ${m}`).join("\n") +
+      "\n",
+  );
   process.exit(1);
 }
 
