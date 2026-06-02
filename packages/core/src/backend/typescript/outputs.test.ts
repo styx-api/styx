@@ -258,6 +258,54 @@ describe("typescript outputs - execution", () => {
     expect(outputs).toEqual({ outs: [] });
   });
 
+  it("treats an output shared by a list scope and a single scope as one list field", () => {
+    // The same output name declared in a repeatable option (list) and a plain
+    // option (single) - the `cifti_separate` shape. The merged field is a list,
+    // so the single-scope contributor must push one element rather than assign
+    // a scalar into the array (which would be a type error).
+    const repInner = seq(lit("-rep"), path("rin"));
+    repInner.meta = {
+      name: "rep",
+      outputs: [
+        {
+          name: "shared_out",
+          tokens: [
+            { kind: "ref", target: nodeRef("rin") },
+            { kind: "literal", value: ".o" },
+          ],
+        },
+      ],
+    };
+    const singleInner = seq(lit("-single"), path("sin"));
+    singleInner.meta = {
+      name: "single",
+      outputs: [
+        {
+          name: "shared_out",
+          tokens: [
+            { kind: "ref", target: nodeRef("sin") },
+            { kind: "literal", value: ".o" },
+          ],
+        },
+      ],
+    };
+    const root = seq(lit("tool"), rep(repInner), opt(singleInner));
+    root.meta = { name: "tool" };
+
+    const code = generate(root, { app: { id: "tool" } });
+    expect(code).toContain("shared_out: OutputPathType[]");
+    // No scalar assignment into the list field; every contributor pushes.
+    expect(code).not.toMatch(/outputs\.shared_out\s*=/);
+
+    const { outputs } = executeWithOutputs(
+      root,
+      { rep: [{ rin: "a" }], single: { sin: "b" } },
+      { app: { id: "tool" } },
+    );
+    const shared = (outputs as { shared_out: string[] }).shared_out;
+    expect([...shared].sort()).toEqual(["a.o", "b.o"]);
+  });
+
   it("only populates an alt-arm output when that arm is selected", () => {
     const convert = seq(lit("convert"), path("src"));
     convert.meta = {

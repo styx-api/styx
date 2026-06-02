@@ -158,10 +158,16 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
 
       case "sequence": {
         const fields: Record<string, BoundType> = {};
+        // Track the single binding-bearing child so the collapse check below can
+        // inspect its node kind (only meaningful when exactly one field exists).
+        let soleFieldChild: Expr | undefined;
         for (const child of node.attrs.nodes) {
           const childName = strategy.getName(child, path);
           const childType = solveNode(child, [...path, childName], gate);
-          if (childType !== null) fields[childName] = childType;
+          if (childType !== null) {
+            fields[childName] = childType;
+            soleFieldChild = child;
+          }
         }
         // A sequence that carries `meta.outputs` must always produce a binding,
         // even when it would otherwise collapse - that binding is the scope key
@@ -176,7 +182,22 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
           }
           return null;
         }
-        if (Object.keys(fields).length === 1 && !hasOutputs) {
+        // Collapse a single-field sequence to that field - e.g. `-x <val>`
+        // (`seq(lit("-x"), str)`) becomes just the value, so the flag and its
+        // one value read as a single optional/required parameter.
+        //
+        // EXCEPTION: when the field comes from an `optional` child, the
+        // sequence's own literal (e.g. `-whole-file`) can be present while the
+        // optional sub-field (e.g. `-demean`) is absent. Collapsing would
+        // conflate those two independent optional states and drop the sub-field
+        // (it would have no struct to live on). Keep such a sequence a struct so
+        // the sub-field stays addressable. A `repeat`/scalar/alternative child
+        // is tied 1:1 to the flag's presence, so collapsing those stays correct.
+        if (
+          Object.keys(fields).length === 1 &&
+          !hasOutputs &&
+          soleFieldChild?.kind !== "optional"
+        ) {
           return Object.values(fields)[0]!;
         }
         const type: BoundType = { kind: "struct", fields };

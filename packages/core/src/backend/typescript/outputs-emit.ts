@@ -238,6 +238,16 @@ type IterScope = Map<BindingId, string>;
 interface OutputEmitCtx {
   ctx: CodegenContext;
   iter: IterScope;
+  /**
+   * Merged shape per emitted field id (jsId of the output name), across every
+   * contributing scope. An output name can be declared in several scopes with
+   * different shapes - e.g. a list scope (repeatable option) and a single scope
+   * (plain option) both writing `volume_out`. The field's type follows the
+   * merged shape (a list if any contributor iterates), so the *write* must too:
+   * a single-scope contributor pushes one element into a list field rather than
+   * assigning. Keyed identically to `collectOutputFields`.
+   */
+  fieldShapes: Map<string, OutputShape>;
 }
 
 /**
@@ -251,7 +261,13 @@ function emitOneOutput(
   ec: OutputEmitCtx,
   cb: CodeBuilder,
 ): void {
-  const shape = outputShape(gate);
+  const occShape = outputShape(gate);
+  // Push-vs-assign follows the *field's* merged shape, not this occurrence's:
+  // when the same name is a list in one scope and single in another, the field
+  // is a list, so a single-scope contributor must push (one element) rather
+  // than assign a scalar into the array. Falls back to the occurrence shape for
+  // a name that somehow has no merged entry.
+  const shape = ec.fieldShapes.get(jsId(output.name)) ?? occShape;
   // Bracket-access for non-identifier field names (e.g. `in-file`, `4d`); dot
   // for valid identifiers. The interface key is jsId-quoted to match.
   const fieldRef = tsPropAccess("outputs", output.name);
@@ -260,9 +276,15 @@ function emitOneOutput(
     if (remaining.length === 0) {
       const pathExpr = renderPathExpr(output.tokens, child);
       // A mutable input's writable copy is surfaced via mutableCopy (its host
-      // path); a regular output resolves a local path via outputFile.
+      // path); a regular output resolves a local path via outputFile. The
+      // optional `, true` arg only applies to a single (non-list) field.
       const optionalArg =
-        !output.mutable && shape.kind === "single" && shape.optional ? ", true" : "";
+        !output.mutable &&
+        shape.kind === "single" &&
+        occShape.kind === "single" &&
+        occShape.optional
+          ? ", true"
+          : "";
       const call = output.mutable
         ? `execution.mutableCopy(${pathExpr})`
         : `execution.outputFile(${pathExpr}${optionalArg})`;
@@ -415,9 +437,11 @@ export function emitBuildOutputs(
   );
   cb.indent(() => {
     loopCounter = 0;
+    const fields = collectOutputFields(ctx);
     const ec: OutputEmitCtx = {
       ctx,
       iter: new Map(),
+      fieldShapes: new Map(fields.map((f) => [f.id, f.shape])),
     };
 
     // Initialize the outputs object with defaults so wrapper code can assign or
@@ -425,7 +449,7 @@ export function emitBuildOutputs(
     // same-named outputs (e.g. union arms) yield one initializer entry.
     cb.line(`const outputs: ${outputsType} = {`);
     cb.indent(() => {
-      for (const field of collectOutputFields(ctx)) {
+      for (const field of fields) {
         cb.line(`${field.id}: ${initialValue(field.shape)},`);
       }
       // Stream fields start empty; the wrapper pushes onto them via the

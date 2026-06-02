@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lit, path, seq, str } from "../ir/builders.js";
+import { lit, opt, path, seq, str } from "../ir/builders.js";
 import { solve } from "./solver.js";
 
 describe("solver root-binding fixup", () => {
@@ -35,6 +35,45 @@ describe("solver root-binding fixup", () => {
     const infile = resolve(infileNode);
     expect(infile?.name).toBe("infile");
     expect(infile?.access).toEqual([{ kind: "field", name: "infile" }]);
+  });
+
+  it("keeps a single-optional-field sequence as a struct (does not collapse)", () => {
+    // An option with no value of its own but a nested sub-flag, e.g.
+    // `-whole-file [-demean]`: opt(seq[whole_file](lit, opt[demean](lit))).
+    // The flag can be present while the sub-flag is absent, so collapsing the
+    // single field would conflate the two optional states and drop `demean`.
+    // The sequence must stay a struct so `demean` is addressable as
+    // `params.whole_file.demean` (not promoted to a non-existent root field).
+    const demean = opt(lit("-demean"), { name: "demean" });
+    const inner = seq(lit("-whole-file"), demean);
+    inner.meta = { name: "whole_file" };
+    const expr = seq(lit("tool"), opt(inner));
+    expr.meta = { name: "tool" };
+    const { resolve } = solve(expr);
+
+    const struct = resolve(inner);
+    expect(struct?.type.kind).toBe("struct");
+    expect(struct?.type.kind === "struct" && Object.keys(struct.type.fields)).toEqual(["demean"]);
+
+    const demeanBinding = resolve(demean);
+    expect(demeanBinding?.access).toEqual([
+      { kind: "field", name: "whole_file" },
+      { kind: "field", name: "demean" },
+    ]);
+  });
+
+  it("still collapses a single required-value field (-x <val> shape)", () => {
+    // The collapse exception is narrow: a required scalar field stays collapsed,
+    // so `-x <val>` reads as one optional value, not a struct wrapper.
+    const val = str("val");
+    const inner = seq(lit("-x"), val);
+    inner.meta = { name: "x" };
+    const expr = seq(lit("tool"), opt(inner));
+    expr.meta = { name: "tool" };
+    const { resolve } = solve(expr);
+    // The inner sequence collapsed - no struct binding registered for it.
+    expect(resolve(inner)).toBeUndefined();
+    expect(resolve(val)?.access).toEqual([{ kind: "field", name: "x" }]);
   });
 
   it("emits an empty root struct for a no-input tool", () => {

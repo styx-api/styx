@@ -576,7 +576,13 @@ describe("argdump -> Boutiques validity", () => {
   });
 
   it("drops default-value when not in value-choices", () => {
-    // store with bool default + string choices (e.g. --cifti-output)
+    // store with bool default + string choices (e.g. --cifti-output). nargs="?"
+    // makes the value optional, so the flag can appear alone OR with a choice -
+    // an optional-value-under-an-optional-flag, which the solver keeps as a
+    // SubCommand (a single optional sub-field does not collapse, so the
+    // "flag present, value absent" state survives). The string choices land on
+    // the nested value input; the bool `default` must not become a
+    // `default-value` on either input.
     const bt = emitFromArgdump({
       prog: "mytool",
       actions: [
@@ -594,8 +600,11 @@ describe("argdump -> Boutiques validity", () => {
     const inputs = bt.inputs as Record<string, unknown>[];
     const inp = inputs.find((i) => i.id === "cifti_output");
     expect(inp).toBeDefined();
-    expect(inp!["value-choices"]).toEqual(["91k", "170k"]);
     expect(inp!["default-value"]).toBeUndefined();
+    const sub = inp!.type as Record<string, unknown>;
+    const nested = (sub.inputs as Record<string, unknown>[])[0]!;
+    expect(nested["value-choices"]).toEqual(["91k", "170k"]);
+    expect(nested["default-value"]).toBeUndefined();
   });
 
   it("coerces String defaults & choices to strings (numeric type with explicit choices)", () => {
