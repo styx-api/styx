@@ -1,0 +1,32 @@
+{
+  "name": "mutate",
+  "description": "Mutable input shape for codegen typecheck.",
+  "tool-version": "1.0",
+  "schema-version": "0.5",
+  "command-line": "mutate [INFILE] [OUTPUT]",
+  "inputs": [
+    {
+      "id": "infile",
+      "name": "In file",
+      "type": "File",
+      "mutable": true,
+      "value-key": "[INFILE]",
+      "description": "Input file modified in place; staged as a writable copy and surfaced as an output via mutable_copy."
+    },
+    {
+      "id": "output",
+      "name": "Output",
+      "type": "String",
+      "value-key": "[OUTPUT]",
+      "description": "Output report file name."
+    }
+  ],
+  "output-files": [
+    {
+      "id": "report",
+      "name": "Report",
+      "path-template": "[OUTPUT]",
+      "description": "A produced report file."
+    }
+  ]
+}

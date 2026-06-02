@@ -1,0 +1,10 @@
+{
+  "name": "DenoiseImage",
+  "source": {
+    "type": "boutiques",
+    "path": "boutiques.json"
+  },
+  "docs": {
+    "description": "Vendored ANTs DenoiseImage descriptor. Exercises a union-typed output: the `output` field is a discriminated union whose variants declare different output-files (one vs two), so the resolved Outputs type is a union across arms. This is the shape that previously collapsed to `never` (fixed by scope-local output-ref resolution)."
+  }
+}
