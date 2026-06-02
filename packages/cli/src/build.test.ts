@@ -71,10 +71,11 @@ describe("build (catalog mode)", () => {
       "python/tools/__init__.py",
       "python/tools/farewell.py",
       "python/tools/greet.py",
+      "python/tools/py.typed",
     ]);
   });
 
-  it("multi mode runs all three tiers (project emit is a no-op for python today)", () => {
+  it("multi mode runs all three tiers (project emit adds packaging metadata)", () => {
     const result = build({
       catalog: FIXTURE,
       out: "/out",
@@ -83,9 +84,15 @@ describe("build (catalog mode)", () => {
     });
     expect(result.errors).toEqual([]);
     expect(relPaths(result.files, "/out")).toEqual([
+      "python/README.md",
+      "python/pyproject.toml",
+      "python/requirements.txt",
+      "python/tools/README.md",
       "python/tools/__init__.py",
       "python/tools/farewell.py",
       "python/tools/greet.py",
+      "python/tools/py.typed",
+      "python/tools/pyproject.toml",
     ]);
   });
 
@@ -102,6 +109,26 @@ describe("build (catalog mode)", () => {
       "typescript/tools/greet.ts",
       "typescript/tools/index.ts",
     ]);
+  });
+
+  it("typescript multi mode adds the project package.json", () => {
+    const result = build({
+      catalog: FIXTURE,
+      out: "/out",
+      backends: [new TypeScriptBackend()],
+      mode: "multi",
+    });
+    expect(result.errors).toEqual([]);
+    expect(relPaths(result.files, "/out")).toEqual([
+      "typescript/index.ts",
+      "typescript/package.json",
+      "typescript/tools/farewell.ts",
+      "typescript/tools/greet.ts",
+      "typescript/tools/index.ts",
+      "typescript/tsconfig.json",
+    ]);
+    const pkgJson = result.files.find((f) => f.path.endsWith("package.json"));
+    expect(pkgJson!.content).toContain('"styxdefs": "^0.2.0"');
   });
 
   it("threads package + project meta into the codegen context", () => {

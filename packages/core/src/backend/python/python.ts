@@ -1,6 +1,14 @@
 import type { AppMeta } from "../../ir/index.js";
-import type { CodegenContext, PackageMeta } from "../../manifest/index.js";
-import type { Backend, EmittedApp, EmittedPackage } from "../backend.js";
+import type { CodegenContext, PackageMeta, ProjectMeta } from "../../manifest/index.js";
+import type { Backend, EmitResult, EmittedApp, EmittedPackage } from "../backend.js";
+import {
+  generateRequirementsTxt,
+  generateRootPyproject,
+  generateRootReadme,
+  generateSubPyproject,
+  generateSubReadme,
+  pyDistName,
+} from "./packaging.js";
 import { CodeBuilder } from "../code-builder.js";
 import { Scope } from "../scope.js";
 import { pascalCase, screamingSnakeCase, snakeCase } from "../string-case.js";
@@ -377,9 +385,36 @@ export class PythonBackend implements Backend {
   emitPackage(pkg: PackageMeta, apps: EmittedApp[]): EmittedPackage {
     return {
       meta: pkg,
-      files: new Map([["__init__.py", generatePackageInit(apps)]]),
+      files: new Map([
+        ["__init__.py", generatePackageInit(apps)],
+        // PEP 561 marker so type-checkers treat the generated suite as typed.
+        ["py.typed", ""],
+      ]),
       errors: [],
       warnings: [],
     };
+  }
+
+  emitProject(proj: ProjectMeta, packages: EmittedPackage[]): EmitResult {
+    const files = new Map<string, string>();
+    const distNames: string[] = [];
+    const pkgDirs: string[] = [];
+
+    for (const p of packages) {
+      const pkg = p.meta ?? {};
+      // Mirror the CLI's `pkgDir` fallback so a nameless package's source dir
+      // still gets a matching pyproject/README instead of being orphaned.
+      const dir = pkg.name ?? "package";
+      pkgDirs.push(dir);
+      distNames.push(pyDistName(proj, pkg));
+      files.set(`${dir}/pyproject.toml`, generateSubPyproject(proj, pkg));
+      files.set(`${dir}/README.md`, generateSubReadme(proj, pkg));
+    }
+
+    files.set("pyproject.toml", generateRootPyproject(proj, distNames));
+    files.set("README.md", generateRootReadme(proj, distNames));
+    files.set("requirements.txt", generateRequirementsTxt(pkgDirs));
+
+    return { files, errors: [], warnings: [] };
   }
 }
