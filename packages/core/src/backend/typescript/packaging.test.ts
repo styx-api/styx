@@ -32,10 +32,10 @@ describe("TypeScript emitProject packaging", () => {
     expect(pkg.type).toBe("module");
   });
 
-  it("emits a root barrel re-exporting each suite", () => {
+  it("emits a root barrel namespacing each suite", () => {
     const index = out.files.get("index.ts");
-    expect(index).toContain('export * from "./ants/index.js";');
-    expect(index).toContain('export * from "./fsl/index.js";');
+    expect(index).toContain('export * as ants from "./ants/index.js";');
+    expect(index).toContain('export * as fsl from "./fsl/index.js";');
   });
 
   it("emits a tsconfig.json targeting dist/", () => {

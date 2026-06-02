@@ -169,6 +169,9 @@ function runBackendOverCatalog(
     const pkgDir = pkg.meta.name ?? "package";
     const appsEmitted: EmittedApp[] = [];
     let skipped = 0;
+    // One scope shared across every tool in the suite so top-level names stay
+    // unique across the package's flat barrel re-exports.
+    const pkgScope = backend.newPackageScope?.();
 
     for (const app of pkg.apps) {
       // A tool can declare a format we have no frontend for yet (e.g. Workbench).
@@ -186,7 +189,7 @@ function runBackendOverCatalog(
       const ctx = readAndCompile(app.sourcePath, app.sourceFormat, pkg.meta, catalog.meta, result);
       if (!ctx) continue;
 
-      const emitted = backend.emitApp(ctx);
+      const emitted = backend.emitApp(ctx, pkgScope);
       appendEmitMessages(result, emitted, backend, `${pkg.meta.name}/${app.name}`);
       appsEmitted.push(emitted);
 

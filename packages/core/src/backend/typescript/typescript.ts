@@ -80,6 +80,11 @@ const TS_RESERVED: ReadonlySet<string> = new Set([
   "protected",
   "public",
   "type",
+  // Not keywords, but forbidden as binding names in strict mode (ES modules are
+  // always strict), so a parameter/local named these is a hard error.
+  "arguments",
+  "eval",
+  "await",
 ]);
 
 /**
@@ -130,9 +135,11 @@ export function computePublicNames(appId: string | undefined): PublicNames {
   };
 }
 
-export function generateTypeScript(ctx: CodegenContext): string {
+export function generateTypeScript(ctx: CodegenContext, packageScope?: Scope): string {
   const cb = new CodeBuilder("  ");
-  const scope = new Scope(TS_RESERVED);
+  // A package-shared scope keeps top-level names unique across every tool in the
+  // suite barrel; without one (standalone emit) a per-tool scope is enough.
+  const scope = packageScope ?? new Scope(TS_RESERVED);
 
   const appId = ctx.app?.id;
   const pkg = ctx.package?.name ?? "unknown";
@@ -163,7 +170,15 @@ export function generateTypeScript(ctx: CodegenContext): string {
     wrapper: reg(publicNames.wrapper),
   };
 
-  const { namedTypes, typeDecls } = collectNamedTypes(rootType, names.params, scope, pascalCase);
+  // Prefix nested type names with the tool's root name so a suite's flat barrel
+  // doesn't collide same-named types (e.g. `Outputtype`) across tools.
+  const { namedTypes, typeDecls } = collectNamedTypes(
+    rootType,
+    names.params,
+    scope,
+    pascalCase,
+    appId ? names.params : "",
+  );
 
   const rootName =
     (rootType.kind === "struct" ? namedTypes.get(structKey(rootType)) : undefined) ??
@@ -324,8 +339,8 @@ export class TypeScriptBackend implements Backend {
   readonly name = "typescript";
   readonly target = "typescript";
 
-  emitApp(ctx: CodegenContext): EmittedApp {
-    const code = generateTypeScript(ctx);
+  emitApp(ctx: CodegenContext, scope?: Scope): EmittedApp {
+    const code = generateTypeScript(ctx, scope);
     const fileName = `${appModuleName(ctx.app)}.ts`;
     return {
       meta: ctx.app,
@@ -333,6 +348,10 @@ export class TypeScriptBackend implements Backend {
       errors: [],
       warnings: [],
     };
+  }
+
+  newPackageScope(): Scope {
+    return new Scope(TS_RESERVED);
   }
 
   emitPackage(pkg: PackageMeta, apps: EmittedApp[]): EmittedPackage {

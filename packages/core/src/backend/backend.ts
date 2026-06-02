@@ -1,6 +1,7 @@
 import type { BoundType } from "../bindings/index.js";
 import type { AppMeta } from "../ir/index.js";
 import type { CodegenContext, PackageMeta, ProjectMeta } from "../manifest/index.js";
+import type { Scope } from "./scope.js";
 
 export interface EmitResult {
   files: Map<string, string>;
@@ -38,8 +39,21 @@ export interface EmittedPackage extends EmitResult {
 export interface Backend {
   readonly name: string;
   readonly target: string;
-  /** Emit the per-tool file(s) for one app. Mandatory. */
-  emitApp(ctx: CodegenContext): EmittedApp;
+  /**
+   * Emit the per-tool file(s) for one app. Mandatory.
+   *
+   * When emitting many tools into one suite barrel, pass a `scope` shared across
+   * the package (from `newPackageScope`) so emitted top-level names stay unique
+   * across tools - a flat `export *` / `from .x import *` re-export otherwise
+   * collides same-named types. Omit it for standalone single-tool emission.
+   */
+  emitApp(ctx: CodegenContext, scope?: Scope): EmittedApp;
+  /**
+   * Create a fresh symbol scope seeded with this backend's reserved words, to be
+   * shared across all `emitApp` calls for one package. Optional; callers fall
+   * back to per-tool scoping (still safe via name prefixing) when absent.
+   */
+  newPackageScope?(): Scope;
   /**
    * Emit suite-level files for a package containing many apps (e.g. the
    * `__init__.py` re-exporting `from .bet import *` per tool, or an
