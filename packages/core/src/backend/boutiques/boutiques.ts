@@ -341,9 +341,17 @@ class BoutiquesEmitter {
       return;
     }
 
+    // `findStructNode` may descend below `expr` to the sequence whose direct
+    // children are the struct's fields (e.g. when a single-field inner sequence
+    // was preserved by flatten to keep its doc, then collapsed). Any command
+    // literals on the path from `expr` down to that node would otherwise be
+    // dropped - including the tool's own command name. Recover them as a prefix.
+    const prefixLiterals =
+      structNode === expr ? [] : (commandPrefixLiterals(expr, structNode) ?? []);
+
     const scope = new Scope();
     const idScope = new Scope();
-    const commandParts: string[] = [];
+    const commandParts: string[] = [...prefixLiterals];
     const inputs: BtInput[] = [];
     const valueKeyByBinding = new Map<BindingId, string>();
     const fieldInfo = collectFieldInfo(this.ctx, structType);
@@ -992,6 +1000,29 @@ class BoutiquesEmitter {
       minListEntries: countMin,
     };
   }
+}
+
+/**
+ * The ordered command literals on the path from `node` down to `target`,
+ * descending only through sequences (the structure `findStructNode` follows to
+ * reach a struct whose fields are direct children). Returns `null` when
+ * `target` is not reachable that way - callers then emit no prefix. Literals
+ * inside `target` itself are excluded; the caller walks those separately.
+ */
+function commandPrefixLiterals(node: Expr, target: Expr): string[] | null {
+  if (node === target) return [];
+  if (node.kind !== "sequence") return null;
+  const lits: string[] = [];
+  for (const child of node.attrs.nodes) {
+    if (child === target) return lits;
+    if (child.kind === "literal") {
+      lits.push(child.attrs.str);
+      continue;
+    }
+    const deeper = commandPrefixLiterals(child, target);
+    if (deeper !== null) return [...lits, ...deeper];
+  }
+  return null;
 }
 
 export function generateBoutiques(ctx: CodegenContext): {

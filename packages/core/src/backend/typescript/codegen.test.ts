@@ -618,10 +618,26 @@ describe("TypeScript generation - params factory & kwarg wrapper", () => {
   });
 
   it("skips the kwarg wrapper / factory when the solver leaves no struct root", () => {
-    const code = generate(seq(seqJoin("=", lit("--out"), str("out"))), { app: { id: "t" } });
+    // A root-level alternative solves to a union (not a struct), so there are no
+    // named fields to spread into a factory/kwarg signature. (A single-field
+    // tool, by contrast, is wrapped into a struct root and DOES get the kwarg
+    // path - see the wrapping tests below.)
+    const code = generate(alt(seq(lit("a"), str("x")), seq(lit("b"), str("y"))), {
+      app: { id: "t" },
+    });
     expect(code).not.toMatch(/export function tParams\(/);
     expect(code).not.toMatch(/export function tExecute\(/);
     expect(code).toMatch(/export function t\(params:/);
+  });
+
+  it("wraps a single collapsed field into a struct root with the kwarg path", () => {
+    // `--out=VALUE` collapses to a lone scalar; the root fixup wraps it in a
+    // struct so the params interface has the field and the kwarg wrapper works.
+    const code = generate(seq(seqJoin("=", lit("--out"), str("out"))), { app: { id: "t" } });
+    expect(code).toMatch(/export function tParams\(/);
+    expect(code).toMatch(/out:/);
+    // cargs must reference the field on the struct, matching the interface.
+    expect(code).toContain("params.out");
   });
 });
 

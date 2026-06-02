@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Binding, BindingId, BoundType } from "../bindings/index.js";
 import { renderAccess, tsPropAccess } from "../backend/typescript/emit.js";
-import { alt, lit, opt, path, rep, seq, str } from "../ir/builders.js";
+import { alt, float, lit, opt, path, rep, seq, str } from "../ir/builders.js";
 import type { Expr } from "../ir/index.js";
 import { solve } from "./solver.js";
 
@@ -238,6 +238,40 @@ describe("assignAccessPaths - segment shapes", () => {
     expect(renderAccess(resolve(file)!.access, () => "item0")).toBe("item0.file");
   });
 
+  it("optional struct list reuses the optional's path (no doubled field)", () => {
+    // mrtrix `-config key value` shape: opt(rep(seq(lit, key, value))). The list
+    // and the optional name the same field; the repeat must iterate the
+    // optional's path (`params.config`), not append its field again
+    // (`params.config.config`). Regression for the cargs/validate desync.
+    const key = str("key");
+    const value = str("value");
+    const repNode = rep(seq(lit("-config"), key, value), "config");
+    const optNode = opt(repNode);
+    const expr = seq(lit("tool"), optNode);
+    const { resolve } = solve(expr);
+    const optB = resolve(optNode)!;
+    const repB = resolve(repNode)!;
+    // The list's own access matches the optional's - one `config` segment.
+    expect(repB.access).toEqual([field("config")]);
+    expect(repB.access).toEqual(optB.access);
+    expect(renderAccess(repB.access, noLoopVars)).toBe("params.config");
+    // Inner fields stay iter-rooted off the repeat's loop var.
+    expect(resolve(key)!.access).toEqual([iter(repB.id), field("key")]);
+    expect(renderAccess(resolve(key)!.access, () => "item0")).toBe("item0.key");
+  });
+
+  it("optional scalar list reuses the optional's path (unchanged by the fix)", () => {
+    const item = str("items");
+    const repNode = rep(item, "items");
+    const optNode = opt(repNode);
+    const expr = seq(lit("tool"), optNode);
+    const { resolve } = solve(expr);
+    const repB = resolve(repNode)!;
+    expect(repB.access).toEqual([field("items")]);
+    expect(renderAccess(repB.access, noLoopVars)).toBe("params.items");
+    expect(resolve(item)!.access).toEqual([iter(repB.id)]);
+  });
+
   it("nested repeat composes iter segments (resets base per loop)", () => {
     const leaf = str("leaf");
     const inner = rep(seq(leaf, str("other")), "inner");
@@ -253,6 +287,28 @@ describe("assignAccessPaths - segment shapes", () => {
     expect(renderAccess(resolve(leaf)!.access, (b) => (b === outerB.id ? "o" : "i"))).toBe(
       "i.leaf",
     );
+  });
+
+  it("boxed single-field optional union arm collapses its inner onto the variant field (no extra segment)", () => {
+    // ants SimulateDisplacementField shape: a union arm that is a single
+    // optional input. The arm collapses and the solver boxes it into the
+    // variant struct, so the optional's name (the variant's) differs from the
+    // inner terminal's. The inner value must live at the variant field
+    // (`opts.expo`), not gain a segment named after the inner node
+    // (`opts.expo.smoothing`).
+    const smoothing = float("smoothing");
+    const expoArm = opt(smoothing);
+    expoArm.meta = { name: "expo" };
+    const multiArm = seq(lit("--b"), str("levels"), str("points"));
+    multiArm.meta = { name: "bspline" };
+    const altNode = alt(expoArm, multiArm);
+    const expr = seq(lit("tool"), opt(altNode, "opts"));
+    const { resolve } = solve(expr);
+    const expoB = resolve(expoArm)!;
+    // The arm binding lives at the variant field path.
+    expect(renderAccess(expoB.access, noLoopVars)).toBe("params.opts.expo");
+    // The inner terminal collapses onto that same path - no `.smoothing` segment.
+    expect(renderAccess(resolve(smoothing)!.access, noLoopVars)).toBe("params.opts.expo");
   });
 
   it("complex-union variant field is a plain field off the union path (no variant segment)", () => {
