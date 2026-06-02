@@ -1,0 +1,10 @@
+{
+  "name": "borderMerge",
+  "source": {
+    "type": "workbench",
+    "path": "workbench.json"
+  },
+  "docs": {
+    "description": "Vendored Connectome Workbench border-merge descriptor. Exercises the workbench frontend: a positional output (str + Output ref), a repeatable option carrying a struct (list-of-struct), and deeply nested options/flags (-border -> -select -> -up-to -> -reverse). Confirms the recursive switch-group lowering type-checks under mypy --strict + tsc."
+  }
+}

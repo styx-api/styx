@@ -1,5 +1,5 @@
 {
   "name": "1.0",
   "container": "typecheck/suite:1.0",
-  "apps": ["dwi2response", "shapes", "DenoiseImage", "antsApplyTransforms", "mutate"]
+  "apps": ["dwi2response", "shapes", "DenoiseImage", "antsApplyTransforms", "mutate", "borderMerge"]
 }

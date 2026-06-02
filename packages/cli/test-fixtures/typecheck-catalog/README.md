@@ -20,6 +20,7 @@ union-output `never` collapses, indexability.
 | `DenoiseImage`        | Vendored ANTs descriptor: a union-typed output (variants declare different output-files), so the resolved Outputs type is a union across arms - the shape that previously collapsed to `never`.                                                                                                                      |
 | `antsApplyTransforms` | Vendored ANTs descriptor: a mixed (struct + bare-literal) union (`interpolation`); cargs branch on runtime shape (`isinstance` dict) because literal arms have no `@type`.                                                                                                                                           |
 | `mutate`              | Hand-written: a mutable File input, staged as a writable copy (`input_file(mutable=True)`) and also surfaced as an `OutputPathType` field via `mutable_copy` - exercises both the cargs and Outputs paths of the mutable primitive.                                                                                  |
+| `borderMerge`         | Vendored Connectome Workbench descriptor (the only `workbench` source-format fixture): a repeatable option carrying a struct (`list[struct]`), deeply nested options/flags (`-border` -> `-select` -> `-up-to` -> `-reverse`), and a positional output referenced by name - the workbench frontend's happy path.     |
 
 ## Adding a fixture
 

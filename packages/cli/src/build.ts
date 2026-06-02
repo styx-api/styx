@@ -21,7 +21,11 @@ import { loadCatalog, type CatalogProject } from "./catalog.js";
 export type BuildMode = "scripts" | "single" | "multi";
 
 /** Frontend formats the compiler can parse; others are skipped with a warning. */
-const SUPPORTED_FORMATS: ReadonlySet<string> = new Set<FormatName>(["boutiques", "argdump"]);
+const SUPPORTED_FORMATS: ReadonlySet<string> = new Set<FormatName>([
+  "boutiques",
+  "argdump",
+  "workbench",
+]);
 
 export interface BuildOptions {
   /** Single-descriptor input file (mutually exclusive with `catalog`). */

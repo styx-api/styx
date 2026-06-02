@@ -25,6 +25,15 @@ describe("detectFormat", () => {
     expect(detectFormat(source)).toBe("argdump");
   });
 
+  it("detects workbench by command + short_description", () => {
+    const source = JSON.stringify({
+      command: "-border-merge",
+      short_description: "MERGE BORDER FILES",
+      params: [],
+    });
+    expect(detectFormat(source)).toBe("workbench");
+  });
+
   it("returns null for invalid JSON", () => {
     expect(detectFormat("not json")).toBeNull();
   });

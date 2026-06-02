@@ -99,7 +99,15 @@ export const simplify: Pass = {
         case "sequence": {
           const children = node.attrs.nodes.map(visit);
 
-          // Merge consecutive literals (only with empty/no join, no metadata)
+          // Merge consecutive metadata-less literals, but only in an explicit
+          // concatenation context (`join === ""`). The merge is separator-free
+          // (`prev.str += child.str`), which only matches the semantics of an
+          // empty join. A sequence with no join joins its children with a space
+          // (they become separate argv tokens at the top level), so merging
+          // adjacent literals there would wrongly fuse two arguments into one
+          // (e.g. `seq(lit("wb_command"), lit("-foo"))` -> `"wb_command-foo"`).
+          // Inside a join context the backend concatenates anyway, so leaving
+          // such literals unmerged stays correct (just one node larger).
           const nodes: Expr[] = [];
           for (const child of children) {
             const prev = nodes[nodes.length - 1];
@@ -108,7 +116,7 @@ export const simplify: Pass = {
               child.kind === "literal" &&
               !prev.meta &&
               !child.meta &&
-              (node.attrs.join === "" || node.attrs.join === undefined)
+              node.attrs.join === ""
             ) {
               changed = true;
               prev.attrs.str += child.attrs.str;

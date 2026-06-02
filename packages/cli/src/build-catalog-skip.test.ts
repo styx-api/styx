@@ -50,14 +50,14 @@ describe("catalog build: skipping unbuildable tools", () => {
     writeFile("pkg/1/greet/d.json", BOUTIQUES);
     writeFile(
       "pkg/1/wb/app.json",
-      JSON.stringify({ name: "wb", source: { type: "workbench", path: "wb.json" } }),
+      JSON.stringify({ name: "wb", source: { type: "matlab", path: "wb.json" } }),
     );
     writeFile("pkg/1/wb/wb.json", "{}");
 
     const result = build({ catalog: tmp, out, backends: [new PythonBackend()], mode: "multi" });
 
     expect(result.errors).toEqual([]);
-    expect(result.warnings.some((w) => /unsupported source format "workbench"/.test(w))).toBe(true);
+    expect(result.warnings.some((w) => /unsupported source format "matlab"/.test(w))).toBe(true);
     const paths = relPaths(result.files);
     expect(paths).toContain("python/pkg/greet.py");
     expect(paths.some((p) => p.includes("/wb"))).toBe(false);
@@ -69,7 +69,7 @@ describe("catalog build: skipping unbuildable tools", () => {
     writeFile("only/1/version.json", JSON.stringify({ name: "1", apps: ["wb"] }));
     writeFile(
       "only/1/wb/app.json",
-      JSON.stringify({ name: "wb", source: { type: "workbench", path: "wb.json" } }),
+      JSON.stringify({ name: "wb", source: { type: "matlab", path: "wb.json" } }),
     );
     writeFile("only/1/wb/wb.json", "{}");
 
@@ -94,7 +94,7 @@ describe("catalog build: skipping unbuildable tools", () => {
     writeFile("pkg/1/greet/d.json", BOUTIQUES);
     writeFile(
       "pkg/1/wb/app.json",
-      JSON.stringify({ name: "wb", source: { type: "workbench", path: "wb.json" } }),
+      JSON.stringify({ name: "wb", source: { type: "matlab", path: "wb.json" } }),
     );
     writeFile("pkg/1/wb/wb.json", "{}");
 

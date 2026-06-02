@@ -39,6 +39,7 @@ const expectedTools = [
   "denoise_image",
   "ants_apply_transforms",
   "mutate",
+  "border_merge",
 ];
 const expectedFiles = expectedTools.flatMap((t) => [
   `python/suite/${t}.py`,

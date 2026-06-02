@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lit, opt, rep, repJoin, seq, str } from "../builders.js";
+import { lit, opt, rep, repJoin, seq, seqJoin, str } from "../builders.js";
 import type { Output } from "../meta.js";
 import { simplify } from "./simplify.js";
 
@@ -41,10 +41,23 @@ describe("simplify", () => {
     expect(result.expr.meta?.name).toBe("inner");
   });
 
-  it("merges consecutive literals", () => {
-    const result = simplify.apply(seq(lit("a"), lit("b"), lit("c")));
+  it("merges consecutive literals in an empty-join (concatenation) sequence", () => {
+    const result = simplify.apply(seqJoin("", lit("a"), lit("b"), lit("c")));
     expect(result.expr.kind).toBe("literal");
     if (result.expr.kind === "literal") expect(result.expr.attrs.str).toBe("abc");
+  });
+
+  it("does NOT merge literals in a no-join sequence (they are separate args)", () => {
+    // A top-level no-join sequence emits its children as separate argv tokens,
+    // so fusing them would turn N arguments into one (e.g. an executable plus
+    // its subcommand: `wb_command` + `-foo`).
+    const result = simplify.apply(seq(lit("a"), lit("b"), lit("c")));
+    expect(result.expr.kind).toBe("sequence");
+    if (result.expr.kind === "sequence") {
+      expect(
+        result.expr.attrs.nodes.map((n) => (n.kind === "literal" ? n.attrs.str : n.kind)),
+      ).toEqual(["a", "b", "c"]);
+    }
   });
 
   it("does not collapse alt(T) when the alt carries metadata", () => {

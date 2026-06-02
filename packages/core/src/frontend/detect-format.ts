@@ -1,4 +1,4 @@
-export type FormatName = "boutiques" | "argdump";
+export type FormatName = "boutiques" | "argdump" | "workbench";
 
 /**
  * Auto-detect the format of a JSON descriptor source string.
@@ -21,6 +21,11 @@ export function detectFormat(source: string): FormatName | null {
   // Check $schema for argdump
   if (typeof obj.$schema === "string" && obj.$schema.includes("argdump")) {
     return "argdump";
+  }
+
+  // Workbench: has a "command" switch plus "short_description"
+  if (typeof obj.command === "string" && typeof obj.short_description === "string") {
+    return "workbench";
   }
 
   // Boutiques: has "command-line" or "inputs" array
