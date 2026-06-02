@@ -1,0 +1,10 @@
+{
+  "name": "typecheck",
+  "version": "0.1.0",
+  "license": "MIT",
+  "packages": ["suite"],
+  "docs": {
+    "title": "Codegen Typecheck Fixtures",
+    "description": "Small curated catalog whose generated Python/TypeScript is type-checked (mypy + tsc) in CI. Each tool exercises a codegen shape that string-matching unit tests cannot fully guard (nested unions, optional-omit, scalars/flags/lists)."
+  }
+}

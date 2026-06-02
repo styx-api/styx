@@ -3,3 +3,4 @@ node_modules
 .svelte-kit
 __snapshots__
 package-lock.json
+.tmp-codegen-typecheck

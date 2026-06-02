@@ -39,3 +39,32 @@ jobs:
 
       - name: Test
         run: npm test
+
+  codegen-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install mypy
+        run: pip install mypy
+
+      - name: Build (core + cli)
+        run: npm run build -w @styx/core -w @styx/cli
+
+      - name: Type-check generated code (mypy + tsc)
+        run: node scripts/typecheck-codegen.mjs

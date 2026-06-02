@@ -1,0 +1,83 @@
+{
+  "name": "shapes",
+  "description": "Scalar/flag/list/optional shapes for codegen typecheck.",
+  "tool-version": "1.0",
+  "schema-version": "0.5",
+  "command-line": "shapes [INPUT] [NAME] [SCALES] [COUNT] [FACTOR] [VERBOSE] [TAGS] [OUTPUT]",
+  "inputs": [
+    {
+      "id": "input",
+      "name": "Input",
+      "type": "File",
+      "value-key": "[INPUT]",
+      "description": "Required input file."
+    },
+    {
+      "id": "name",
+      "name": "Name",
+      "type": "String",
+      "value-key": "[NAME]",
+      "description": "Required name."
+    },
+    {
+      "id": "scales",
+      "name": "Scales",
+      "type": "Number",
+      "list": true,
+      "value-key": "[SCALES]",
+      "description": "Required list of scale factors."
+    },
+    {
+      "id": "count",
+      "name": "Count",
+      "type": "Number",
+      "integer": true,
+      "optional": true,
+      "command-line-flag": "--count",
+      "value-key": "[COUNT]",
+      "description": "Optional integer with no default."
+    },
+    {
+      "id": "factor",
+      "name": "Factor",
+      "type": "Number",
+      "optional": true,
+      "command-line-flag": "--factor",
+      "value-key": "[FACTOR]",
+      "description": "Optional float with no default."
+    },
+    {
+      "id": "verbose",
+      "name": "Verbose",
+      "type": "Flag",
+      "command-line-flag": "--verbose",
+      "value-key": "[VERBOSE]",
+      "description": "Optional boolean flag."
+    },
+    {
+      "id": "tags",
+      "name": "Tags",
+      "type": "String",
+      "list": true,
+      "optional": true,
+      "command-line-flag": "--tags",
+      "value-key": "[TAGS]",
+      "description": "Optional repeatable list of strings."
+    },
+    {
+      "id": "output",
+      "name": "Output",
+      "type": "String",
+      "value-key": "[OUTPUT]",
+      "description": "Output file name."
+    }
+  ],
+  "output-files": [
+    {
+      "id": "out_file",
+      "name": "Out file",
+      "path-template": "[OUTPUT]",
+      "description": "The produced output file."
+    }
+  ]
+}

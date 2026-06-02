@@ -35,6 +35,19 @@ export default [
     },
   },
   {
-    ignores: ["**/dist", "**/node_modules", "**/.svelte-kit", "**/__snapshots__"],
+    // Node tooling scripts (e.g. the codegen typecheck gate).
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: { ...globals.node },
+    },
+  },
+  {
+    ignores: [
+      "**/dist",
+      "**/node_modules",
+      "**/.svelte-kit",
+      "**/__snapshots__",
+      ".tmp-codegen-typecheck",
+    ],
   },
 ];

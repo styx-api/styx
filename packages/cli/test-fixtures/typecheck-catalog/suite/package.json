@@ -1,0 +1,11 @@
+{
+  "name": "suite",
+  "versions": [
+    "1.0"
+  ],
+  "default": "1.0",
+  "docs": {
+    "title": "Suite",
+    "description": "Codegen-typecheck fixture toolset."
+  }
+}

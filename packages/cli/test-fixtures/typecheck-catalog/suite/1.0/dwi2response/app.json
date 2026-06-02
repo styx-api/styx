@@ -1,0 +1,10 @@
+{
+  "name": "dwi2response",
+  "source": {
+    "type": "boutiques",
+    "path": "boutiques.json"
+  },
+  "docs": {
+    "description": "Vendored mrtrix dwi2response descriptor. Exercises a discriminated union of sub-command structs where multiple variants share a nested literal-union field (wm_algo) - the nested-union-inside-union shape whose declaration ordering regressed and required a topological sort in the Python backend."
+  }
+}
