@@ -80,7 +80,8 @@ describe("runBuildCommand: happy path (exit 0)", () => {
       mode: "single",
     });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout[0]).toBe("wrote 3 files to /out");
+    // single mode: 2 app modules + __init__.py + py.typed.
+    expect(r.stdout[0]).toBe("wrote 4 files to /out");
   });
 
   it("comma-separated backends produce per-backend output dirs", () => {

@@ -1,7 +1,8 @@
 import type { AppMeta } from "../../ir/index.js";
-import type { CodegenContext, PackageMeta } from "../../manifest/index.js";
-import type { Backend, EmittedApp, EmittedPackage } from "../backend.js";
+import type { CodegenContext, PackageMeta, ProjectMeta } from "../../manifest/index.js";
+import type { Backend, EmitResult, EmittedApp, EmittedPackage } from "../backend.js";
 import { CodeBuilder } from "../code-builder.js";
+import { generatePackageJson, generateRootIndex, generateTsconfig } from "./packaging.js";
 import { Scope } from "../scope.js";
 import { camelCase, pascalCase, screamingSnakeCase, snakeCase } from "../string-case.js";
 import { buildSigEntries } from "../sig-entries.js";
@@ -338,6 +339,18 @@ export class TypeScriptBackend implements Backend {
     return {
       meta: pkg,
       files: new Map([["index.ts", generatePackageIndex(apps)]]),
+      errors: [],
+      warnings: [],
+    };
+  }
+
+  emitProject(proj: ProjectMeta, packages: EmittedPackage[]): EmitResult {
+    return {
+      files: new Map([
+        ["package.json", generatePackageJson(proj)],
+        ["index.ts", generateRootIndex(packages)],
+        ["tsconfig.json", generateTsconfig()],
+      ]),
       errors: [],
       warnings: [],
     };
