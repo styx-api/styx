@@ -254,10 +254,27 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
       // Already a struct (e.g. joined seq with 2+ fields) - use it directly
       createBinding(expr, name, rootType, []);
     } else {
-      // Single scalar/optional/list field was collapsed - wrap it in a struct
-      const childName = expr.attrs.nodes
-        .map((child) => nodeToBinding.get(child))
-        .find(Boolean)?.name;
+      // Single scalar/optional/list field was collapsed - wrap it in a struct.
+      // The field's binding may not be a direct child: a nested sequence that
+      // collapsed (e.g. one preserved by flatten to keep its `meta.doc`) leaves
+      // the binding buried one or more levels down. Search through collapsed
+      // sequences for it. Using `binding.name` as the field name keeps the
+      // struct field aligned with the access path the backends render
+      // (`params.<binding.name>`).
+      const findCollapsedBinding = (node: Expr): Binding | undefined => {
+        const b = nodeToBinding.get(node);
+        if (b) return b;
+        // Only sequences collapse without leaving a binding; optional/repeat/
+        // alternative always register one, so no need to descend into them.
+        if (node.kind === "sequence") {
+          for (const child of node.attrs.nodes) {
+            const found = findCollapsedBinding(child);
+            if (found) return found;
+          }
+        }
+        return undefined;
+      };
+      const childName = expr.attrs.nodes.map(findCollapsedBinding).find(Boolean)?.name;
       if (childName) {
         createBinding(expr, name, { kind: "struct", fields: { [childName]: rootType } }, []);
       }

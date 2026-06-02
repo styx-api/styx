@@ -162,6 +162,79 @@ describe("resolveOutputs", () => {
     expect(out.mediaTypes).toEqual(["text/plain"]);
   });
 
+  it("resolves a per-arm output ref to its own arm's same-named binding", () => {
+    // ants DenoiseImage shape: a union whose two arms both declare a field
+    // named `out` and an output referencing it. A global name index would
+    // collapse the two `out` bindings into one, so the first arm's output would
+    // pick up the second arm's variant gate - producing a contradictory
+    // `variant alpha && variant beta` gate that types to `never` in TS.
+    const armA = withOutputs(seq(lit("--a"), str("out")), [
+      { name: "out_file", tokens: [{ kind: "ref", target: nodeRef("out") }] },
+    ]);
+    armA.meta = { ...armA.meta, name: "alpha" };
+    const armB = withOutputs(seq(lit("--b"), str("out"), opt(str("extra"))), [
+      { name: "out_file", tokens: [{ kind: "ref", target: nodeRef("out") }] },
+    ]);
+    armB.meta = { ...armB.meta, name: "beta" };
+    const expr = seq(lit("cmd"), alt(armA, armB));
+    const result = solve(expr);
+    const resolution = resolveOutputs(expr, result);
+
+    // Two scopes (one per arm), each output gated by exactly its own variant.
+    expect(resolution.scopes).toHaveLength(2);
+    for (const scope of resolution.scopes) {
+      const scopeGate = result.bindings.get(scope.scope)?.gate ?? [];
+      const armVariant = scopeGate.find((a) => a.kind === "variant");
+      expect(armVariant).toBeDefined();
+      const out = scope.outputs[0]!;
+      const gate = outputGate(scopeGate, out, result.bindings);
+      const variants = gate.filter((a) => a.kind === "variant");
+      // Exactly one variant atom, matching this arm's - not a mix of both.
+      expect(variants).toHaveLength(1);
+      expect(variants[0]).toEqual(armVariant);
+      // The ref binding is the one declared in this arm's subtree.
+      const refToken = out.tokens.find((t) => t.kind === "ref")!;
+      const refBinding = result.bindings.get(refToken.binding!)!;
+      expect(
+        refBinding.gate.some((a) => a.kind === "variant" && a.variant === armVariant!.variant),
+      ).toBe(true);
+    }
+  });
+
+  it("resolves an output ref on a collapsed bare-scalar arm to that arm's boxed binding", () => {
+    // Exact ants DenoiseImage shape: one arm is a bare scalar (no flag), so it
+    // collapses and the solver boxes its lone field's binding ONTO the arm node
+    // itself (the scope node). The arm's output ref must resolve to that
+    // depth-0 binding - whose access path is the field and whose gate is the
+    // arm's variant - not to the other arm's same-named field.
+    // The bare-scalar arm's variant name coincides with its field name (as in
+    // DenoiseImage, where both are `correctedOutputFileName`).
+    const armA = str("out");
+    armA.meta = {
+      name: "out",
+      outputs: [{ name: "out_file", tokens: [{ kind: "ref", target: nodeRef("out") }] }],
+    };
+    const armB = withOutputs(seq(lit("--b"), str("out"), opt(str("extra"))), [
+      { name: "out_file", tokens: [{ kind: "ref", target: nodeRef("out") }] },
+    ]);
+    armB.meta = { ...armB.meta, name: "beta" };
+    const expr = seq(lit("cmd"), alt(armA, armB));
+    const result = solve(expr);
+    const resolution = resolveOutputs(expr, result);
+
+    expect(resolution.scopes).toHaveLength(2);
+    for (const scope of resolution.scopes) {
+      const scopeGate = result.bindings.get(scope.scope)?.gate ?? [];
+      const armVariant = scopeGate.find((a) => a.kind === "variant");
+      expect(armVariant).toBeDefined();
+      const out = scope.outputs[0]!;
+      const gate = outputGate(scopeGate, out, result.bindings);
+      // Exactly one variant atom - the arm's own - not a contradictory mix.
+      expect(gate.filter((a) => a.kind === "variant")).toHaveLength(1);
+      expect(gate.find((a) => a.kind === "variant")).toEqual(armVariant);
+    }
+  });
+
   it("buckets multiple outputs declared on the same node into one scope", () => {
     const root = withOutputs(seq(lit("cmd"), path("a"), path("b")), [
       { name: "out_a", tokens: [{ kind: "ref", target: nodeRef("a") }] },

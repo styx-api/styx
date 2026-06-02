@@ -276,7 +276,43 @@ describe("Boutiques generation", () => {
 });
 
 describe("Boutiques subcommands", () => {
-  it("handles subcommand input", () => {
+  it("collapses a lone (non-union) subcommand into the root command", () => {
+    // The evolved model collapses `seq(T) -> T`, so a single (non-union)
+    // subcommand merges into the root: its inputs surface as the tool's own
+    // inputs and its command-line text becomes part of the root command. (Nested
+    // SubCommand objects only arise from unions - see "handles subcommand union
+    // input".) The tool's own command name must survive the merge.
+    const bt = emitFor(
+      minimalDescriptor({
+        "command-line": "test [SUB]",
+        inputs: [
+          {
+            id: "sub",
+            name: "Subcommand",
+            "value-key": "[SUB]",
+            type: {
+              id: "sub",
+              "command-line": "--name [NAME] [COUNT]",
+              inputs: [
+                { id: "name", "value-key": "[NAME]", type: "String" },
+                { id: "count", "value-key": "[COUNT]", type: "Number", integer: true },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+    // Both subcommand inputs surface flat; no nested object.
+    const inputs = bt.inputs as Record<string, unknown>[];
+    expect(inputs.map((i) => i.id)).toEqual(["name", "count"]);
+    expect(inputs.every((i) => typeof i.type === "string")).toBe(true);
+    // The root command name is preserved ahead of the subcommand's own literal.
+    expect(bt["command-line"]).toBe("test --name [NAME] [COUNT]");
+  });
+
+  it("preserves the command name when a single-input tool collapses", () => {
+    // Regression: a single-input subcommand collapses through a preserved inner
+    // sequence; the root `test` literal must not be dropped.
     const bt = emitFor(
       minimalDescriptor({
         "command-line": "test [SUB]",
@@ -294,14 +330,10 @@ describe("Boutiques subcommands", () => {
         ],
       }),
     );
+    expect(bt["command-line"]).toBe("test --name [NAME]");
     const inputs = bt.inputs as Record<string, unknown>[];
     expect(inputs).toHaveLength(1);
-    const subType = inputs[0]!.type as Record<string, unknown>;
-    expect(typeof subType).toBe("object");
-    expect(Array.isArray(subType)).toBe(false);
-    const subInputs = subType.inputs as Record<string, unknown>[];
-    expect(subInputs).toBeDefined();
-    expect(subInputs.length).toBeGreaterThan(0);
+    expect(inputs[0]!.type).toBe("String");
   });
 
   it("handles subcommand union input", () => {

@@ -54,11 +54,24 @@ function isInterpolable(type: BoundType): boolean {
   }
 }
 
-function indexBindingsByName(root: Expr, resolve: (n: Expr) => Binding | undefined): NameIndex {
+/**
+ * `includeRoot` controls whether the binding on `root` itself (depth 0) is
+ * indexed. The global index excludes it (a ref must never resolve to the root
+ * struct, which shares its name with a deep field via `findDeepName`). A
+ * scope-local index includes it: a collapsed single-field union arm boxes its
+ * lone field's binding onto the scope node itself (e.g. ants DenoiseImage's
+ * `correctedOutputFileName` arm), and that binding - with the field's access
+ * path and the arm's variant gate - is exactly what the arm's output ref needs.
+ */
+function indexBindingsByName(
+  root: Expr,
+  resolve: (n: Expr) => Binding | undefined,
+  includeRoot = false,
+): NameIndex {
   const byNameDepth = new Map<string, { binding: Binding; depth: number }>();
   function walk(node: Expr, depth: number): void {
     const binding = resolve(node);
-    if (binding && depth > 0) {
+    if (binding && (depth > 0 || includeRoot)) {
       const existing = byNameDepth.get(binding.name);
       if (!existing || preferCandidate({ binding, depth }, existing)) {
         byNameDepth.set(binding.name, { binding, depth });
@@ -126,7 +139,8 @@ function collectScopes(root: Expr): { node: Expr; outputs: Output[] }[] {
 function resolveOne(
   output: Output,
   index: number,
-  names: NameIndex,
+  localNames: NameIndex,
+  globalNames: NameIndex,
 ): { resolved: ResolvedOutput; errors: OutputDiagnostic[] } {
   const errors: OutputDiagnostic[] = [];
   const name = effectiveOutputName(output, index);
@@ -136,7 +150,13 @@ function resolveOne(
       tokens.push({ kind: "literal", value: token.value });
       continue;
     }
-    const binding = names.byName.get(token.target.name);
+    // Prefer a binding declared within the output's own scope subtree. Union
+    // arms duplicate field names across scopes (each arm is its own scope), so
+    // the global index alone would resolve an arm's output ref to a sibling
+    // arm's binding, mixing contradictory variant gates into one output. Fall
+    // back to the global index for refs to bindings outside the local subtree.
+    const binding =
+      localNames.byName.get(token.target.name) ?? globalNames.byName.get(token.target.name);
     if (!binding) {
       errors.push({
         output: name,
@@ -195,8 +215,12 @@ export function resolveOutputs(root: Expr, solved: SolveResult): OutputResolutio
       bucket = { scope: scopeBinding.id, outputs: [] };
       byScope.set(scopeBinding.id, bucket);
     }
+    // Index only the bindings within this scope's subtree (including the scope
+    // node's own binding), so an output ref resolves to the field declared in
+    // the same scope (union arm) before falling back to the global index.
+    const localNames = indexBindingsByName(node, solved.resolve, true);
     for (const output of outputs) {
-      const { resolved, errors: outErrors } = resolveOne(output, outputIndex++, names);
+      const { resolved, errors: outErrors } = resolveOne(output, outputIndex++, localNames, names);
       errors.push(...outErrors);
       bucket.outputs.push(resolved);
     }

@@ -499,12 +499,24 @@ describe("Python generation - params factory & kwarg wrapper", () => {
   });
 
   it("skips the kwarg wrapper / factory when the solver leaves no struct root", () => {
-    // A single-field joined-seq collapses, leaving no struct binding on the root.
-    const code = generate(seq(seqJoin("=", lit("--out"), str("out"))), { app: { id: "t" } });
+    // A root-level alternative solves to a union (not a struct): no named fields
+    // to spread into a factory/kwarg signature. (A single-field tool, by
+    // contrast, is wrapped into a struct root and DOES get the kwarg path.)
+    const code = generate(alt(seq(lit("a"), str("x")), seq(lit("b"), str("y"))), {
+      app: { id: "t" },
+    });
     expect(code).not.toMatch(/def t_params\(/);
     expect(code).not.toMatch(/def t_execute\(/);
     // The user-facing wrapper is still emitted as the dict-style fallback.
     expect(code).toMatch(/def t\(params:/);
+  });
+
+  it("wraps a single collapsed field into a struct root with the kwarg path", () => {
+    // `--out=VALUE` collapses to a lone scalar; the root fixup wraps it in a
+    // struct so the params dict has the field and the kwarg wrapper works.
+    const code = generate(seq(seqJoin("=", lit("--out"), str("out"))), { app: { id: "t" } });
+    expect(code).toMatch(/def t_params\(/);
+    expect(code).toContain('params["out"]');
   });
 
   it("lists the new symbols in __all__", () => {

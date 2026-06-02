@@ -119,8 +119,31 @@ function walk(node: Expr, resolve: (node: Expr) => Binding | undefined, arg: Acc
       }
       const access: AccessPath = [...arg.path, field(binding.name)];
       binding.access = access;
+      // The inner node, after unwrapping the optional from the binding type.
+      const innerType = binding.type.kind === "optional" ? binding.type.inner : binding.type;
       let childArg: AccessCtx;
-      if (hasStructScope(binding.type)) {
+      if (binding.type === arg.currentStructType) {
+        // This optional IS the boxed single-field union variant: a collapsed
+        // single-input arm whose type the solver retyped to the variant's
+        // struct (so `binding.type === currentStructType`). It maps to the
+        // variant's lone field, so the inner value collapses onto this
+        // optional's own field access. Without this, the struct-scope branch
+        // below would add a spurious extra segment named after the inner IR
+        // node (e.g. `params.opts.exponential_options.smoothing_standard_deviation`)
+        // instead of the boxed field (`params.opts.exponential_options`). The
+        // sequence case guards the same way via its `!== currentStructType` test.
+        childArg = { ...arg, directPath: access };
+      } else if (innerType.kind === "list") {
+        // optional<list>: the inner node is a `repeat` that represents this same
+        // value and assigns its own (iter-based) child scope. It must reuse this
+        // optional's path rather than append its field again - otherwise a
+        // struct-list field whose name matches the optional's collides into a
+        // doubled path (`params.config.config`). `directPath` = "inherit this
+        // path, append nothing". Scalar lists already reached here via the
+        // optional/bool branch below; struct lists previously fell into the
+        // `hasStructScope` branch and got the doubled path.
+        childArg = { ...arg, directPath: access };
+      } else if (hasStructScope(binding.type)) {
         childArg = {
           path: access,
           currentStructType: unwrapToStruct(binding.type) ?? arg.currentStructType,
