@@ -228,11 +228,22 @@ type IterScope = Map<BindingId, string>;
 interface OutputEmitCtx {
   ctx: CodegenContext;
   iter: IterScope;
+  /**
+   * Prefix substitutions for optional fields narrowed by an enclosing presence
+   * gate: maps a rendered access prefix to the `.get()`-narrowed local holding
+   * it. Threaded into `renderAccess` so reads use the local (one lookup, absent-
+   * safe, mypy-narrowable) - mirrors the cargs builder's `valueSubst`.
+   */
+  subst: ReadonlyMap<string, string>;
 }
 
 interface WrapperRender {
   open: string;
   loopVar?: string;
+  /** A `local = params.get(...)` line emitted before `open` (optional gates). */
+  bindLine?: string;
+  /** `[accessPrefix, local]` to add to the child scope's `subst` map. */
+  subst?: [string, string];
 }
 
 let loopCounter = 0;
@@ -249,6 +260,19 @@ function renderWrapperOpen(atom: GateAtom, ec: OutputEmitCtx): WrapperRender {
   }
   // present
   const binding = ec.ctx.bindings.get(atom.binding);
+  if (binding?.type.kind === "optional") {
+    // Optional fields are NotRequired - the factory omits absent ones. Bind the
+    // value to a narrowed local read via `.get()` (a bare subscript would
+    // KeyError) and redirect inner reads to it via `subst`. Mirrors walkOptional.
+    const subscriptAccess = bindingAccess(atom.binding, ec);
+    const getAccess = bindingAccess(atom.binding, ec, true);
+    const local = `__v${loopCounter++}`;
+    return {
+      open: `if ${local} is not None:`,
+      bindLine: `${local} = ${getAccess}`,
+      subst: [subscriptAccess, local],
+    };
+  }
   const access = bindingAccess(atom.binding, ec);
   const cond = presentCondition(binding?.type, access);
   return { open: `if ${cond}:` };
@@ -268,18 +292,24 @@ function presentCondition(type: BoundType | undefined, access: string): string {
   }
 }
 
-function bindingAccess(id: BindingId, ec: OutputEmitCtx): string {
+function bindingAccess(id: BindingId, ec: OutputEmitCtx, finalGet = false): string {
   // The binding is itself the currently-iterated element (a ref to the list
   // being looped, or a scalar list element): use its loop variable directly.
-  const subst = ec.iter.get(id);
-  if (subst) return subst;
+  const iterVar = ec.iter.get(id);
+  if (iterVar) return iterVar;
   const binding = ec.ctx.bindings.get(id);
   if (binding) {
     // Solver-assigned path; `iter` segments resolve to the loop variable bound
-    // by the surrounding `iter` gate atom.
+    // by the surrounding `iter` gate atom. `finalGet` renders the last field
+    // segment as `.get()` when binding an optional's value; `subst` redirects an
+    // optional prefix to the narrowed local bound by its presence gate.
     return renderAccess(
       binding.access,
       (b) => ec.iter.get(b) ?? `None  # unresolved loop var ${b}`,
+      {
+        finalFieldGet: finalGet,
+        subst: ec.subst,
+      },
     );
   }
   return `None  # unresolved binding ${id}`;
@@ -367,12 +397,15 @@ function emitOneOutput(
     const [head, ...rest] = remaining;
     if (!head) return;
     const wrapper = renderWrapperOpen(head, child);
+    if (wrapper.bindLine) cb.line(wrapper.bindLine);
     cb.line(wrapper.open);
     cb.indent(() => {
-      const inner =
-        head.kind === "iter"
-          ? { ...child, iter: new Map(child.iter).set(head.binding, wrapper.loopVar!) }
-          : child;
+      let inner = child;
+      if (head.kind === "iter") {
+        inner = { ...child, iter: new Map(child.iter).set(head.binding, wrapper.loopVar!) };
+      } else if (wrapper.subst) {
+        inner = { ...child, subst: new Map(child.subst).set(wrapper.subst[0], wrapper.subst[1]) };
+      }
       nest(rest, inner);
     });
   }
@@ -401,6 +434,7 @@ export function emitBuildOutputs(
     const ec: OutputEmitCtx = {
       ctx,
       iter: new Map(),
+      subst: new Map(),
     };
 
     const fields = collectOutputFields(ctx);

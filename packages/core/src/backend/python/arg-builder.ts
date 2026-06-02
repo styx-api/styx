@@ -62,20 +62,36 @@ interface ArgContext {
    * segments in a binding's solver-assigned access path.
    */
   loopVars: ReadonlyMap<BindingId, string>;
+  /**
+   * Prefix substitutions for optional fields narrowed by an enclosing presence
+   * guard: maps a rendered access prefix to the `.get()`-narrowed local that
+   * holds it. Threaded into `renderAccess` so inner reads use the local (one
+   * lookup, absent-safe, mypy-narrowable) instead of re-subscripting.
+   */
+  valueSubst: ReadonlyMap<string, string>;
 }
 
-/** Render a binding's solver-assigned access path in the current loop scope. */
-function accessOf(binding: Binding, arg: ArgContext): string {
-  return renderAccess(binding.access, (b) => {
-    const v = arg.loopVars.get(b);
-    if (v === undefined) throw new Error(`arg-builder: unbound loop variable for binding ${b}`);
-    return v;
-  });
+/**
+ * Render a binding's solver-assigned access path in the current loop scope.
+ * `finalGet` renders the final field segment as `.get(key)` (used when binding
+ * an optional's value to a narrowed local - the key may be absent).
+ */
+function accessOf(binding: Binding, arg: ArgContext, finalGet = false): string {
+  return renderAccess(
+    binding.access,
+    (b) => {
+      const v = arg.loopVars.get(b);
+      if (v === undefined) throw new Error(`arg-builder: unbound loop variable for binding ${b}`);
+      return v;
+    },
+    { finalFieldGet: finalGet, subst: arg.valueSubst },
+  );
 }
 
 // -- Recursive descent --
 
 let loopVarCounter = 0;
+let optVarCounter = 0;
 
 /**
  * Build arg-building code for an IR tree via recursive descent.
@@ -85,9 +101,11 @@ let loopVarCounter = 0;
  */
 export function buildArgs(rootExpr: Expr, ctx: CodegenContext, _rootType?: BoundType): ArgResult {
   loopVarCounter = 0;
+  optVarCounter = 0;
   const initialCtx: ArgContext = {
     joinDepth: 0,
     loopVars: new Map(),
+    valueSubst: new Map(),
   };
   return walk(rootExpr, ctx, initialCtx);
 }
@@ -158,25 +176,45 @@ function walkOptional(
 ): ArgResult {
   const binding = ctx.resolve(node);
   if (!binding) throw new Error("Missing binding for optional node");
+  const isOpt = binding.type.kind === "optional";
   const access = accessOf(binding, arg);
 
+  // For a nullable optional, bind the value to a narrowed local read via `.get()`
+  // (the key is `NotRequired` - the factory omits it when None, so a bare
+  // subscript would KeyError). Inner reads of this access (and anything nested
+  // under it) are redirected to the local via `valueSubst`: one lookup, absent-
+  // safe, and mypy can narrow the local (it cannot narrow a re-subscript or a
+  // fresh `.get()`). Bool-flag optionals are always present (default false), so
+  // they keep the plain truthy subscript guard.
+  let childArg = arg;
+  let local: string | undefined;
+  let getAccess: string | undefined;
+  if (isOpt) {
+    local = `v_${optVarCounter++}`;
+    getAccess = accessOf(binding, arg, true);
+    childArg = { ...arg, valueSubst: new Map(arg.valueSubst).set(access, local) };
+  }
+
   // The inner node's access path is solver-assigned (it either inherits this
-  // optional's path on a collapse, or scopes into it for a struct), so no scope
-  // context needs threading - only the existing loop scope and join depth.
-  const inner = walk(node.attrs.node, ctx, arg);
+  // optional's path on a collapse, or scopes into it for a struct); we thread the
+  // loop scope, join depth, and the optional's value substitution.
+  const inner = walk(node.attrs.node, ctx, childArg);
 
   // Inside a join context, emit as ternary expression.
   if (arg.joinDepth > 0 && isExpr(inner)) {
-    if (binding.type.kind === "optional") {
-      return { expr: `(${inner.expr} if ${access} is not None else "")` };
+    if (isOpt) {
+      // Walrus binds the narrowed local inside the lazy ternary; the inner expr
+      // (which references `local`) only evaluates when the key is present.
+      return { expr: `(${inner.expr} if (${local} := ${getAccess}) is not None else "")` };
     }
     return { expr: `(${inner.expr} if ${access} else "")` };
   }
 
   const cb = new CodeBuilder("    ");
   const innerStmt = resultToStmt(inner);
-  if (binding.type.kind === "optional") {
-    cb.line(`if ${access} is not None:`);
+  if (isOpt) {
+    cb.line(`${local} = ${getAccess}`);
+    cb.line(`if ${local} is not None:`);
     cb.indent(() => appendLines(cb, innerStmt));
   } else {
     cb.line(`if ${access}:`);
