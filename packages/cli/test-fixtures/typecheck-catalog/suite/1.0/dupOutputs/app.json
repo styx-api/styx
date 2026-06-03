@@ -1,0 +1,10 @@
+{
+  "name": "dupOutputs",
+  "source": {
+    "type": "boutiques",
+    "path": "boutiques.json"
+  },
+  "docs": {
+    "description": "Hand-written tool with two ungated output-files sharing an id (the afni v_3d_detrend / v_3d_skull_strip shape). The required-single Outputs local is declared once and reassigned by later contributors; a second annotated declaration of the same local is a mypy --strict no-redef."
+  }
+}

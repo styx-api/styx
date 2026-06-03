@@ -24,6 +24,35 @@ describe("python outputs - codegen", () => {
     expect(code).toContain("return out");
   });
 
+  it("reassigns (not re-declares) a second ungated output sharing a name", () => {
+    // Regression (afni v_3d_detrend, v_3d_skull_strip, ...): two `output-files`
+    // share an id with no gate. The required-single branch used to emit a
+    // second annotated declaration (`out_file_v: OutputPathType = ...`), which
+    // mypy --strict flags as `no-redef`. Now the first contributor declares and
+    // later ones reassign the already-declared local.
+    const root = seq(lit("tool"), path("input"));
+    root.meta = {
+      outputs: [
+        {
+          name: "out_file",
+          tokens: [
+            { kind: "ref", target: nodeRef("input") },
+            { kind: "literal", value: "_detrend" },
+          ],
+        },
+        {
+          name: "out_file",
+          tokens: [{ kind: "literal", value: "out_file" }],
+        },
+      ],
+    };
+    const code = generate(root, { app: { id: "tool" } });
+    // Exactly one annotated declaration of the shared local...
+    expect(code.match(/out_file_v: OutputPathType =/g)?.length).toBe(1);
+    // ...and the second contributor reassigns without re-annotating.
+    expect(code).toContain('out_file_v = execution.output_file("out_file")');
+  });
+
   it("omits Outputs entirely when no outputs are attached", () => {
     const root = seq(lit("tool"), path("input"));
     const code = generate(root, { app: { id: "tool" } });
