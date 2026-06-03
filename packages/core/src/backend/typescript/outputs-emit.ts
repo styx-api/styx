@@ -1,4 +1,5 @@
 import type {
+  Binding,
   BindingId,
   BoundType,
   GateAtom,
@@ -6,10 +7,12 @@ import type {
   ResolvedToken,
 } from "../../bindings/index.js";
 import { outputGate } from "../../bindings/index.js";
+import { collectFieldInfo } from "../collect-field-info.js";
 import type { Documentation, Expr } from "../../ir/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
 import { emitJsDoc, renderAccess, tsPropAccess } from "./emit.js";
+import { renderTsLiteral } from "./typemap.js";
 
 /**
  * A `ResolvedOutput` plus a `mutable` marker. A mutable input file is surfaced
@@ -248,6 +251,39 @@ interface OutputEmitCtx {
    * assigning. Keyed identically to `collectOutputFields`.
    */
   fieldShapes: Map<string, OutputShape>;
+  /**
+   * Rendered TS default literals for root-level defaulted fields, keyed by field
+   * name. An output path interpolating such a field (e.g. an output basename
+   * `maskfile`) reads it via `(access ?? default)` so an absent key substitutes
+   * the default rather than stringifying `undefined`. Mirrors the cargs builder.
+   */
+  defaults: ReadonlyMap<string, string>;
+}
+
+/** The rendered default for a binding iff it is a root-level defaulted field. */
+function rootFieldDefault(
+  binding: Binding | undefined,
+  defaults: ReadonlyMap<string, string>,
+): string | undefined {
+  if (!binding) return undefined;
+  const a = binding.access;
+  if (a.length === 1 && a[0]?.kind === "field") return defaults.get(binding.name);
+  return undefined;
+}
+
+/** Build the field-name -> rendered-default map for the struct root (else empty).
+ * Includes only non-optional defaulted fields (optional fields are
+ * presence-guarded; their default comes from the factory's kwarg signature). */
+function collectDefaults(ctx: CodegenContext): Map<string, string> {
+  const out = new Map<string, string>();
+  const rootType = ctx.resolve(ctx.expr)?.type;
+  if (rootType?.kind !== "struct") return out;
+  for (const [name, fi] of collectFieldInfo(ctx, rootType)) {
+    if (fi.defaultValue === undefined) continue;
+    if (rootType.fields[name]?.kind === "optional") continue;
+    out.set(name, renderTsLiteral(fi.defaultValue));
+  }
+  return out;
 }
 
 /**
@@ -399,7 +435,13 @@ function renderToken(tok: ResolvedToken, ec: OutputEmitCtx): string {
 }
 
 function renderRefValue(tok: Extract<ResolvedToken, { kind: "ref" }>, ec: OutputEmitCtx): string {
-  let expr = bindingAccess(tok.binding, ec);
+  // A defaulted root field interpolated into an output path is read absent-safe
+  // via `(access ?? default)` (it is `?:`); other refs render normally.
+  const def = rootFieldDefault(ec.ctx.bindings.get(tok.binding), ec.defaults);
+  let expr =
+    def !== undefined && !ec.iter.has(tok.binding)
+      ? `(${bindingAccess(tok.binding, ec)} ?? ${def})`
+      : bindingAccess(tok.binding, ec);
   // Optional refs with a fallback substitute the fallback on null/undefined.
   if (tok.fallback !== undefined) {
     expr = `(${expr} ?? ${JSON.stringify(tok.fallback)})`;
@@ -442,6 +484,7 @@ export function emitBuildOutputs(
       ctx,
       iter: new Map(),
       fieldShapes: new Map(fields.map((f) => [f.id, f.shape])),
+      defaults: collectDefaults(ctx),
     };
 
     // Initialize the outputs object with defaults so wrapper code can assign or

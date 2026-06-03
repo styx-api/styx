@@ -110,4 +110,45 @@ describe("TypeScript codegen against the real styxdefs runtime", () => {
       styxdefs.StyxValidationError,
     );
   });
+
+  it("substitutes a defaulted field's default when a hand-authored config omits it", () => {
+    // A defaulted field (`out="default_out"`) is omittable in the schema/types,
+    // so a config may omit it. Executed directly, the runtime must substitute the
+    // default - never stringify `undefined` into the command line.
+    const defaulted: Expr = {
+      kind: "str",
+      attrs: {},
+      meta: { name: "out", defaultValue: "default_out" },
+    };
+    const { args } = runAgainstRealRuntime(seq(lit("tool"), defaulted), {});
+    expect(args).toEqual(["tool", "default_out"]);
+    expect(args).not.toContain("undefined");
+  });
+
+  it("drops an omitted flag without error (absent == off)", () => {
+    // A flag is omittable (default false). A config that omits it must execute
+    // cleanly with the flag simply absent from the command line.
+    const flag: Expr = {
+      kind: "optional",
+      attrs: { node: seq(lit("--loud")) },
+      meta: { name: "loud", defaultValue: false },
+    };
+    const { args } = runAgainstRealRuntime(seq(lit("tool"), str("name"), flag), { name: "x" });
+    expect(args).toEqual(["tool", "x"]);
+  });
+
+  it("substitutes a defaulted ENUM (value-choices) field's default when omitted", () => {
+    // A `value-choices` String with a default lowers to a literal-union
+    // `alternative` read in walkAlternative (not walkTerminal). A schema-valid
+    // config may omit it; the runtime must substitute the default, not emit
+    // `undefined`. Regression guard for the alternative-dispatch read path.
+    const enumField: Expr = {
+      kind: "alternative",
+      attrs: { alts: [lit("fast"), lit("slow"), lit("auto")] },
+      meta: { name: "mode", defaultValue: "auto" },
+    };
+    const { args } = runAgainstRealRuntime(seq(lit("tool"), enumField), {});
+    expect(args).toEqual(["tool", "auto"]);
+    expect(args).not.toContain("undefined");
+  });
 });

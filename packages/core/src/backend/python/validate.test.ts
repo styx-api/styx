@@ -74,7 +74,7 @@ describe("Python validation - scalar presence and isinstance", () => {
     const code = generate(seq(lit("tool"), opt(seq(lit("-x"), str("note")))));
     expect(code).toContain('if params.get("note", None) is not None:');
     expect(code).not.toContain("`note` must not be None");
-    expect(code).toContain("expected `str | None`");
+    expect(code).toContain("expected `str`");
   });
 
   it("gates fields with a default (flags) instead of requiring presence", () => {

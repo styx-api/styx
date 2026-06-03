@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Expr } from "../../ir/index.js";
 import { PythonBackend, generatePackageInit } from "./python.js";
 import {
   alt,
@@ -73,9 +74,13 @@ describe("Python generation - type declarations", () => {
     expect(code).toContain("infile: InputPathType");
   });
 
-  it("maps optional to nullable field", () => {
+  it("maps optional to an omittable (NotRequired), non-nullable field", () => {
     const code = generate(seq(opt(str("name"))));
-    expect(code).toMatch(/name: typing\.NotRequired\[str \| None\]/);
+    // Optional == omittable, never nullable: the solver has no nullable type.
+    // (The kwarg signature keeps a `| None = None` sentinel - that's the param
+    // type, not the dict field type.)
+    expect(code).toMatch(/name: typing\.NotRequired\[str\]/);
+    expect(code).not.toContain("typing.NotRequired[str | None]");
   });
 
   it("maps repeat to list type", () => {
@@ -90,29 +95,30 @@ describe("Python generation - type declarations", () => {
 });
 
 describe("Python generation - TypedDict NotRequired (mypy cleanliness)", () => {
-  // The params factory builds the initial dict literal with only required +
-  // explicitly-defaulted fields, then conditionally adds optional-without-default
-  // fields (`if x is not None: params["x"] = x`). Those conditionally-set fields
-  // must be NotRequired in the TypedDict, or mypy flags "Missing keys" at the
-  // factory's dict literal. The classification mirrors the factory exactly:
-  // optional && !hasExplicitDefault.
+  // A field is omittable (NotRequired) iff it is `optional` or carries a default
+  // (which includes flags - defaultValue false). The value type is never `| None`
+  // (the solver has no nullable): omittability is the only "unset", expressed
+  // structurally by NotRequired. Required-without-default fields stay bare; the
+  // factory always writes them.
 
-  it("marks optional-without-default fields NotRequired", () => {
+  it("marks optional-without-default fields NotRequired (no None)", () => {
     const code = generate(seq(lit("t"), str("name"), opt(str("opt_name"))), { app: { id: "t" } });
     // Required field: bare, no NotRequired.
     expect(code).toMatch(/^ {4}name: str$/m);
-    // Optional-without-default field: NotRequired.
-    expect(code).toMatch(/opt_name: typing\.NotRequired\[str \| None\]/);
+    // Optional-without-default field: NotRequired, non-nullable.
+    expect(code).toMatch(/opt_name: typing\.NotRequired\[str\]/);
+    expect(code).not.toContain("typing.NotRequired[str | None]");
   });
 
-  it("keeps explicitly-defaulted optional fields required (factory always writes them)", () => {
+  it("marks explicitly-defaulted (flag) fields NotRequired (omittable, no None)", () => {
     const code = generate(
       seq(lit("t"), opt(seq(lit("-v")), { name: "verbose", defaultValue: false })),
       { app: { id: "t" } },
     );
-    // Defaulted field is nullable but required - no NotRequired wrapper.
-    expect(code).toMatch(/verbose: bool \| None/);
-    expect(code).not.toMatch(/verbose: typing\.NotRequired/);
+    // A default means the key may be omitted (the runtime applies the default);
+    // it is NotRequired and never nullable.
+    expect(code).toMatch(/verbose: typing\.NotRequired\[bool\]/);
+    expect(code).not.toMatch(/verbose:.*None/);
   });
 
   it("keeps required (non-optional, no default) fields required", () => {
@@ -121,9 +127,10 @@ describe("Python generation - TypedDict NotRequired (mypy cleanliness)", () => {
     expect(code).not.toMatch(/name: typing\.NotRequired/);
   });
 
-  it("marks optional list fields NotRequired", () => {
+  it("marks optional list fields NotRequired (no None)", () => {
     const code = generate(seq(lit("t"), opt(rep(str("item"), "items"))), { app: { id: "t" } });
-    expect(code).toMatch(/items: typing\.NotRequired\[list\[str\] \| None\]/);
+    expect(code).toMatch(/items: typing\.NotRequired\[list\[str\]\]/);
+    expect(code).not.toContain("typing.NotRequired[list[str] | None]");
   });
 
   it("marks optional fields NotRequired inside a functional-syntax TypedDict (non-ident key)", () => {
@@ -133,7 +140,7 @@ describe("Python generation - TypedDict NotRequired (mypy cleanliness)", () => {
       app: { id: "bet" },
       package: { name: "fsl" },
     });
-    expect(code).toMatch(/"frac": typing\.NotRequired\[str \| None\]/);
+    expect(code).toMatch(/"frac": typing\.NotRequired\[str\]/);
   });
 
   it("binds NotRequired optional fields to a narrowed .get() local in cargs", () => {
@@ -193,7 +200,7 @@ describe("Python generation - docstrings", () => {
   it("emits docstring for optional scalar field (doc on inner terminal)", () => {
     const code = generate(seq(lit("cmd"), opt(seq(lit("--out"), str("output", "Output path")))));
     expect(code).toContain('"""Output path"""');
-    expect(code).toMatch(/output: typing\.NotRequired\[str \| None\]/);
+    expect(code).toMatch(/output: typing\.NotRequired\[str\]/);
   });
 
   it("emits docstrings for fields inside repeat struct", () => {
@@ -242,9 +249,11 @@ describe("Python generation - cargs building", () => {
     expect(code).toContain(`if ${m![1]} is not None:`);
   });
 
-  it("emits truthy check for bool flags", () => {
+  it("emits absent-safe truthy check for bool flags", () => {
+    // Flags are NotRequired (default false == absent), so the guard reads via
+    // `.get()` - a bare subscript would KeyError when the caller omits the flag.
     const code = generate(seq(opt(seq(lit("-v")))));
-    expect(code).toMatch(/if params\["\w+"\]:/);
+    expect(code).toMatch(/if params\.get\("\w+"\):/);
   });
 
   it("emits for-in loop for list params with correct loop variable", () => {
@@ -278,6 +287,21 @@ describe("Python generation - cargs building", () => {
     const code = generate(seq(alt(lit("fast"), lit("slow"))));
     expect(code).toContain("cargs.append(str(params[");
   });
+
+  it("substitutes the default for an omitted defaulted enum (value-choices) field", () => {
+    // A defaulted `value-choices` field lowers to a literal-union alternative
+    // read unconditionally. It is NotRequired, so the read must apply the default
+    // via `.get(key, default)` - a bare subscript would KeyError when omitted.
+    const enumField: Expr = {
+      kind: "alternative",
+      attrs: { alts: [lit("fast"), lit("slow"), lit("auto")] },
+      meta: { name: "mode", defaultValue: "auto" },
+    };
+    const code = generate(seq(lit("tool"), enumField));
+    expect(code).toContain('cargs.append(str(params.get("mode", "auto")))');
+    // The cargs read must not be a bare subscript (validate's gated read is fine).
+    expect(code).not.toContain('cargs.append(str(params["mode"]))');
+  });
 });
 
 describe("Python generation - complex IR", () => {
@@ -291,16 +315,17 @@ describe("Python generation - complex IR", () => {
       ),
     );
     expect(code).toContain("input: str");
-    // Optional-no-default -> NotRequired; defaulted optional (verbose) stays required.
-    expect(code).toMatch(/threshold: typing\.NotRequired\[float \| None\]/);
-    expect(code).toMatch(/verbose: bool \| None/);
+    // Both optional-no-default and defaulted (verbose flag) are NotRequired and
+    // non-nullable; the flag guard reads absent-safe via `.get()`.
+    expect(code).toMatch(/threshold: typing\.NotRequired\[float\]/);
+    expect(code).toMatch(/verbose: typing\.NotRequired\[bool\]/);
     expect(code).toContain('cargs.append("tool")');
-    expect(code).toContain('if params["verbose"]:');
+    expect(code).toContain('if params.get("verbose"):');
   });
 
   it("handles repeat inside optional", () => {
     const code = generate(seq(opt(seq(lit("-c"), rep(float("coord"), "coords")))));
-    expect(code).toMatch(/coords: typing\.NotRequired\[list\[float\] \| None\]/);
+    expect(code).toMatch(/coords: typing\.NotRequired\[list\[float\]\]/);
     const m = code.match(/(\w+) = params\.get\("coords"\)/);
     expect(m).toBeTruthy();
     const v = m![1];

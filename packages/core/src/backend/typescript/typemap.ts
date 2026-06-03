@@ -11,7 +11,13 @@ export function mapType(type: BoundType, resolve: (type: BoundType) => string | 
     case "literal":
       return typeof type.value === "string" ? JSON.stringify(type.value) : String(type.value);
     case "optional":
-      return `${mapType(type.inner, resolve)} | null | undefined`;
+      // The solver has no nullable type: `optional` means "omittable" (the key
+      // may be absent), never "the value may be null". Omittability is expressed
+      // structurally at the field level (`?:` on the interface key, NotRequired
+      // in Python); the value type itself is just the inner type. So in any
+      // value position (nested list/union arm, validator messages) we render the
+      // inner type with no `| null | undefined`.
+      return mapType(type.inner, resolve);
     case "list": {
       const inner = mapType(type.item, resolve);
       return inner.includes("|") ? `Array<${inner}>` : `${inner}[]`;
@@ -31,4 +37,11 @@ export function mapType(type: BoundType, resolve: (type: BoundType) => string | 
       return type.variants.map((v) => mapType(v.type, resolve)).join(" | ");
     }
   }
+}
+
+/** Render a JS default value as a TypeScript literal (signatures, `?? default`). */
+export function renderTsLiteral(value: string | number | boolean): string {
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "NaN";
+  return JSON.stringify(value);
 }

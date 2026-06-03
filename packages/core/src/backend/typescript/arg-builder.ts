@@ -1,8 +1,10 @@
 import type { Binding, BindingId, BoundType, BoundVariant } from "../../bindings/index.js";
+import { collectFieldInfo } from "../collect-field-info.js";
 import type { Expr } from "../../ir/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
 import { renderAccess } from "./emit.js";
+import { renderTsLiteral } from "./typemap.js";
 
 // -- Result types --
 
@@ -63,6 +65,16 @@ interface ArgContext {
    * segments in a binding's solver-assigned access path.
    */
   loopVars: ReadonlyMap<BindingId, string>;
+  /**
+   * Rendered TS default literals for root-level NON-OPTIONAL fields that carry a
+   * Boutiques default (e.g. `maskfile -> "img_bet"`), keyed by field name. Such a
+   * field is `?:` (a hand-authored config may omit it) yet is read
+   * unconditionally - so every read of its value becomes `(access ?? <default>)`
+   * to substitute the default instead of stringifying `undefined`. Optional
+   * fields are excluded: they are presence-guarded (their default, if any, comes
+   * from the factory's kwarg signature).
+   */
+  defaults: ReadonlyMap<string, string>;
 }
 
 /** Render a binding's solver-assigned access path in the current loop scope. */
@@ -72,6 +84,46 @@ function accessOf(binding: Binding, arg: ArgContext): string {
     if (v === undefined) throw new Error(`arg-builder: unbound loop variable for binding ${b}`);
     return v;
   });
+}
+
+/**
+ * The rendered default for a binding iff it is a root-level NON-OPTIONAL field
+ * carrying a Boutiques default. Restricted to single-segment (root) field access
+ * so a nested field can never accidentally pick up a same-named root default.
+ */
+function rootFieldDefault(
+  binding: Binding,
+  defaults: ReadonlyMap<string, string>,
+): string | undefined {
+  const a = binding.access;
+  if (a.length === 1 && a[0]?.kind === "field") return defaults.get(binding.name);
+  return undefined;
+}
+
+/**
+ * Render a binding's access for an UNCONDITIONAL value read (terminal, repeat
+ * loop, alternative dispatch): substitutes the field's default via
+ * `(access ?? default)` when it is a defaulted non-optional field, else the
+ * plain access. Returns plain access for every non-defaulted field, so the
+ * emitted code is byte-identical to before for the common case.
+ */
+function readAccess(binding: Binding, arg: ArgContext): string {
+  const def = rootFieldDefault(binding, arg.defaults);
+  return def !== undefined ? `(${accessOf(binding, arg)} ?? ${def})` : accessOf(binding, arg);
+}
+
+/** Build the field-name -> rendered-default map for a struct root (else empty).
+ * Includes only non-optional defaulted fields (optional fields are
+ * presence-guarded; their default comes from the factory's kwarg signature). */
+function collectDefaults(ctx: CodegenContext, rootType?: BoundType): Map<string, string> {
+  const out = new Map<string, string>();
+  if (rootType?.kind !== "struct") return out;
+  for (const [name, fi] of collectFieldInfo(ctx, rootType)) {
+    if (fi.defaultValue === undefined) continue;
+    if (rootType.fields[name]?.kind === "optional") continue;
+    out.set(name, renderTsLiteral(fi.defaultValue));
+  }
+  return out;
 }
 
 // -- Recursive descent --
@@ -84,11 +136,12 @@ let loopVarCounter = 0;
  * Context flows down via the immutable `arg` parameter (access paths, join depth, etc.).
  * Results flow up via return values (expressions or statement blocks).
  */
-export function buildArgs(rootExpr: Expr, ctx: CodegenContext, _rootType?: BoundType): ArgResult {
+export function buildArgs(rootExpr: Expr, ctx: CodegenContext, rootType?: BoundType): ArgResult {
   loopVarCounter = 0;
   const initialCtx: ArgContext = {
     joinDepth: 0,
     loopVars: new Map(),
+    defaults: collectDefaults(ctx, rootType),
   };
   return walk(rootExpr, ctx, initialCtx);
 }
@@ -121,8 +174,10 @@ function walk(node: Expr, ctx: CodegenContext, arg: ArgContext): ArgResult {
 function walkTerminal(node: Expr, ctx: CodegenContext, arg: ArgContext): ArgResult {
   const binding = ctx.resolve(node);
   if (!binding) throw new Error(`Missing binding for terminal node: ${node.kind}`);
-  const access = accessOf(binding, arg);
-  return { expr: toStringExpr(node, binding.type, access) };
+  // A root-level defaulted field (e.g. an output basename `maskfile="img_bet"`)
+  // is read here unconditionally but is `?:`, so `readAccess` substitutes the
+  // default for an absent key via `(access ?? default)`.
+  return { expr: toStringExpr(node, binding.type, readAccess(binding, arg)) };
 }
 
 function walkSequence(
@@ -198,7 +253,9 @@ function walkRepeat(
   // A non-join repeat inside an outer join concatenates rather than pushing
   // separate args, mirroring walkSequence's handling of bare non-join seqs.
   const join = node.attrs.join ?? (arg.joinDepth > 0 ? "" : undefined);
-  const access = accessOf(binding, arg);
+  // Unconditional read (the count/list value) - `readAccess` substitutes a
+  // defaulted non-optional field's default for an absent key.
+  const access = readAccess(binding, arg);
 
   // Count repeat: emit a counted for-loop. Inside a join the for-loop would
   // be dropped into a list literal as raw text, so emit `Array.from` instead.
@@ -246,7 +303,10 @@ function walkAlternative(
 ): ArgResult {
   const binding = ctx.resolve(node);
   if (!binding) throw new Error("Missing binding for alternative node");
-  const access = accessOf(binding, arg);
+  // Unconditional read (the enum value / bool guard / union discriminator) -
+  // `readAccess` substitutes a defaulted non-optional field's default for an
+  // absent key (e.g. a `value-choices` String with a default).
+  const access = readAccess(binding, arg);
 
   // Complex-union variant fields already carry the union's path in their
   // solver-assigned access, so arms walk with the current context unchanged.
