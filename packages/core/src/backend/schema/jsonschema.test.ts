@@ -311,9 +311,10 @@ describe("Outputs JSON Schema generation", () => {
     expect(schema.required).toContain("out");
   });
 
-  it("omits an optional (gated) output from required but keeps the property", () => {
+  it("types an optional (present-gated) output as nullable and keeps it required", () => {
     // The output references an optional input, so its gate carries a `present`
-    // atom -> optional-single -> present-but-nullable -> not in `required`.
+    // atom -> optional-single. The Outputs field is always present but null when
+    // the gate is off, so it stays in `required` and carries a null type branch.
     const schema = outputsSchemaFor(
       withOutputs(
         [{ id: "out", name: "Output", "path-template": "[INPUT1].out" }],
@@ -321,9 +322,45 @@ describe("Outputs JSON Schema generation", () => {
       ),
     );
     const props = schema.properties as Record<string, JsonSchema>;
-    expect(props["out"]?.type).toBe("string");
+    expect(props["out"]?.type).toEqual(["string", "null"]);
     expect(props["out"]?.["x-styx-type"]).toBe("file");
-    expect(schema.required ?? []).not.toContain("out");
+    expect(schema.required).toContain("out");
+  });
+
+  it("types a union-variant-gated output as nullable and keeps it required", () => {
+    // The `converted` output references `src`, which lives in the `convert` arm
+    // of a union, so its gate carries a `variant` atom (a distinct optionality
+    // path from `present`) -> optional-single -> nullable + required.
+    const schema = outputsSchemaFor(
+      minimalDescriptor({
+        "command-line": "test [SUBCMD]",
+        inputs: [
+          {
+            id: "subcmd",
+            "value-key": "[SUBCMD]",
+            type: [
+              {
+                id: "convert",
+                "command-line": "convert [SRC]",
+                inputs: [{ id: "src", "value-key": "[SRC]", type: "File" }],
+                "output-files": [
+                  { id: "converted", name: "Converted", "path-template": "[SRC].conv" },
+                ],
+              },
+              {
+                id: "inspect",
+                "command-line": "inspect [TARGET]",
+                inputs: [{ id: "target", "value-key": "[TARGET]", type: "File" }],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const props = schema.properties as Record<string, JsonSchema>;
+    expect(props["converted"]?.type).toEqual(["string", "null"]);
+    expect(props["converted"]?.["x-styx-type"]).toBe("file");
+    expect(schema.required).toContain("converted");
   });
 
   it("maps a list output to a required array of file-typed items", () => {
