@@ -152,6 +152,23 @@ describe("Python validation - unions", () => {
     expect(code).toContain('if not isinstance(params["source"]["url"], str):');
   });
 
+  it("rejects a duplicate-tagged struct variant (malformed discriminated union)", () => {
+    // A union with two variants tagged "orient" is malformed - the second is
+    // unreachable at runtime and a mypy --strict `comparison-overlap`. Frontends
+    // dodge duplicate tags (the Boutiques frontend renames duplicate subcommand
+    // ids); a duplicate reaching the backend is an invariant violation that the
+    // codegen rejects rather than silently emitting a dead branch.
+    const orientA = seq(lit("-orient"), str("orient_a"));
+    orientA.meta = { name: "orient" };
+    const orientB = seq(lit("-orient"), str("orient_b"));
+    orientB.meta = { name: "orient" };
+    const origin = seq(lit("-origin"), str("origin_vec"));
+    origin.meta = { name: "origin" };
+    expect(() => generate(seq(lit("tool"), namedAlt("op", orientA, orientB, origin)))).toThrow(
+      /duplicate union variant @type "orient"/,
+    );
+  });
+
   it("validates an enum (all-literal) choice as membership", () => {
     const code = generate(seq(lit("tool"), namedAlt("mode", lit("fast"), lit("slow"))));
     expect(code).toContain('not in ["fast", "slow"]');

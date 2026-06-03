@@ -44,6 +44,18 @@ export interface Output {
 export interface NodeMeta {
   /** Name identifier for this node (used by solver for binding names). */
   name?: string;
+  /**
+   * The discriminator (`@type`) tag for this node when it is a union arm (a
+   * Boutiques sub-command). Kept separate from `name`: a single-field
+   * sub-command collapses onto its inner field, whose `name` then wins, so the
+   * tag would otherwise become the inner field's id - e.g. two distinct
+   * sub-commands `VariousString`/`VariousFile` both wrapping an `obj` field
+   * would collide on `@type: "obj"` (and the second arm would be unreachable).
+   * `mergeMeta` preserves this through the collapse and the solver prefers it
+   * for the variant tag, so distinct sub-commands keep distinct, reachable
+   * `@type`s.
+   */
+  variantTag?: string;
   doc?: Documentation;
   defaultValue?: string | number | boolean;
   /** Files produced when this node is active. See `Output`. */

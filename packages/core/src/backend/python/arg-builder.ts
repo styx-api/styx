@@ -3,6 +3,7 @@ import { collectFieldInfo } from "../collect-field-info.js";
 import type { Expr } from "../../ir/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
+import { structVariants } from "../union-variants.js";
 import { pyStr, renderAccess, renderPyLiteral } from "./typemap.js";
 
 // -- Result types --
@@ -403,9 +404,10 @@ function walkAlternative(
     // mixed (struct variants plus bare-literal variants, e.g. ants
     // `Interpolation = "Linear" | MultiLabel | ...`). Pure-enum unions returned
     // above. Dispatch struct variants on `@type`; a bare literal is its own value.
-    const structVariants = unionType.variants
-      .map((variant, i) => ({ variant, i }))
-      .filter((x) => x.variant.type.kind === "struct");
+    // Struct variants with their indices; throws if two share an `@type` (a
+    // duplicate-tagged variant is unreachable and a mypy `comparison-overlap` -
+    // frontends must dodge duplicate tags before codegen).
+    const structVars = structVariants(unionType);
     const hasLiteral = unionType.variants.some((v) => v.type.kind === "literal");
 
     // Inside a join: chained ternary, same reason as bool above.
@@ -417,8 +419,8 @@ function walkAlternative(
         );
       }
       let structExpr = pyStr("");
-      for (let k = structVariants.length - 1; k >= 0; k--) {
-        const { variant, i } = structVariants[k]!;
+      for (let k = structVars.length - 1; k >= 0; k--) {
+        const { variant, i } = structVars[k]!;
         const v = (variants[i] as Expr_).expr;
         structExpr = `(${v} if ${access}["@type"] == ${pyStr(variant.name ?? "")} else ${structExpr})`;
       }
@@ -429,7 +431,7 @@ function walkAlternative(
 
     const cb = new CodeBuilder("    ");
     const emitStructDispatch = (): void => {
-      structVariants.forEach(({ variant, i }, k) => {
+      structVars.forEach(({ variant, i }, k) => {
         const keyword = k === 0 ? "if" : "elif";
         cb.line(`${keyword} ${access}["@type"] == ${pyStr(variant.name ?? "")}:`);
         cb.indent(() => appendLines(cb, resultToStmt(variants[i]!)));

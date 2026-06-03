@@ -41,6 +41,8 @@ const expectedTools = [
   "mutate",
   "border_merge",
   "dup_outputs",
+  "dup_variant",
+  "various_types",
 ];
 const expectedFiles = expectedTools.flatMap((t) => [
   `python/suite/${t}.py`,

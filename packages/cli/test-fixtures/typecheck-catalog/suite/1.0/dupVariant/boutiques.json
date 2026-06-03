@@ -1,0 +1,70 @@
+{
+  "name": "dupVariant",
+  "description": "A discriminated union with a duplicate-tagged variant for codegen typecheck.",
+  "tool-version": "1.0",
+  "schema-version": "0.5+styx",
+  "command-line": "dupVariant [OPERATIONS]",
+  "inputs": [
+    {
+      "id": "operations",
+      "name": "Operations",
+      "value-key": "[OPERATIONS]",
+      "list": true,
+      "optional": true,
+      "description": "A repeatable discriminated union of sub-commands.",
+      "type": [
+        {
+          "id": "orient",
+          "name": "orient",
+          "command-line": "[X]",
+          "description": "Set image orientation.",
+          "inputs": [
+            {
+              "id": "orient",
+              "name": "orient",
+              "value-key": "[X]",
+              "type": "String",
+              "command-line-flag": "-orient",
+              "optional": false,
+              "description": "Orientation code."
+            }
+          ]
+        },
+        {
+          "id": "origin",
+          "name": "origin",
+          "command-line": "[X]",
+          "description": "Set image origin.",
+          "inputs": [
+            {
+              "id": "origin",
+              "name": "origin",
+              "value-key": "[X]",
+              "type": "String",
+              "command-line-flag": "-origin",
+              "optional": false,
+              "description": "Origin vector."
+            }
+          ]
+        },
+        {
+          "id": "orient",
+          "name": "orient",
+          "command-line": "[X]",
+          "description": "Set image orientation.",
+          "inputs": [
+            {
+              "id": "orient",
+              "name": "orient",
+              "value-key": "[X]",
+              "type": "String",
+              "command-line-flag": "-orient",
+              "optional": false,
+              "description": "Orientation code (duplicate sub-command, same id)."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

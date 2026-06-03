@@ -8,6 +8,8 @@
     "antsApplyTransforms",
     "mutate",
     "borderMerge",
-    "dupOutputs"
+    "dupOutputs",
+    "dupVariant",
+    "variousTypes"
   ]
 }

@@ -208,7 +208,12 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
       case "alternative": {
         const id = preallocate();
         // Resolve each arm's variant name first so child gates can carry it.
+        // `variantTag` (the sub-command id) is preferred over `name`: a
+        // single-field sub-command collapses onto its inner field, whose `name`
+        // wins, so `name` alone would derive the tag from the inner field's id
+        // (two distinct sub-commands wrapping a same-named field would collide).
         const armNames = node.attrs.alts.map((alt, i) => {
+          if (alt.meta?.variantTag) return alt.meta.variantTag;
           if (alt.meta?.name) return alt.meta.name;
           if (alt.kind === "literal") return alt.attrs.str.replace(/^-+/, "");
           return `variant_${i}`;

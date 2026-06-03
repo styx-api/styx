@@ -3,6 +3,7 @@ import { collectFieldInfo } from "../collect-field-info.js";
 import type { Expr } from "../../ir/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
+import { structVariants } from "../union-variants.js";
 import { renderAccess } from "./emit.js";
 import { renderTsLiteral } from "./typemap.js";
 
@@ -357,9 +358,9 @@ function walkAlternative(
     // mixed (struct variants plus bare-literal variants, e.g. ants
     // `Interpolation = "Linear" | MultiLabel | ...`). Pure-enum unions returned
     // above. Dispatch struct variants on `@type`; a bare literal is its own value.
-    const structVariants = unionType.variants
-      .map((variant, i) => ({ variant, i }))
-      .filter((x) => x.variant.type.kind === "struct");
+    // `structVariants` throws if two share an `@type` (an unreachable, dead
+    // branch - frontends must dodge duplicate tags before codegen).
+    const structVars = structVariants(unionType);
     const hasLiteral = unionType.variants.some((v) => v.type.kind === "literal");
 
     // Inside a join: chained ternary, same reason as bool above.
@@ -371,8 +372,8 @@ function walkAlternative(
         );
       }
       let structExpr = '""';
-      for (let k = structVariants.length - 1; k >= 0; k--) {
-        const { variant, i } = structVariants[k]!;
+      for (let k = structVars.length - 1; k >= 0; k--) {
+        const { variant, i } = structVars[k]!;
         const v = (variants[i] as Expr_).expr;
         structExpr = `(${access}["@type"] === ${JSON.stringify(variant.name ?? "")} ? ${v} : ${structExpr})`;
       }
@@ -390,7 +391,7 @@ function walkAlternative(
     const emitStructSwitch = (): void => {
       cb.line(`switch (${access}["@type"]) {`);
       cb.indent(() => {
-        for (const { variant, i } of structVariants) {
+        for (const { variant, i } of structVars) {
           cb.line(`case ${JSON.stringify(variant.name ?? "")}: {`);
           cb.indent(() => {
             appendLines(cb, resultToStmt(variants[i]!));

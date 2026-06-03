@@ -1,0 +1,10 @@
+{
+  "name": "dupVariant",
+  "source": {
+    "type": "boutiques",
+    "path": "boutiques.json"
+  },
+  "docs": {
+    "description": "Hand-written tool with a repeatable discriminated union whose sub-commands include two with the same id (the c3d c2d/c3d/c4d shape: two byte-identical -orient sub-commands). The duplicate-tagged variant is deduplicated so each emitter (cargs + validate) dispatches one branch per @type; a second branch is unreachable and a mypy --strict comparison-overlap (the tag is narrowed away by the first)."
+  }
+}

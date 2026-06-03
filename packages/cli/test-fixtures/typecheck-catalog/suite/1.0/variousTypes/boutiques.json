@@ -1,0 +1,50 @@
+{
+  "name": "variousTypes",
+  "description": "Distinct sub-commands sharing an inner field name for codegen typecheck.",
+  "tool-version": "1.0",
+  "schema-version": "0.5+styx",
+  "command-line": "variousTypes [OPERAND]",
+  "inputs": [
+    {
+      "id": "operand",
+      "name": "Operand",
+      "value-key": "[OPERAND]",
+      "optional": true,
+      "description": "A value supplied either as a string or as a file.",
+      "type": [
+        {
+          "id": "VariousString",
+          "name": "VariousString",
+          "command-line": "[OBJ]",
+          "description": "Operand given as a string.",
+          "inputs": [
+            {
+              "id": "obj",
+              "name": "Object",
+              "value-key": "[OBJ]",
+              "type": "String",
+              "optional": false,
+              "description": "String operand."
+            }
+          ]
+        },
+        {
+          "id": "VariousFile",
+          "name": "VariousFile",
+          "command-line": "[OBJ]",
+          "description": "Operand given as a file.",
+          "inputs": [
+            {
+              "id": "obj",
+              "name": "Object",
+              "value-key": "[OBJ]",
+              "type": "File",
+              "optional": false,
+              "description": "File operand."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
