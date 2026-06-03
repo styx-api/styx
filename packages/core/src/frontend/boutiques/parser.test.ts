@@ -827,6 +827,90 @@ describe("BoutiquesParser", () => {
       expect(alt.attrs.alts).toHaveLength(2);
     });
 
+    it("dodges duplicate subcommand ids in a union (keeps a unique @type per arm)", () => {
+      const result = parse(
+        minimalDescriptor({
+          "command-line": "tool [SUBCMD]",
+          inputs: [
+            {
+              id: "subcmd",
+              "value-key": "[SUBCMD]",
+              type: [
+                {
+                  id: "orient",
+                  "command-line": "[X]",
+                  inputs: [{ id: "x", "value-key": "[X]", type: "String" }],
+                },
+                {
+                  id: "origin",
+                  "command-line": "[Y]",
+                  inputs: [{ id: "y", "value-key": "[Y]", type: "String" }],
+                },
+                {
+                  id: "orient",
+                  "command-line": "[Z]",
+                  inputs: [{ id: "z", "value-key": "[Z]", type: "String" }],
+                },
+              ],
+            },
+          ],
+        }),
+      );
+      const seq = result.expr as Sequence;
+      const alt = seq.attrs.nodes[1] as Alternative;
+      // The duplicate "orient" is dodged to a unique tag, the others unchanged.
+      // Both the binding name and the discriminator (variantTag) carry it.
+      expect(alt.attrs.alts.map((a) => a.meta?.variantTag)).toEqual([
+        "orient",
+        "origin",
+        "orient_2",
+      ]);
+      expect(alt.attrs.alts.map((a) => a.meta?.name)).toEqual(["orient", "origin", "orient_2"]);
+      expect(
+        result.warnings.some((w) => w.message.includes("Duplicate subcommand id 'orient'")),
+      ).toBe(true);
+    });
+
+    it("tags distinct sub-commands by their id even when they share an inner field name", () => {
+      // The mrcalc shape: distinct sub-commands (VariousString / VariousFile)
+      // each wrap a single inner field both named "obj". The @type must come
+      // from the sub-command id (recorded as variantTag, which survives the
+      // single-field collapse) - not the shared inner field name. No dodge here
+      // since the ids are already distinct.
+      const result = parse(
+        minimalDescriptor({
+          "command-line": "tool [OPERAND]",
+          inputs: [
+            {
+              id: "operand",
+              "value-key": "[OPERAND]",
+              type: [
+                {
+                  id: "VariousString",
+                  "command-line": "[OBJ]",
+                  inputs: [{ id: "obj", "value-key": "[OBJ]", type: "String" }],
+                },
+                {
+                  id: "VariousFile",
+                  "command-line": "[OBJ]",
+                  inputs: [{ id: "obj", "value-key": "[OBJ]", type: "File" }],
+                },
+              ],
+            },
+          ],
+        }),
+      );
+      const seq = result.expr as Sequence;
+      const alt = seq.attrs.nodes[1] as Alternative;
+      expect(alt.attrs.alts.map((a) => a.meta?.variantTag)).toEqual([
+        "VariousString",
+        "VariousFile",
+      ]);
+      expect(result.warnings.some((w) => w.message.includes("Duplicate subcommand id"))).toBe(
+        false,
+      );
+    });
+
     it("unwraps single-alternative union", () => {
       const result = parse(
         minimalDescriptor({

@@ -1,0 +1,10 @@
+{
+  "name": "variousTypes",
+  "source": {
+    "type": "boutiques",
+    "path": "boutiques.json"
+  },
+  "docs": {
+    "description": "Hand-written: a union of two distinct sub-commands (VariousString/VariousFile) that each collapse onto a single inner field both named 'obj' (the mrtrix mrcalc/mrconvert shape). The @type comes from the sub-command id (via variantTag, which survives the single-field collapse), so both variants stay distinct and reachable; deriving it from the shared inner field name would make the second variant unreachable and the backend throws on the resulting duplicate @type."
+  }
+}

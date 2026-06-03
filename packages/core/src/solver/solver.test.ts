@@ -1,6 +1,40 @@
 import { describe, expect, it } from "vitest";
-import { lit, opt, path, seq, str } from "../ir/builders.js";
+import { alt, lit, opt, path, seq, str } from "../ir/builders.js";
 import { solve } from "./solver.js";
+
+describe("solver union @type tags", () => {
+  it("derives the variant tag from variantTag, surviving a single-field collapse", () => {
+    // The mrcalc shape: two distinct sub-commands (VariousString / VariousFile)
+    // each collapse onto a single inner field both named "obj". Using `name`
+    // alone would tag both `obj` (the second arm unreachable at runtime);
+    // `variantTag` carries the sub-command id through the collapse so the tags
+    // stay distinct and both arms are reachable.
+    const asStr = str({ name: "obj", variantTag: "VariousString" });
+    const asFile = path({ name: "obj", variantTag: "VariousFile" });
+    const altNode = alt(asStr, asFile);
+    const expr = seq(lit("tool"), altNode);
+    expr.meta = { name: "tool" };
+    const { resolve } = solve(expr);
+    const u = resolve(altNode);
+    expect(u?.type.kind).toBe("union");
+    const tags = u?.type.kind === "union" ? u.type.variants.map((v) => v.name) : [];
+    expect(tags).toEqual(["VariousString", "VariousFile"]);
+  });
+
+  it("falls back to name when no variantTag is present", () => {
+    const a = seq(lit("--file"), path("file"));
+    a.meta = { name: "fromFile" };
+    const b = seq(lit("--url"), str("url"));
+    b.meta = { name: "fromUrl" };
+    const altNode = alt(a, b);
+    const expr = seq(lit("tool"), altNode);
+    expr.meta = { name: "tool" };
+    const { resolve } = solve(expr);
+    const u = resolve(altNode);
+    const tags = u?.type.kind === "union" ? u.type.variants.map((v) => v.name) : [];
+    expect(tags).toEqual(["fromFile", "fromUrl"]);
+  });
+});
 
 describe("solver root-binding fixup", () => {
   it("wraps a single collapsed field in a root struct", () => {

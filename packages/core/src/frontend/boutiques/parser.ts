@@ -435,6 +435,14 @@ export class BoutiquesParser implements Frontend {
           return null;
         }
         const parsedAlts: Expr[] = [];
+        // A discriminated union dispatches on a unique `@type` (the subcommand
+        // id), recorded as `variantTag` so it survives a single-field
+        // sub-command collapsing onto its inner field. Two genuinely-duplicate
+        // ids (c3d c2d/c3d/c4d declare two byte-identical sub-commands) are
+        // dodged to a unique tag so both arms stay addressable rather than the
+        // second being an unreachable, codegen-breaking duplicate (the backend
+        // rejects duplicate `@type`s outright).
+        const usedTags = new Set<string>();
         for (const alt of alts) {
           if (!isObject(alt)) {
             this.warn("Skipping non-object subcommand alternative");
@@ -442,10 +450,25 @@ export class BoutiquesParser implements Frontend {
           }
           const parsed = this.parseDescriptor(alt);
           if (parsed) {
-            // Set metadata from the subcommand descriptor
+            // Tag the arm from the subcommand descriptor's id.
             const altMeta = this.buildAppMeta(alt);
             if (altMeta?.id) {
-              parsed.meta = { ...parsed.meta, name: altMeta.id };
+              let tag = altMeta.id;
+              if (usedTags.has(tag)) {
+                let n = 2;
+                while (usedTags.has(`${altMeta.id}_${n}`)) n++;
+                tag = `${altMeta.id}_${n}`;
+                this.warn(
+                  `Duplicate subcommand id '${altMeta.id}' in union '${btInput.id}'; ` +
+                    `renamed variant to '${tag}' to keep the @type discriminator unique.`,
+                );
+              }
+              usedTags.add(tag);
+              // `variantTag` is the discriminator (survives collapse); `name`
+              // gives a unique binding/type name for non-collapsing (multi-field)
+              // arms - it is clobbered by the inner field's name when the arm
+              // collapses, which is why the tag needs its own channel.
+              parsed.meta = { ...parsed.meta, name: tag, variantTag: tag };
             }
             parsedAlts.push(parsed);
           }

@@ -18,6 +18,14 @@ function mergeMeta(parent?: NodeMeta, child?: NodeMeta): NodeMeta | undefined {
   const name = child.name ?? parent.name;
   if (name !== undefined) merged.name = name;
 
+  // The variant tag is the union discriminator (the sub-command id); unlike
+  // `name` it must survive a single-field sub-command collapsing onto its inner
+  // field (whose `name` wins above), so the `@type` stays the sub-command id
+  // rather than the inner field's id. The parent (the sub-command wrapper)
+  // carries it; the inner field has none.
+  const variantTag = parent.variantTag ?? child.variantTag;
+  if (variantTag !== undefined) merged.variantTag = variantTag;
+
   const defaultValue = child.defaultValue ?? parent.defaultValue;
   if (defaultValue !== undefined) merged.defaultValue = defaultValue;
 

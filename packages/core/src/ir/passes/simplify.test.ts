@@ -41,6 +41,19 @@ describe("simplify", () => {
     expect(result.expr.meta?.name).toBe("inner");
   });
 
+  it("preserves the wrapper's variantTag when a single-field sub-command collapses", () => {
+    // A union arm: the sub-command wrapper carries the @type tag (variantTag),
+    // its single inner field carries the field name. On collapse, `name` takes
+    // the inner field's id but `variantTag` must survive on the wrapper, else
+    // the discriminator would become the inner field's id (the mrcalc shape).
+    const e = seq(str("obj"));
+    e.meta = { name: "VariousString", variantTag: "VariousString" };
+    const result = simplify.apply(e);
+    expect(result.expr.kind).toBe("str");
+    expect(result.expr.meta?.name).toBe("obj");
+    expect(result.expr.meta?.variantTag).toBe("VariousString");
+  });
+
   it("merges consecutive literals in an empty-join (concatenation) sequence", () => {
     const result = simplify.apply(seqJoin("", lit("a"), lit("b"), lit("c")));
     expect(result.expr.kind).toBe("literal");

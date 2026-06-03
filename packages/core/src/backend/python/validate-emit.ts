@@ -9,6 +9,7 @@ import {
   findRepeatNode,
   structFields,
 } from "../validate-walk.js";
+import { structVariants } from "../union-variants.js";
 import { emitDocstring } from "./emit.js";
 import { mapType, pyStr } from "./typemap.js";
 
@@ -182,13 +183,17 @@ function emitUnion(
   }
 
   const altNode = findAlternativeNode(node);
+  // Struct variants with their indices; throws if two share an `@type` (a
+  // duplicate-tagged variant is unreachable and a mypy `comparison-overlap` -
+  // frontends must dodge duplicate tags before codegen). The index keeps each
+  // arm aligned with the IR `alts`.
+  const structVars = structVariants(unionType);
   const emitStructArm = (): void => {
     // `valueExpr` is known to be a dict here.
     e.cb.line(`if "@type" not in ${valueExpr}:`);
     e.cb.indent(() => raise(e, str("Params object is missing `@type`")));
-    const names = unionType.variants
-      .filter((v) => v.type.kind === "struct")
-      .map((v) => v.name)
+    const names = structVars
+      .map(({ variant }) => variant.name)
       .filter((n): n is string => n !== undefined)
       .map((n) => pyStr(n))
       .join(", ");
@@ -196,12 +201,9 @@ function emitUnion(
     e.cb.indent(() =>
       raise(e, str("Parameter `" + wireKey + "`s `@type` must be one of [" + names + "]")),
     );
-    let first = true;
-    unionType.variants.forEach((variant, i) => {
-      const vt = variant.type;
-      if (vt.kind !== "struct") return;
-      const keyword = first ? "if" : "elif";
-      first = false;
+    structVars.forEach(({ variant, i }, k) => {
+      const vt = variant.type as Extract<BoundType, { kind: "struct" }>;
+      const keyword = k === 0 ? "if" : "elif";
       e.cb.line(`${keyword} ${valueExpr}["@type"] == ${pyStr(variant.name ?? "")}:`);
       e.cb.indent(() => {
         const fields = structFields(e.ctx, vt, altNode?.attrs.alts[i]).filter(

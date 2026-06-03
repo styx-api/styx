@@ -9,6 +9,7 @@ import {
   findRepeatNode,
   structFields,
 } from "../validate-walk.js";
+import { structVariants } from "../union-variants.js";
 import { emitJsDoc, tsPropAccess } from "./emit.js";
 import { mapType } from "./typemap.js";
 
@@ -178,12 +179,16 @@ function emitUnion(
   }
 
   const altNode = findAlternativeNode(node);
+  // Struct variants with their indices; throws if two share an `@type` (a
+  // duplicate-tagged variant is unreachable and a mypy `comparison-overlap` in
+  // the Python mirror - frontends must dodge duplicate tags before codegen).
+  // The index keeps each arm aligned with the IR `alts`.
+  const structVars = structVariants(unionType);
   const emitStructArm = (): void => {
     // `access` is known to be an object here.
     block(e, `!("@type" in ${access})`, () => raise(e, "Params object is missing `@type`"));
-    const names = unionType.variants
-      .filter((v) => v.type.kind === "struct")
-      .map((v) => v.name)
+    const names = structVars
+      .map(({ variant }) => variant.name)
       .filter((n): n is string => n !== undefined)
       .map((n) => JSON.stringify(n));
     // `.includes` rather than a `!==`-chain: the discriminant is a closed literal
@@ -197,9 +202,8 @@ function emitUnion(
     // rejects later arms.
     e.cb.line(`switch (${access}["@type"]) {`);
     e.cb.indent(() => {
-      unionType.variants.forEach((variant, i) => {
-        const vt = variant.type;
-        if (vt.kind !== "struct") return;
+      structVars.forEach(({ variant, i }) => {
+        const vt = variant.type as Extract<BoundType, { kind: "struct" }>;
         e.cb.line(`case ${JSON.stringify(variant.name ?? "")}: {`);
         e.cb.indent(() => {
           const fields = structFields(e.ctx, vt, altNode?.attrs.alts[i]).filter(
