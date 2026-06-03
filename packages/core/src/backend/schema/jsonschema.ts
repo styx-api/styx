@@ -2,12 +2,13 @@ import type { Binding, BoundType, BoundVariant } from "../../bindings/index.js";
 import type { Expr, ScalarKind } from "../../ir/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import type { Backend, EmittedApp } from "../backend.js";
+import { type OutputShape, collectOutputFields, streamFields } from "../collect-output-fields.js";
 import { findDoc } from "../find-doc.js";
 import { findStructNode } from "../find-struct-node.js";
 import { resolveFieldBinding } from "../resolve-field-binding.js";
 
 export interface JsonSchema {
-  type?: string;
+  type?: string | string[];
   items?: JsonSchema;
   properties?: Record<string, JsonSchema>;
   required?: string[];
@@ -175,16 +176,91 @@ export function generateSchema(ctx: CodegenContext): JsonSchema {
   return new SchemaBuilder(ctx).build();
 }
 
+/** Output names are language-neutral in the schema; key by the raw descriptor id. */
+const rawName = (name: string): string => name;
+
+/** The JSON Schema for one output field, given its solved shape. */
+function outputFieldSchema(shape: OutputShape): JsonSchema {
+  // A list output is always present (an empty array when nothing is produced),
+  // its elements never null: `OutputPathType[]` / `list[OutputPathType]`.
+  if (shape.kind === "list") {
+    return { type: "array", items: { type: "string", "x-styx-type": "file" } };
+  }
+  // A single output's key is always present on the Outputs object; when its gate
+  // is off the value is `null` (the backends type it `OutputPathType | None` /
+  // `OutputPathType | null`). So a gated single is a file path OR null - not an
+  // absent key. We mark it `required` (see below) and carry the null branch.
+  if (shape.optional) return { type: ["string", "null"], "x-styx-type": "file" };
+  return { type: "string", "x-styx-type": "file" };
+}
+
+/**
+ * JSON Schema for a tool's **Outputs object**: the set of files it produces
+ * (resolved outputs + mutable inputs surfaced as outputs) plus its captured
+ * stdout/stderr streams. Built from the same `collectOutputFields` /
+ * `streamFields` source of truth the Python and TypeScript backends use to type
+ * the Outputs dataclass/interface, so the three describe the same shape.
+ *
+ * Field encoding (mirrors how the language backends type each field):
+ * - required single -> `{ type: "string", x-styx-type: "file" }`
+ * - optional single -> `{ type: ["string", "null"], x-styx-type: "file" }`
+ * - list output     -> `{ type: "array", items: { type: "string", x-styx-type: "file" } }`
+ * - stream field    -> `{ type: "array", items: { type: "string" } }` (lines of
+ *   text, NOT paths - the absent `x-styx-type` lets a consumer tell them apart)
+ *
+ * EVERY field is `required`: unlike the inputs schema (where an optional param
+ * key is genuinely omitted, so "not in `required`" is faithful), an Outputs
+ * field is always present - a gated single is `null`, a gated list is an empty
+ * array. So optionality is carried by the `null` type branch, and a strict
+ * validator accepts the actual emitted object (e.g. `{ "out_file": null }`).
+ */
+export function generateOutputsSchema(ctx: CodegenContext): JsonSchema {
+  const schema: JsonSchema = {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+  };
+  if (ctx.app?.doc?.title) schema.title = ctx.app.doc.title;
+  if (ctx.app?.doc?.description) schema.description = ctx.app.doc.description;
+
+  const properties: Record<string, JsonSchema> = {};
+  const required: string[] = [];
+
+  for (const field of collectOutputFields(ctx, rawName)) {
+    const prop = outputFieldSchema(field.shape);
+    if (field.doc) prop.description = field.doc;
+    properties[field.name] = prop;
+    required.push(field.name);
+  }
+
+  for (const stream of streamFields(ctx, rawName)) {
+    const prop: JsonSchema = { type: "array", items: { type: "string" } };
+    if (stream.doc) prop.description = stream.doc;
+    properties[stream.name] = prop;
+    required.push(stream.name);
+  }
+
+  schema.properties = properties;
+  if (required.length > 0) schema.required = required;
+  return schema;
+}
+
 export class JsonSchemaBackend implements Backend {
   readonly name = "json-schema";
   readonly target = "json-schema";
 
   emitApp(ctx: CodegenContext): EmittedApp {
     const schema = generateSchema(ctx);
-    const json = JSON.stringify(schema, null, 2);
+    const outputsSchema = generateOutputsSchema(ctx);
     return {
       meta: ctx.app,
-      files: new Map([["schema.json", json]]),
+      // Inputs and outputs are kept as two cleanly addressable artifacts
+      // (mirroring v1's `<tool>.input.json` / `<tool>.output.json` split): a
+      // consumer can fetch/compute either independently, and the inputs
+      // `schema.json` stays byte-stable for existing consumers.
+      files: new Map([
+        ["schema.json", JSON.stringify(schema, null, 2)],
+        ["outputs.schema.json", JSON.stringify(outputsSchema, null, 2)],
+      ]),
       errors: [],
       warnings: [],
     };
