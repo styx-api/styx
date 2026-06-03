@@ -16,7 +16,7 @@ GREET_METADATA = Metadata(
 class Greet(typing.TypedDict):
     name: str
     """Person to greet."""
-    loud: bool | None
+    loud: typing.NotRequired[bool]
     """Shout the greeting."""
 
 def greet_params(
@@ -56,7 +56,7 @@ def greet_cargs(params: Greet, execution: Execution) -> list[str]:
     cargs: list[str] = []
     cargs.append("greet")
     cargs.append(params["name"])
-    if params["loud"]:
+    if params.get("loud"):
         cargs.append("--loud")
     return cargs
 

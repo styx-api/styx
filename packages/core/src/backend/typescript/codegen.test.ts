@@ -69,9 +69,11 @@ describe("TypeScript generation - type declarations", () => {
     expect(code).toContain("infile: InputPathType");
   });
 
-  it("maps optional to nullable optional field", () => {
+  it("maps optional to an omittable (?:), non-nullable field", () => {
     const code = generate(seq(opt(str("name"))));
-    expect(code).toMatch(/name\?: string \| null/);
+    // Optional == omittable, never nullable: the solver has no nullable type.
+    expect(code).toMatch(/name\?: string;/);
+    expect(code).not.toMatch(/name\?: string \| null/);
   });
 
   it("maps repeat to array type", () => {
@@ -94,12 +96,13 @@ describe("TypeScript generation - type declarations", () => {
     expect(code).toContain('"@type"?: "fsl/bet"');
   });
 
-  it("keeps fields with defaultValue required in the interface", () => {
-    // Defaults live on the params factory signature, not the interface; the
-    // factory always writes the field, so it stays required on the dict shape.
+  it("marks fields with a defaultValue omittable (?:) in the interface, non-nullable", () => {
+    // A default means the key may be omitted; the params factory still writes it,
+    // and the runtime applies the default for a hand-authored config that omits
+    // it. The interface key is `?:` and never `| null`.
     const code = generate(seq(opt(seq(lit("-v")), { name: "verbose", defaultValue: false })));
-    expect(code).toMatch(/verbose: boolean/);
-    expect(code).not.toMatch(/verbose\?: boolean/);
+    expect(code).toMatch(/verbose\?: boolean;/);
+    expect(code).not.toMatch(/verbose\?: boolean \| null/);
   });
 });
 
@@ -339,9 +342,10 @@ describe("TypeScript generation - complex IR", () => {
       ),
     );
     expect(code).toContain("input: string");
-    expect(code).toMatch(/threshold\?: number \| null/);
-    // `verbose` has an explicit default; stays required on the interface.
-    expect(code).toMatch(/verbose: boolean/);
+    // Both optional-no-default and defaulted (verbose) are omittable (?:) and
+    // non-nullable.
+    expect(code).toMatch(/threshold\?: number;/);
+    expect(code).toMatch(/verbose\?: boolean;/);
     expect(code).toContain('cargs.push("tool")');
     expect(code).toContain("if (params.verbose)");
   });

@@ -6,7 +6,7 @@ import { snakeCase } from "../string-case.js";
 import { structKey, unionKey } from "../type-keys.js";
 import type { ArgResult } from "./arg-builder.js";
 import { buildArgs, resultToStmt } from "./arg-builder.js";
-import { mapType, pyStr } from "./typemap.js";
+import { mapType, pyStr, renderPyLiteral } from "./typemap.js";
 import type { NamedType } from "./types.js";
 import { collectFieldInfo, resolveTypeName } from "./types.js";
 
@@ -163,19 +163,18 @@ function emitStructTypedDict(
     const fi = fieldInfo.get(fieldName);
     const hasDefault = fi?.defaultValue !== undefined;
     const isOptional = fieldType.kind === "optional";
-    let typeExpr = mapType(fieldType, resolve);
-    // Fields with defaults are nullable: missing/None means "use the default".
-    // Mirrors the TS backend's `field?:` semantics on TypedDict-like shapes.
-    if (hasDefault && !typeExpr.includes("None")) {
-      typeExpr = `${typeExpr} | None`;
-    }
-    // Optional-without-default fields are only set conditionally by the params
-    // factory (`if x is not None: params["x"] = x`), so they're absent from the
-    // initial dict literal. Mark them NotRequired so mypy doesn't flag "Missing
-    // keys" at every factory's dict literal. Mirrors the factory's classification
-    // exactly: `isOptional && !hasExplicitDefault` <-> conditional set. Defaulted
-    // and required fields stay required - the factory always writes them.
-    if (isOptional && !hasDefault) {
+    // The value type is the inner type, never `| None`: the solver has no
+    // nullable, so a present value is never None. Omittability (the key may be
+    // absent) is expressed structurally via `typing.NotRequired[...]`.
+    const inner = isOptional ? fieldType.inner : fieldType;
+    let typeExpr = mapType(inner, resolve);
+    // A field is omittable iff it is `optional` or it carries a default (which
+    // includes flags - `defaultValue` false). Mark omittable fields NotRequired:
+    // optional-without-default fields are conditionally set by the factory, and
+    // defaulted fields may legitimately be absent in a hand-authored config (the
+    // absence-safe runtime reads apply the default). Required-without-default
+    // fields stay bare - the factory always writes them.
+    if (isOptional || hasDefault) {
       typeExpr = `typing.NotRequired[${typeExpr}]`;
     }
     typedEntries.push({ key: fieldName, type: typeExpr, doc: fi?.doc });
@@ -423,20 +422,20 @@ export function appFuncName(ctx: CodegenContext, fallback: string): string {
   return snakeCase(ctx.app?.id ?? fallback);
 }
 
-/** Render a JS value as a Python literal. Used for default values in signatures. */
-function renderPyDefault(value: string | number | boolean): string {
-  if (typeof value === "boolean") return value ? "True" : "False";
-  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "float('nan')";
-  return pyStr(value);
-}
-
-/** SigOptions hooks for Python: ` | None` nullable suffix, `None` nullable default. */
+/**
+ * SigOptions hooks for Python. The kwarg-signature sentinel for an optional
+ * param is `T | None = None` - here `| None` is the *parameter* type (the
+ * "not provided" sentinel a caller passes), not the dict field type, which is
+ * just `typing.NotRequired[T]`. Keeping the sentinel preserves the ergonomic
+ * `foo(x)` call where omitted optionals default to `None` and the factory then
+ * drops them.
+ */
 export function pySigOptions(resolve: (t: BoundType) => string | undefined): SigOptions {
   return {
     renderType: (t) => mapType(t, resolve),
     nullableSuffix: " | None",
     nullableDefault: "None",
-    renderDefault: renderPyDefault,
+    renderDefault: renderPyLiteral,
   };
 }
 
@@ -508,9 +507,14 @@ function emitArgsBlock(entries: readonly { name: string; doc?: string }[], cb: C
 
 /**
  * Emit the `_params(...)` factory: a kwarg-style function that builds and
- * returns the params dict (with `@type` injected). Required fields and fields
- * with explicit defaults are always set; optional-without-default fields are
- * conditionally set when not None.
+ * returns the params dict (with `@type` injected). Non-optional fields (required,
+ * and defaulted scalars whose default lives on the signature) are always set in
+ * the literal. Every optional field is set conditionally when not None -
+ * including optional-with-default ones: their value type is `T | None` (the omit
+ * sentinel) but the dict field is the non-None `NotRequired[T]`, so a bare
+ * literal assignment of a possibly-None value would not type-check. When the
+ * caller omits the arg, the signature default (a concrete non-None value) flows
+ * through the guard and is written.
  */
 export function emitParamsFactory(
   entries: readonly SigEntry[],
@@ -546,16 +550,17 @@ export function emitParamsFactory(
     cb.indent(() => {
       if (typeTag !== undefined) cb.line(`"@type": ${pyStr(typeTag)},`);
       for (const e of entries) {
-        if (!e.isOptional || e.hasExplicitDefault) {
+        if (!e.isOptional) {
           cb.line(`${pyStr(e.wireKey)}: ${e.name},`);
         }
       }
     });
     cb.line("}");
 
-    // Conditional include for optional-without-default fields
+    // Conditional include for every optional field (its kwarg default supplies a
+    // non-None value when the caller omits the arg).
     for (const e of entries) {
-      if (e.isOptional && !e.hasExplicitDefault) {
+      if (e.isOptional) {
         cb.line(`if ${e.name} is not None:`);
         cb.indent(() => cb.line(`params[${pyStr(e.wireKey)}] = ${e.name}`));
       }

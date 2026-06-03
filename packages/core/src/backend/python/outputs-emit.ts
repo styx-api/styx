@@ -5,12 +5,14 @@ import type {
   ResolvedOutput,
   ResolvedToken,
 } from "../../bindings/index.js";
+import type { Binding } from "../../bindings/index.js";
 import { outputGate } from "../../bindings/index.js";
+import { collectFieldInfo } from "../collect-field-info.js";
 import type { Documentation, Expr } from "../../ir/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
 import { PY_KEYWORDS, emitDocstring } from "./emit.js";
-import { pyStr, renderAccess } from "./typemap.js";
+import { pyStr, renderAccess, renderPyLiteral } from "./typemap.js";
 
 /**
  * A `ResolvedOutput` plus a `mutable` marker. A mutable input file is surfaced
@@ -235,6 +237,40 @@ interface OutputEmitCtx {
    * safe, mypy-narrowable) - mirrors the cargs builder's `valueSubst`.
    */
   subst: ReadonlyMap<string, string>;
+  /**
+   * Rendered Python default literals for root-level defaulted fields, keyed by
+   * field name. An output path that interpolates such a field (e.g. an output
+   * basename `maskfile`) reads it via `.get(key, <default>)` so an absent key
+   * substitutes the default rather than raising `KeyError`. Mirrors the cargs
+   * builder's `defaults`.
+   */
+  defaults: ReadonlyMap<string, string>;
+}
+
+/** The rendered default for a binding iff it is a root-level defaulted field. */
+function rootFieldDefault(
+  binding: Binding | undefined,
+  defaults: ReadonlyMap<string, string>,
+): string | undefined {
+  if (!binding) return undefined;
+  const a = binding.access;
+  if (a.length === 1 && a[0]?.kind === "field") return defaults.get(binding.name);
+  return undefined;
+}
+
+/** Build the field-name -> rendered-default map for the struct root (else empty).
+ * Includes only non-optional defaulted fields (optional fields are
+ * presence-guarded; their default comes from the factory's kwarg signature). */
+function collectDefaults(ctx: CodegenContext): Map<string, string> {
+  const out = new Map<string, string>();
+  const rootType = ctx.resolve(ctx.expr)?.type;
+  if (rootType?.kind !== "struct") return out;
+  for (const [name, fi] of collectFieldInfo(ctx, rootType)) {
+    if (fi.defaultValue === undefined) continue;
+    if (rootType.fields[name]?.kind === "optional") continue;
+    out.set(name, renderPyLiteral(fi.defaultValue));
+  }
+  return out;
 }
 
 interface WrapperRender {
@@ -273,7 +309,12 @@ function renderWrapperOpen(atom: GateAtom, ec: OutputEmitCtx): WrapperRender {
       subst: [subscriptAccess, local],
     };
   }
-  const access = bindingAccess(atom.binding, ec);
+  // A bool flag / count gating an output is NotRequired (a hand-authored config
+  // may omit it), so read absence-safe via `.get()` - a bare subscript would
+  // KeyError. `presentCondition` coerces the possibly-None `.get()` result.
+  const t = binding?.type.kind;
+  const absentSafe = t === "bool" || t === "count";
+  const access = bindingAccess(atom.binding, ec, absentSafe);
   const cond = presentCondition(binding?.type, access);
   return { open: `if ${cond}:` };
 }
@@ -284,15 +325,22 @@ function presentCondition(type: BoundType | undefined, access: string): string {
     case "optional":
       return `${access} is not None`;
     case "bool":
+      // `access` is a `.get()` read: None (absent) is falsy -> flag off.
       return access;
     case "count":
-      return `${access} > 0`;
+      // `access` is a `.get()` read: coerce None (absent) to 0 before comparing.
+      return `(${access} or 0) > 0`;
     default:
       return access;
   }
 }
 
-function bindingAccess(id: BindingId, ec: OutputEmitCtx, finalGet = false): string {
+function bindingAccess(
+  id: BindingId,
+  ec: OutputEmitCtx,
+  finalGet = false,
+  finalDefault?: string,
+): string {
   // The binding is itself the currently-iterated element (a ref to the list
   // being looped, or a scalar list element): use its loop variable directly.
   const iterVar = ec.iter.get(id);
@@ -301,13 +349,15 @@ function bindingAccess(id: BindingId, ec: OutputEmitCtx, finalGet = false): stri
   if (binding) {
     // Solver-assigned path; `iter` segments resolve to the loop variable bound
     // by the surrounding `iter` gate atom. `finalGet` renders the last field
-    // segment as `.get()` when binding an optional's value; `subst` redirects an
-    // optional prefix to the narrowed local bound by its presence gate.
+    // segment as `.get()` when binding an optional's value; `finalDefault`
+    // renders it as `.get(key, default)` for a defaulted field; `subst` redirects
+    // an optional prefix to the narrowed local bound by its presence gate.
     return renderAccess(
       binding.access,
       (b) => ec.iter.get(b) ?? `None  # unresolved loop var ${b}`,
       {
         finalFieldGet: finalGet,
+        finalFieldDefault: finalDefault,
         subst: ec.subst,
       },
     );
@@ -349,7 +399,13 @@ function renderToken(tok: ResolvedToken, ec: OutputEmitCtx): string {
 }
 
 function renderRefValue(tok: Extract<ResolvedToken, { kind: "ref" }>, ec: OutputEmitCtx): string {
-  let expr = bindingAccess(tok.binding, ec);
+  // A defaulted root field interpolated into an output path is read absent-safe
+  // via `.get(key, default)` (it is `NotRequired`); other refs render normally.
+  const def = rootFieldDefault(ec.ctx.bindings.get(tok.binding), ec.defaults);
+  let expr =
+    def !== undefined && !ec.iter.has(tok.binding)
+      ? bindingAccess(tok.binding, ec, false, def)
+      : bindingAccess(tok.binding, ec);
   if (tok.fallback !== undefined) {
     expr = `(${expr} if ${expr} is not None else ${pyStr(tok.fallback)})`;
   }
@@ -435,6 +491,7 @@ export function emitBuildOutputs(
       ctx,
       iter: new Map(),
       subst: new Map(),
+      defaults: collectDefaults(ctx),
     };
 
     const fields = collectOutputFields(ctx);

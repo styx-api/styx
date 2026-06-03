@@ -37,7 +37,9 @@ describe("Python name dodging - host vs wire", () => {
       { app: { id: "tool" } },
     );
     expect(code).toMatch(/Tool = typing\.TypedDict\(/);
-    expect(code).toMatch(/"lambda":\s*typing\.NotRequired\[float\s*\|\s*None\]/);
+    // Dict field: NotRequired, non-nullable. Kwarg signature: keeps `| None`
+    // sentinel default (the "not provided" param value, not the field type).
+    expect(code).toMatch(/"lambda":\s*typing\.NotRequired\[float\]/);
     expect(code).toMatch(/lambda_:\s*float\s*\|\s*None/);
   });
 

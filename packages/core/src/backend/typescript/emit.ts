@@ -4,7 +4,7 @@ import { CodeBuilder } from "../code-builder.js";
 import type { SigEntry, SigOptions } from "../sig-entries.js";
 import type { ArgResult } from "./arg-builder.js";
 import { buildArgs, resultToStmt } from "./arg-builder.js";
-import { mapType } from "./typemap.js";
+import { mapType, renderTsLiteral } from "./typemap.js";
 import type { NamedType } from "./types.js";
 import { collectFieldInfo, resolveTypeName } from "./types.js";
 
@@ -89,16 +89,18 @@ export function emitTypeDeclarations(
           emitJsDoc(cb, fi?.doc);
 
           const isOptional = fieldType.kind === "optional";
-          // Fields with explicit defaults remain required in the interface; the
-          // params-factory's signature default handles the omission case. This
-          // mirrors v1: a `boolean` flag with default `false` stays `: boolean`
-          // (the factory always writes `false` if the user didn't override).
-          const optional = isOptional ? "?" : "";
+          // A field is omittable (key may be absent) iff it is `optional` or it
+          // carries a default (which includes flags - their `defaultValue` is
+          // false). The default/absent case is handled by the params factory and
+          // the absence-safe runtime reads; the type only needs to permit the key
+          // to be missing. Never `| null`: the solver has no nullable, so a
+          // present value is never null - omittability is the only "unset".
+          const omittable = isOptional || fi?.defaultValue !== undefined;
+          const optional = omittable ? "?" : "";
 
-          const mapped =
-            fieldType.kind === "optional"
-              ? mapType(fieldType.inner, resolve) + " | null"
-              : mapType(fieldType, resolve);
+          const mapped = isOptional
+            ? mapType(fieldType.inner, resolve)
+            : mapType(fieldType, resolve);
           // Quote keys that aren't valid identifiers (e.g. `4d_input`). TS
           // allows reserved-word identifiers as interface keys without quotes.
           cb.line(`${tsObjKey(fieldName)}${optional}: ${mapped};`);
@@ -152,20 +154,19 @@ export function emitBuildCargs(
   cb.line("}");
 }
 
-/** Render a JS value as a TypeScript literal for default-parameter use. */
-function renderTsDefault(value: string | number | boolean): string {
-  if (typeof value === "boolean") return value ? "true" : "false";
-  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "NaN";
-  return JSON.stringify(value);
-}
-
-/** SigOptions hooks for TypeScript: ` | null` nullable suffix, `null` nullable default. */
+/**
+ * SigOptions hooks for TypeScript. The kwarg-signature sentinel for an optional
+ * param is `T | null = null` - here `| null` is the *parameter* type (the
+ * "not provided" sentinel a caller passes), not the dict field type, which is
+ * just `T?`. Keeping the sentinel keeps the ergonomic `foo(x)` call where
+ * omitted optionals default to `null` and the factory then drops them.
+ */
 export function tsSigOptions(resolve: (t: BoundType) => string | undefined): SigOptions {
   return {
     renderType: (t) => mapType(t, resolve),
     nullableSuffix: " | null",
     nullableDefault: "null",
-    renderDefault: renderTsDefault,
+    renderDefault: renderTsLiteral,
   };
 }
 
@@ -244,8 +245,13 @@ function emitJsDocParams(
 
 /**
  * Emit the `<tool>Params(...)` factory: a kwarg-style builder for the params
- * object. Required fields and explicitly-defaulted fields are always set;
- * optional-without-default fields are conditionally set when not null.
+ * object. Non-optional fields (required, and defaulted scalars whose default
+ * lives on the signature) are always set in the literal. Every optional field is
+ * set conditionally when not null - including optional-with-default ones: their
+ * value type is `T | null` (the omit sentinel) but the dict field is the
+ * non-null `T?`, so a bare literal assignment of a possibly-null value would not
+ * type-check. When the caller omits the arg, the signature default (a concrete
+ * non-null value) flows through the guard and is written.
  */
 export function emitParamsFactory(
   entries: readonly SigEntry[],
@@ -275,14 +281,14 @@ export function emitParamsFactory(
     cb.indent(() => {
       if (typeTag !== undefined) cb.line(`"@type": ${JSON.stringify(typeTag)},`);
       for (const e of entries) {
-        if (!e.isOptional || e.hasExplicitDefault) {
+        if (!e.isOptional) {
           cb.line(`${tsObjKey(e.wireKey)}: ${e.name},`);
         }
       }
     });
     cb.line("};");
     for (const e of entries) {
-      if (e.isOptional && !e.hasExplicitDefault) {
+      if (e.isOptional) {
         cb.line(`if (${e.name} !== null) {`);
         cb.indent(() => cb.line(`${tsPropAccess("params", e.wireKey)} = ${e.name};`));
         cb.line("}");

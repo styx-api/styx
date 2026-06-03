@@ -15,7 +15,7 @@ export interface Greet {
   /** Person to greet. */
   name: string;
   /** Shout the greeting. */
-  loud: boolean;
+  loud?: boolean;
 }
 
 /**

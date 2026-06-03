@@ -1,8 +1,9 @@
 import type { Binding, BindingId, BoundType, BoundVariant } from "../../bindings/index.js";
+import { collectFieldInfo } from "../collect-field-info.js";
 import type { Expr } from "../../ir/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
-import { pyStr, renderAccess } from "./typemap.js";
+import { pyStr, renderAccess, renderPyLiteral } from "./typemap.js";
 
 // -- Result types --
 
@@ -69,14 +70,61 @@ interface ArgContext {
    * lookup, absent-safe, mypy-narrowable) instead of re-subscripting.
    */
   valueSubst: ReadonlyMap<string, string>;
+  /**
+   * Rendered Python default literals for root-level NON-OPTIONAL fields that
+   * carry a Boutiques default (e.g. `maskfile -> "img_bet"`), keyed by field
+   * name. Such a field is `NotRequired` (a hand-authored config may omit it) yet
+   * is read unconditionally - so every read of its value becomes
+   * `.get(key, <default>)` to substitute the default instead of raising
+   * `KeyError`. Optional fields are excluded: they are presence-guarded (their
+   * default, if any, is supplied by the factory's kwarg signature), so reading
+   * them with a default here would both be wrong and collide with `valueSubst`.
+   */
+  defaults: ReadonlyMap<string, string>;
+}
+
+/**
+ * The rendered default for a binding iff it is a root-level NON-OPTIONAL field
+ * carrying a Boutiques default. Restricted to single-segment (root) field access
+ * so a nested field can never accidentally pick up a same-named root default.
+ */
+function rootFieldDefault(
+  binding: Binding,
+  defaults: ReadonlyMap<string, string>,
+): string | undefined {
+  const a = binding.access;
+  if (a.length === 1 && a[0]?.kind === "field") return defaults.get(binding.name);
+  return undefined;
+}
+
+/**
+ * Render a binding's access for an UNCONDITIONAL value read (terminal, repeat
+ * loop, alternative dispatch): substitutes the field's default via
+ * `.get(key, default)` when it is a defaulted non-optional field, else the plain
+ * access. Returns plain access for every non-defaulted field, so the emitted
+ * code is byte-identical to before for the common case. Not used by
+ * `walkOptional` (its bare access is the `valueSubst` key and its guard reads
+ * via `.get()`).
+ */
+function readAccess(binding: Binding, arg: ArgContext): string {
+  const def = rootFieldDefault(binding, arg.defaults);
+  return accessOf(binding, arg, def !== undefined ? { finalDefault: def } : {});
+}
+
+interface AccessOpts {
+  /** Render the final field segment as `.get(key)` (absent key -> None). */
+  finalGet?: boolean;
+  /** Render the final field segment as `.get(key, default)` (absent key -> default). */
+  finalDefault?: string;
 }
 
 /**
  * Render a binding's solver-assigned access path in the current loop scope.
  * `finalGet` renders the final field segment as `.get(key)` (used when binding
- * an optional's value to a narrowed local - the key may be absent).
+ * an optional's value to a narrowed local); `finalDefault` renders it as
+ * `.get(key, default)` (used for absent-safe reads of a defaulted field).
  */
-function accessOf(binding: Binding, arg: ArgContext, finalGet = false): string {
+function accessOf(binding: Binding, arg: ArgContext, opts: AccessOpts = {}): string {
   return renderAccess(
     binding.access,
     (b) => {
@@ -84,8 +132,24 @@ function accessOf(binding: Binding, arg: ArgContext, finalGet = false): string {
       if (v === undefined) throw new Error(`arg-builder: unbound loop variable for binding ${b}`);
       return v;
     },
-    { finalFieldGet: finalGet, subst: arg.valueSubst },
+    { finalFieldGet: opts.finalGet, finalFieldDefault: opts.finalDefault, subst: arg.valueSubst },
   );
+}
+
+/**
+ * Build the field-name -> rendered-default map for a struct root (else empty).
+ * Includes only non-optional defaulted fields (optional fields are
+ * presence-guarded; their default comes from the factory's kwarg signature).
+ */
+function collectDefaults(ctx: CodegenContext, rootType?: BoundType): Map<string, string> {
+  const out = new Map<string, string>();
+  if (rootType?.kind !== "struct") return out;
+  for (const [name, fi] of collectFieldInfo(ctx, rootType)) {
+    if (fi.defaultValue === undefined) continue;
+    if (rootType.fields[name]?.kind === "optional") continue;
+    out.set(name, renderPyLiteral(fi.defaultValue));
+  }
+  return out;
 }
 
 // -- Recursive descent --
@@ -99,13 +163,14 @@ let optVarCounter = 0;
  * Mirrors the TypeScript backend's `walk` structurally so the emitted Python
  * has the same shape (and the same correctness story) as the TS output.
  */
-export function buildArgs(rootExpr: Expr, ctx: CodegenContext, _rootType?: BoundType): ArgResult {
+export function buildArgs(rootExpr: Expr, ctx: CodegenContext, rootType?: BoundType): ArgResult {
   loopVarCounter = 0;
   optVarCounter = 0;
   const initialCtx: ArgContext = {
     joinDepth: 0,
     loopVars: new Map(),
     valueSubst: new Map(),
+    defaults: collectDefaults(ctx, rootType),
   };
   return walk(rootExpr, ctx, initialCtx);
 }
@@ -138,8 +203,10 @@ function walk(node: Expr, ctx: CodegenContext, arg: ArgContext): ArgResult {
 function walkTerminal(node: Expr, ctx: CodegenContext, arg: ArgContext): ArgResult {
   const binding = ctx.resolve(node);
   if (!binding) throw new Error(`Missing binding for terminal node: ${node.kind}`);
-  const access = accessOf(binding, arg);
-  return { expr: toStringExpr(node, binding.type, access) };
+  // A root-level defaulted field (e.g. an output basename `maskfile="img_bet"`)
+  // is read here unconditionally but is `NotRequired`, so `readAccess`
+  // substitutes the default for an absent key via `.get(key, default)`.
+  return { expr: toStringExpr(node, binding.type, readAccess(binding, arg)) };
 }
 
 function walkSequence(
@@ -184,16 +251,18 @@ function walkOptional(
   // subscript would KeyError). Inner reads of this access (and anything nested
   // under it) are redirected to the local via `valueSubst`: one lookup, absent-
   // safe, and mypy can narrow the local (it cannot narrow a re-subscript or a
-  // fresh `.get()`). Bool-flag optionals are always present (default false), so
-  // they keep the plain truthy subscript guard.
+  // fresh `.get()`). Bool-flag optionals are also `NotRequired` (default false),
+  // so the truthy guard reads via `.get()` too (absent key -> None -> flag off).
   let childArg = arg;
   let local: string | undefined;
   let getAccess: string | undefined;
   if (isOpt) {
     local = `v_${optVarCounter++}`;
-    getAccess = accessOf(binding, arg, true);
+    getAccess = accessOf(binding, arg, { finalGet: true });
     childArg = { ...arg, valueSubst: new Map(arg.valueSubst).set(access, local) };
   }
+  // Absent-safe truthy guard for the bool-flag case.
+  const boolGuard = accessOf(binding, arg, { finalGet: true });
 
   // The inner node's access path is solver-assigned (it either inherits this
   // optional's path on a collapse, or scopes into it for a struct); we thread the
@@ -207,7 +276,7 @@ function walkOptional(
       // (which references `local`) only evaluates when the key is present.
       return { expr: `(${inner.expr} if (${local} := ${getAccess}) is not None else "")` };
     }
-    return { expr: `(${inner.expr} if ${access} else "")` };
+    return { expr: `(${inner.expr} if ${boolGuard} else "")` };
   }
 
   const cb = new CodeBuilder("    ");
@@ -217,7 +286,7 @@ function walkOptional(
     cb.line(`if ${local} is not None:`);
     cb.indent(() => appendLines(cb, innerStmt));
   } else {
-    cb.line(`if ${access}:`);
+    cb.line(`if ${boolGuard}:`);
     cb.indent(() => appendLines(cb, innerStmt));
   }
   return { stmt: cb.toString() };
@@ -233,7 +302,9 @@ function walkRepeat(
   // A non-join repeat inside an outer join concatenates rather than pushing
   // separate args, mirroring walkSequence's handling of bare non-join seqs.
   const join = node.attrs.join ?? (arg.joinDepth > 0 ? "" : undefined);
-  const access = accessOf(binding, arg);
+  // Unconditional read (the count/list value) - `readAccess` substitutes a
+  // defaulted non-optional field's default for an absent key.
+  const access = readAccess(binding, arg);
 
   // Count repeat: emit a counted for-loop. Inside a join the for-loop would
   // be dropped into a list literal as raw text, so emit a comprehension.
@@ -279,7 +350,10 @@ function walkAlternative(
 ): ArgResult {
   const binding = ctx.resolve(node);
   if (!binding) throw new Error("Missing binding for alternative node");
-  const access = accessOf(binding, arg);
+  // Unconditional read (the enum value / bool guard / union discriminator) -
+  // `readAccess` substitutes a defaulted non-optional field's default for an
+  // absent key (e.g. a `value-choices` String with a default).
+  const access = readAccess(binding, arg);
 
   // Complex-union variant fields already carry the union's path in their
   // solver-assigned access, so arms walk with the current context unchanged.

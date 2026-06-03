@@ -41,9 +41,9 @@ describe("Python - mutable inputs surface as outputs", () => {
     const code = generate(seq(lit("tool"), opt(attrPath("infile", { mutable: true }))));
     // Outputs dataclass field (unchanged - dataclasses don't use NotRequired).
     expect(code).toContain("infile: OutputPathType | None");
-    // Params TypedDict input field is NotRequired; the present-gate binds a
-    // narrowed local via .get() and surfaces the mutable copy from it.
-    expect(code).toContain("infile: typing.NotRequired[InputPathType | None]");
+    // Params TypedDict input field is NotRequired (non-nullable); the present-gate
+    // binds a narrowed local via .get() and surfaces the mutable copy from it.
+    expect(code).toContain("infile: typing.NotRequired[InputPathType]");
     // The mutable copy surfaces from the outputs gate's narrowed local (.get()).
     const mc = code.match(/execution\.mutable_copy\((\w+)\)/);
     expect(mc).toBeTruthy();

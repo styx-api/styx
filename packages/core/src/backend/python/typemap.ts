@@ -22,7 +22,13 @@ export function mapType(type: BoundType, resolve: (type: BoundType) => string | 
         ? `typing.Literal[${pyStr(type.value)}]`
         : `typing.Literal[${type.value}]`;
     case "optional":
-      return `${mapType(type.inner, resolve)} | None`;
+      // The solver has no nullable type: `optional` means "omittable" (the key
+      // may be absent), never "the value may be None". Omittability is expressed
+      // structurally at the field level (`typing.NotRequired[...]`); the value
+      // type itself is just the inner type. So in any value position (nested
+      // list/union arm, validator messages) we render the inner type with no
+      // `| None`.
+      return mapType(type.inner, resolve);
     case "list":
       return `list[${mapType(type.item, resolve)}]`;
     case "struct": {
@@ -38,6 +44,13 @@ export function mapType(type: BoundType, resolve: (type: BoundType) => string | 
       return type.variants.map((v) => mapType(v.type, resolve)).join(" | ");
     }
   }
+}
+
+/** Render a JS default value as a Python literal (signatures, `.get(k, default)`). */
+export function renderPyLiteral(value: string | number | boolean): string {
+  if (typeof value === "boolean") return value ? "True" : "False";
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "float('nan')";
+  return pyStr(value);
 }
 
 /** Python double-quoted string literal with minimal escaping. */
@@ -64,6 +77,16 @@ export interface RenderAccessOptions {
    */
   finalFieldGet?: boolean;
   /**
+   * Render the LAST segment - if it is a `field` - as `base.get(key, <default>)`,
+   * supplying a fallback value for an absent key. Used for fields that carry a
+   * Boutiques default and are read unconditionally (e.g. an output-basename like
+   * `maskfile="img_bet"`): the field is `NotRequired`, so a bare subscript would
+   * raise `KeyError`, and a bare `.get()` would yield `None` (wrong - the default
+   * must be substituted). The string is an already-rendered Python literal.
+   * Takes precedence over `finalFieldGet`.
+   */
+  finalFieldDefault?: string;
+  /**
    * Prefix substitutions: maps a rendered access prefix (e.g. `params["cfg"]`) to
    * a local variable name. After each segment is appended, if the rendered prefix
    * so far matches a key, it is replaced by the local. This lets reads of an
@@ -85,15 +108,20 @@ export function renderAccess(
   lookupLoopVar: (binding: BindingId) => string,
   options: RenderAccessOptions = {},
 ): string {
-  const { finalFieldGet = false, subst } = options;
+  const { finalFieldGet = false, finalFieldDefault, subst } = options;
   let cur = "params";
   path.forEach((seg, i) => {
     if (seg.kind !== "field") {
       cur = lookupLoopVar(seg.binding);
     } else {
       const isLast = i === path.length - 1;
-      cur =
-        finalFieldGet && isLast ? `${cur}.get(${pyStr(seg.name)})` : `${cur}[${pyStr(seg.name)}]`;
+      if (isLast && finalFieldDefault !== undefined) {
+        cur = `${cur}.get(${pyStr(seg.name)}, ${finalFieldDefault})`;
+      } else if (isLast && finalFieldGet) {
+        cur = `${cur}.get(${pyStr(seg.name)})`;
+      } else {
+        cur = `${cur}[${pyStr(seg.name)}]`;
+      }
     }
     // Swap in a narrowed local if this prefix was bound by an enclosing guard.
     const sub = subst?.get(cur);
