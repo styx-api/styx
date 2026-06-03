@@ -3,7 +3,7 @@ import { resolveOutputs, solve } from "../../solver/index.js";
 import { defaultPipeline } from "../../ir/index.js";
 import { BoutiquesParser } from "../../frontend/boutiques/parser.js";
 import { createContext } from "../../manifest/context.js";
-import { generateSchema, JsonSchemaBackend } from "./jsonschema.js";
+import { generateOutputsSchema, generateSchema, JsonSchemaBackend } from "./jsonschema.js";
 import type { JsonSchema } from "./jsonschema.js";
 
 const parser = new BoutiquesParser();
@@ -15,6 +15,15 @@ function schemaFor(descriptor: Record<string, unknown>): JsonSchema {
   const outputs = resolveOutputs(optimized, solveResult);
   const ctx = createContext(optimized, solveResult, outputs, { app: meta });
   return generateSchema(ctx);
+}
+
+function outputsSchemaFor(descriptor: Record<string, unknown>): JsonSchema {
+  const { expr, meta } = parser.parse(JSON.stringify(descriptor));
+  const optimized = defaultPipeline.apply(expr).expr;
+  const solveResult = solve(optimized);
+  const outputs = resolveOutputs(optimized, solveResult);
+  const ctx = createContext(optimized, solveResult, outputs, { app: meta });
+  return generateOutputsSchema(ctx);
 }
 
 function minimalDescriptor(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -251,6 +260,147 @@ describe("JsonSchema generation", () => {
   });
 });
 
+describe("Outputs JSON Schema generation", () => {
+  const withOutputs = (outputFiles: unknown[], inputs: unknown[]): Record<string, unknown> =>
+    minimalDescriptor({
+      "command-line": "test [INPUT1]",
+      inputs,
+      "output-files": outputFiles,
+    });
+
+  it("produces a valid object-typed envelope", () => {
+    const schema = outputsSchemaFor(minimalDescriptor());
+    expect(schema.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+    expect(schema.type).toBe("object");
+  });
+
+  it("includes app-level title and description", () => {
+    const schema = outputsSchemaFor(
+      minimalDescriptor({ name: "My Tool", description: "A useful tool" }),
+    );
+    expect(schema.title).toBe("My Tool");
+    expect(schema.description).toBe("A useful tool");
+  });
+
+  it("emits an empty properties object for a tool with no outputs", () => {
+    const schema = outputsSchemaFor(minimalDescriptor());
+    expect(schema.properties).toEqual({});
+    expect(schema.required).toBeUndefined();
+  });
+
+  it("maps a required single output to a required file-typed property", () => {
+    const schema = outputsSchemaFor(
+      withOutputs(
+        [
+          {
+            id: "out",
+            name: "Output",
+            description: "The result file",
+            "path-template": "[INPUT1].out",
+          },
+        ],
+        [minimalInput({ type: "File" })],
+      ),
+    );
+    const props = schema.properties as Record<string, JsonSchema>;
+    expect(props["out"]).toEqual({
+      type: "string",
+      "x-styx-type": "file",
+      description: "The result file",
+    });
+    expect(schema.required).toContain("out");
+  });
+
+  it("omits an optional (gated) output from required but keeps the property", () => {
+    // The output references an optional input, so its gate carries a `present`
+    // atom -> optional-single -> present-but-nullable -> not in `required`.
+    const schema = outputsSchemaFor(
+      withOutputs(
+        [{ id: "out", name: "Output", "path-template": "[INPUT1].out" }],
+        [minimalInput({ type: "File", optional: true })],
+      ),
+    );
+    const props = schema.properties as Record<string, JsonSchema>;
+    expect(props["out"]?.type).toBe("string");
+    expect(props["out"]?.["x-styx-type"]).toBe("file");
+    expect(schema.required ?? []).not.toContain("out");
+  });
+
+  it("maps a list output to a required array of file-typed items", () => {
+    // The output references a list input, so its gate carries an `iter` atom
+    // -> list shape -> always present (empty array when nothing is produced).
+    const schema = outputsSchemaFor(
+      withOutputs(
+        [
+          {
+            id: "out",
+            name: "Output",
+            description: "All results",
+            "path-template": "[INPUT1].out",
+          },
+        ],
+        [minimalInput({ type: "File", list: true })],
+      ),
+    );
+    const props = schema.properties as Record<string, JsonSchema>;
+    expect(props["out"]).toEqual({
+      type: "array",
+      items: { type: "string", "x-styx-type": "file" },
+      description: "All results",
+    });
+    expect(schema.required).toContain("out");
+  });
+
+  it("propagates the output name as the property description when no doc is given", () => {
+    const schema = outputsSchemaFor(
+      withOutputs(
+        [{ id: "out", name: "Output file", "path-template": "[INPUT1].out" }],
+        [minimalInput({ type: "File" })],
+      ),
+    );
+    const props = schema.properties as Record<string, JsonSchema>;
+    expect(props["out"]?.description).toBe("Output file");
+  });
+
+  it("maps stdout/stderr streams to required string arrays with no file marker", () => {
+    const schema = outputsSchemaFor(
+      minimalDescriptor({
+        "command-line": "test [INPUT1]",
+        inputs: [minimalInput({ type: "String" })],
+        "stdout-output": { id: "stdout", name: "Captured stdout" },
+        "stderr-output": { id: "stderr", name: "Captured stderr", description: "Standard error." },
+      }),
+    );
+    const props = schema.properties as Record<string, JsonSchema>;
+    // A line list, NOT a path list: the absent `x-styx-type` on `items`
+    // distinguishes a captured stream from a produced file.
+    expect(props["stdout"]?.type).toBe("array");
+    expect(props["stdout"]?.items).toEqual({ type: "string" });
+    expect(props["stderr"]).toEqual({
+      type: "array",
+      items: { type: "string" },
+      description: "Standard error.",
+    });
+    expect(schema.required).toContain("stdout");
+    expect(schema.required).toContain("stderr");
+  });
+
+  it("surfaces a mutable input as a required file output", () => {
+    const schema = outputsSchemaFor(
+      minimalDescriptor({
+        "command-line": "test [INFILE]",
+        inputs: [
+          { id: "infile", name: "Input", type: "File", "value-key": "[INFILE]", mutable: true },
+        ],
+      }),
+    );
+    const props = schema.properties as Record<string, JsonSchema>;
+    expect(props["infile"]?.type).toBe("string");
+    expect(props["infile"]?.["x-styx-type"]).toBe("file");
+    expect(schema.required).toContain("infile");
+  });
+});
+
 describe("JsonSchemaBackend", () => {
   it("emits a file map with schema.json", () => {
     const { expr, meta } = parser.parse(
@@ -275,6 +425,35 @@ describe("JsonSchemaBackend", () => {
     expect(result.files.has("schema.json")).toBe(true);
     const parsed = JSON.parse(result.files.get("schema.json")!);
     expect(parsed.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+  });
+
+  it("emits outputs.schema.json alongside schema.json", () => {
+    const { expr, meta } = parser.parse(
+      JSON.stringify(
+        minimalDescriptor({
+          "command-line": "test [INPUT1]",
+          inputs: [minimalInput({ type: "File" })],
+          "output-files": [{ id: "out", name: "Output", "path-template": "[INPUT1].out" }],
+        }),
+      ),
+    );
+    const optimized = defaultPipeline.apply(expr).expr;
+    const solveResult = solve(optimized);
+    const outputs = resolveOutputs(optimized, solveResult);
+    const ctx = createContext(optimized, solveResult, outputs, { app: meta });
+
+    const result = new JsonSchemaBackend().emitApp(ctx);
+
+    expect(result.files.has("outputs.schema.json")).toBe(true);
+    const parsed = JSON.parse(result.files.get("outputs.schema.json")!);
+    expect(parsed.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+    expect(parsed.type).toBe("object");
+    expect(parsed.properties.out).toEqual({
+      type: "string",
+      "x-styx-type": "file",
+      description: "Output",
+    });
+    expect(parsed.required).toContain("out");
   });
 
   it("bet descriptor produces expected schema", () => {

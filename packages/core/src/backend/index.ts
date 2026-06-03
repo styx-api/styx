@@ -28,7 +28,7 @@ export {
 export { generatePython, PythonBackend } from "./python/index.js";
 export { Scope } from "./scope.js";
 export type { JsonSchema } from "./schema/index.js";
-export { generateSchema, JsonSchemaBackend } from "./schema/index.js";
+export { generateOutputsSchema, generateSchema, JsonSchemaBackend } from "./schema/index.js";
 export { camelCase, pascalCase, screamingSnakeCase, snakeCase } from "./string-case.js";
 export { PYTHON_RUNNER_DEPS, STYXDEFS_COMPAT } from "./styxdefs-compat.js";
 export { structKey, typeKey, unionKey } from "./type-keys.js";

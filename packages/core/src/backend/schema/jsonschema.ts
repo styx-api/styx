@@ -2,6 +2,7 @@ import type { Binding, BoundType, BoundVariant } from "../../bindings/index.js";
 import type { Expr, ScalarKind } from "../../ir/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import type { Backend, EmittedApp } from "../backend.js";
+import { collectOutputFields, streamFields } from "../collect-output-fields.js";
 import { findDoc } from "../find-doc.js";
 import { findStructNode } from "../find-struct-node.js";
 import { resolveFieldBinding } from "../resolve-field-binding.js";
@@ -175,16 +176,80 @@ export function generateSchema(ctx: CodegenContext): JsonSchema {
   return new SchemaBuilder(ctx).build();
 }
 
+/** A produced output file path: a string carrying the `file` vendor marker. */
+const OUTPUT_FILE_SCHEMA: JsonSchema = { type: "string", "x-styx-type": "file" };
+
+/** Output names are language-neutral in the schema; key by the raw descriptor id. */
+const rawName = (name: string): string => name;
+
+/**
+ * JSON Schema for a tool's **Outputs object**: the set of files it produces
+ * (resolved outputs + mutable inputs surfaced as outputs) plus its captured
+ * stdout/stderr streams. Built from the same `collectOutputFields` /
+ * `streamFields` source of truth the Python and TypeScript backends use to type
+ * the Outputs dataclass/interface, so the three describe the same shape.
+ *
+ * Field encoding (mirrors how the language backends type each field):
+ * - single output -> `{ type: "string", x-styx-type: "file" }`
+ * - list output   -> `{ type: "array", items: { type: "string", x-styx-type: "file" } }`
+ * - stream field  -> `{ type: "array", items: { type: "string" } }` (lines of
+ *   text, NOT paths - the absent `x-styx-type` lets a consumer tell them apart)
+ *
+ * Optional-single outputs are present-but-nullable, so they are omitted from
+ * `required` (styx2's encoding: optionality is "not in `required`", never a
+ * `null` type branch - matching the inputs schema). Required singles, lists
+ * (an empty array when nothing is produced), and streams are always present.
+ */
+export function generateOutputsSchema(ctx: CodegenContext): JsonSchema {
+  const schema: JsonSchema = {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+  };
+  if (ctx.app?.doc?.title) schema.title = ctx.app.doc.title;
+  if (ctx.app?.doc?.description) schema.description = ctx.app.doc.description;
+
+  const properties: Record<string, JsonSchema> = {};
+  const required: string[] = [];
+
+  for (const field of collectOutputFields(ctx, rawName)) {
+    const prop: JsonSchema =
+      field.shape.kind === "list"
+        ? { type: "array", items: { ...OUTPUT_FILE_SCHEMA } }
+        : { ...OUTPUT_FILE_SCHEMA };
+    if (field.doc) prop.description = field.doc;
+    properties[field.name] = prop;
+    if (!(field.shape.kind === "single" && field.shape.optional)) required.push(field.name);
+  }
+
+  for (const stream of streamFields(ctx, rawName)) {
+    const prop: JsonSchema = { type: "array", items: { type: "string" } };
+    if (stream.doc) prop.description = stream.doc;
+    properties[stream.name] = prop;
+    required.push(stream.name);
+  }
+
+  schema.properties = properties;
+  if (required.length > 0) schema.required = required;
+  return schema;
+}
+
 export class JsonSchemaBackend implements Backend {
   readonly name = "json-schema";
   readonly target = "json-schema";
 
   emitApp(ctx: CodegenContext): EmittedApp {
     const schema = generateSchema(ctx);
-    const json = JSON.stringify(schema, null, 2);
+    const outputsSchema = generateOutputsSchema(ctx);
     return {
       meta: ctx.app,
-      files: new Map([["schema.json", json]]),
+      // Inputs and outputs are kept as two cleanly addressable artifacts
+      // (mirroring v1's `<tool>.input.json` / `<tool>.output.json` split): a
+      // consumer can fetch/compute either independently, and the inputs
+      // `schema.json` stays byte-stable for existing consumers.
+      files: new Map([
+        ["schema.json", JSON.stringify(schema, null, 2)],
+        ["outputs.schema.json", JSON.stringify(outputsSchema, null, 2)],
+      ]),
       errors: [],
       warnings: [],
     };
