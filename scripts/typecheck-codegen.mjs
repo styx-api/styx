@@ -40,6 +40,7 @@ const expectedTools = [
   "ants_apply_transforms",
   "mutate",
   "border_merge",
+  "dup_outputs",
 ];
 const expectedFiles = expectedTools.flatMap((t) => [
   `python/suite/${t}.py`,

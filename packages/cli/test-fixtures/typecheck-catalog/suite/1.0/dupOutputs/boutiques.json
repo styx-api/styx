@@ -1,0 +1,30 @@
+{
+  "name": "dupOutputs",
+  "description": "Two ungated output-files sharing an id for codegen typecheck.",
+  "tool-version": "1.0",
+  "schema-version": "0.5",
+  "command-line": "dupOutputs [INFILE]",
+  "inputs": [
+    {
+      "id": "infile",
+      "name": "In file",
+      "type": "File",
+      "value-key": "[INFILE]",
+      "description": "Required input file."
+    }
+  ],
+  "output-files": [
+    {
+      "id": "out_file",
+      "name": "Out file (templated)",
+      "path-template": "[INFILE]_detrend",
+      "description": "Output named after the input (first ungated contributor)."
+    },
+    {
+      "id": "out_file",
+      "name": "Out file (fixed)",
+      "path-template": "out_file",
+      "description": "Same id, a fixed name (second ungated contributor)."
+    }
+  ]
+}

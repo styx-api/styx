@@ -420,13 +420,16 @@ function renderRefValue(tok: Extract<ResolvedToken, { kind: "ref" }>, ec: Output
 /**
  * Emit one contributor's assignment into the field's shared local var,
  * wrapped in its gate. The local var's init is emitted upfront by the caller
- * (except for required-single fields, which declare at the assignment).
+ * (except for required-single fields, which declare at their first ungated
+ * assignment; `reassign` marks a later same-named contributor that must assign
+ * into the already-declared local rather than re-annotate it).
  */
 function emitOneOutput(
   output: EmittedOutput,
   gate: GateAtom[],
   fieldShape: OutputShape,
   localVar: string,
+  reassign: boolean,
   ec: OutputEmitCtx,
   cb: CodeBuilder,
 ): void {
@@ -442,10 +445,13 @@ function emitOneOutput(
         : `execution.output_file(${pathExpr})`;
       if (fieldShape.kind === "list") {
         cb.line(`${localVar}.append(${call})`);
-      } else if (fieldShape.optional) {
+      } else if (fieldShape.optional || reassign) {
+        // Optional fields init upfront; a required-single's second-or-later
+        // ungated contributor reassigns the already-declared local (a second
+        // annotated declaration would be a mypy `no-redef`).
         cb.line(`${localVar} = ${call}`);
       } else {
-        // Required single: the (sole, ungated) contributor declares the var here.
+        // Required single: the first ungated contributor declares the var here.
         cb.line(`${localVar}: ${typeAnnot} = ${call}`);
       }
       return;
@@ -506,11 +512,18 @@ export function emitBuildOutputs(
       else if (f.shape.optional) cb.line(`${localVar}: OutputPathType | None = None`);
     }
 
+    // Required-single fields declare their local at the first ungated
+    // contributor; a same-named ungated contributor seen later must reassign
+    // (a second annotated declaration is a mypy `no-redef`). Some afni
+    // descriptors give two output-files the same id with no gate.
+    const declared = new Set<string>();
     const emitContributor = (output: EmittedOutput, scopeGate: GateAtom[]): void => {
       const gate = outputGate(scopeGate, output, ctx.bindings);
       const id = pyId(output.name);
       const field = fields.find((f) => f.id === id)!;
-      emitOneOutput(output, gate, field.shape, localVarOf.get(id)!, ec, cb);
+      const reassign = declared.has(id);
+      declared.add(id);
+      emitOneOutput(output, gate, field.shape, localVarOf.get(id)!, reassign, ec, cb);
     };
     for (const scope of ctx.outputScopes) {
       const scopeBinding = ctx.bindings.get(scope.scope);

@@ -21,6 +21,7 @@ union-output `never` collapses, indexability.
 | `antsApplyTransforms` | Vendored ANTs descriptor: a mixed (struct + bare-literal) union (`interpolation`); cargs branch on runtime shape (`isinstance` dict) because literal arms have no `@type`.                                                                                                                                           |
 | `mutate`              | Hand-written: a mutable File input, staged as a writable copy (`input_file(mutable=True)`) and also surfaced as an `OutputPathType` field via `mutable_copy` - exercises both the cargs and Outputs paths of the mutable primitive.                                                                                  |
 | `borderMerge`         | Vendored Connectome Workbench descriptor (the only `workbench` source-format fixture): a repeatable option carrying a struct (`list[struct]`), deeply nested options/flags (`-border` -> `-select` -> `-up-to` -> `-reverse`), and a positional output referenced by name - the workbench frontend's happy path.     |
+| `dupOutputs`          | Hand-written: two ungated `output-files` sharing an id (the afni `v_3d_detrend` shape). The required-single Outputs local is declared once and reassigned by later contributors; a second annotated declaration of the same local was a mypy --strict `no-redef`.                                                    |
 
 ## Adding a fixture
 
