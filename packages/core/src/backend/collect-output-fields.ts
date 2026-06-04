@@ -25,6 +25,28 @@ import type { CodegenContext } from "../manifest/index.js";
 export type EmittedOutput = ResolvedOutput & { mutable?: boolean };
 
 /**
+ * The synthetic `root` output: the runner's output directory itself, surfaced as
+ * an always-present, non-gated `OutputPathType` field. Modeled as a regular
+ * `ResolvedOutput` with a single literal `"."` token so it flows through the
+ * exact same collection and emit machinery as every declared output - its empty
+ * gate makes it a required single, rendered as `output_file(".")` /
+ * `outputFile(".")`. Because every tool emits it, every tool returns a
+ * non-empty Outputs object (matching styx v1, which always carried `root`).
+ */
+export function rootOutput(ctx: CodegenContext, idOf: (name: string) => string): EmittedOutput {
+  // Reserve a non-colliding field id. If a tool genuinely declares an output (or
+  // a mutable input surfaced as an output) whose id sanitizes to "root", the
+  // synthetic output-dir field dodges with a trailing "_" so it never silently
+  // clobbers that real output (or flips it optional via shape merging).
+  const taken = new Set<string>();
+  for (const scope of ctx.outputScopes) for (const o of scope.outputs) taken.add(idOf(o.name));
+  for (const o of collectMutableOutputs(ctx)) taken.add(idOf(o.name));
+  let name = "root";
+  while (taken.has(idOf(name))) name += "_";
+  return { name, tokens: [{ kind: "literal", value: "." }] };
+}
+
+/**
  * Field shape for a single resolved output.
  *
  * - `single`: emitted at most once. Optional iff any `present`/`variant` atom
@@ -89,6 +111,8 @@ export function collectOutputFields(
       byId.set(id, { id, name: output.name, shape, doc });
     }
   };
+  // The output directory itself, always present and ungated, listed first.
+  add(rootOutput(ctx, idOf), []);
   for (const scope of ctx.outputScopes) {
     const scopeBinding = ctx.bindings.get(scope.scope);
     const scopeGate = scopeBinding?.gate ?? [];

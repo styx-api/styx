@@ -53,12 +53,13 @@ describe("python outputs - codegen", () => {
     expect(code).toContain('out_file_v = execution.output_file("out_file")');
   });
 
-  it("omits Outputs entirely when no outputs are attached", () => {
+  it("still emits Outputs with only the root field when no outputs are attached", () => {
     const root = seq(lit("tool"), path("input"));
     const code = generate(root, { app: { id: "tool" } });
-    expect(code).not.toContain("class ToolOutputs:");
-    expect(code).not.toContain("OutputPathType");
-    expect(code).toContain("-> None:");
+    expect(code).toContain("class ToolOutputs:");
+    expect(code).toContain("root: OutputPathType");
+    expect(code).toContain("-> ToolOutputs:");
+    expect(code).toContain('root_v: OutputPathType = execution.output_file(".")');
   });
 
   it("types gated outputs as nullable", () => {
@@ -268,8 +269,9 @@ describe("python outputs - codegen", () => {
     // Two variant-gated assignments.
     expect(code).toContain('if params["mode"]["@type"] == "a":');
     expect(code).toContain('if params["mode"]["@type"] == "b":');
-    // Exactly one keyword argument in the constructor call (no duplicate kwargs).
-    expect(code).toMatch(/return ToolOutputs\(\n\s+result=result_v,\n\s+\)/);
+    // The shared output is one keyword argument (no duplicate kwargs), after the
+    // always-present root.
+    expect(code).toMatch(/return ToolOutputs\(\n\s+root=root_v,\n\s+result=result_v,\n\s+\)/);
   });
 
   // Regression: a binding nested inside a binding-less wrapper sequence (the

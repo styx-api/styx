@@ -58,6 +58,13 @@ export function runBuildCommand(input: string | undefined, flags: BuildFlags): R
   for (const w of result.warnings) stderr.push(`warn: ${w}`);
   for (const e of result.errors) stderr.push(`error: ${e}`);
 
+  // Catalog builds report a tool tally so a few broken tools in a large catalog
+  // are visible at a glance rather than buried in per-tool error lines.
+  if (result.stats) {
+    const { appsCompiled, appsFailed, appsSkipped } = result.stats;
+    stderr.push(`summary: ${appsCompiled} compiled, ${appsFailed} failed, ${appsSkipped} skipped`);
+  }
+
   if (result.errors.length > 0) {
     return { exitCode: 1, stdout, stderr, files: [] };
   }

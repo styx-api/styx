@@ -496,11 +496,11 @@ describe("Python generation - public names / __all__", () => {
     expect(allBlock).not.toContain('"run"');
   });
 
-  it("omits Outputs symbols from __all__ when no outputs are present", () => {
+  it("includes Outputs symbols in __all__ even with no declared outputs (root only)", () => {
     const code = generate(seq(lit("bet"), path("input")), { app: { id: "bet" } });
     const allBlock = code.match(/__all__ = \[([\s\S]*?)\]/)?.[1] ?? "";
-    expect(allBlock).not.toContain('"BetOutputs"');
-    expect(allBlock).not.toContain('"bet_outputs"');
+    expect(allBlock).toContain('"BetOutputs"');
+    expect(allBlock).toContain('"bet_outputs"');
   });
 
   it("uses generic names when no appId is provided", () => {
@@ -560,6 +560,40 @@ describe("PythonBackend", () => {
     expect(init).toContain("from .flirt import *");
   });
 
+  it("emitPackage emits an execute dispatcher keyed on root @type", () => {
+    const backend = new PythonBackend();
+    const apps = [
+      backend.emitApp(
+        generateCtx(seq(lit("bet"), str("input")), {
+          app: { id: "bet" },
+          package: { name: "fsl" },
+        }),
+      ),
+      backend.emitApp(
+        generateCtx(seq(lit("flirt"), str("input")), {
+          app: { id: "flirt" },
+          package: { name: "fsl" },
+        }),
+      ),
+    ];
+    const init = backend.emitPackage({ name: "fsl" }, apps).files.get("__init__.py")!;
+    expect(init).toContain("from styxdefs import Runner");
+    expect(init).toContain(
+      "def execute(params: dict[str, typing.Any], runner: Runner | None = None) -> typing.Any:",
+    );
+    expect(init).toContain('"fsl/bet": bet_execute,');
+    expect(init).toContain('"fsl/flirt": flirt_execute,');
+  });
+
+  it("emitPackage omits the dispatcher when apps have no @type (no package)", () => {
+    const backend = new PythonBackend();
+    const apps = [
+      backend.emitApp(generateCtx(seq(lit("bet"), str("input")), { app: { id: "bet" } })),
+    ];
+    const init = backend.emitPackage({ name: "fsl" }, apps).files.get("__init__.py")!;
+    expect(init).not.toContain("def execute(");
+  });
+
   it("generatePackageInit sorts modules alphabetically", () => {
     const init = generatePackageInit([
       { meta: { id: "zeta" }, files: new Map(), errors: [], warnings: [] },
@@ -589,7 +623,9 @@ describe("Python generation - params factory & kwarg wrapper", () => {
 
   it("emits a kwarg `<tool>` wrapper that calls the factory then execute", () => {
     const code = generate(seq(lit("greet"), str("name")), { app: { id: "greet" } });
-    expect(code).toMatch(/def greet\(\s*name: str,\s*runner: Runner \| None = None,\s*\) -> None:/);
+    expect(code).toMatch(
+      /def greet\(\s*name: str,\s*runner: Runner \| None = None,\s*\) -> GreetOutputs:/,
+    );
     expect(code).toMatch(/params = greet_params\(\s*name=name,\s*\)/);
     expect(code).toContain("greet_execute(params, runner)");
   });

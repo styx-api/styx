@@ -91,7 +91,7 @@ describe("JsonSchema generation", () => {
     expect(props["input1"]?.type).toBe("number");
   });
 
-  it("maps file input to string with x-styx-type=file", () => {
+  it("maps file input to string with x-styx-type=path", () => {
     const schema = schemaFor(
       minimalDescriptor({
         "command-line": "test [INPUT1]",
@@ -100,7 +100,28 @@ describe("JsonSchema generation", () => {
     );
     const props = schema.properties as Record<string, JsonSchema>;
     expect(props["input1"]?.type).toBe("string");
-    expect(props["input1"]?.["x-styx-type"]).toBe("file");
+    expect(props["input1"]?.["x-styx-type"]).toBe("path");
+  });
+
+  it("maps a bounded list input to an array with minItems/maxItems", () => {
+    const schema = schemaFor(
+      minimalDescriptor({
+        "command-line": "test [INPUT1]",
+        inputs: [
+          minimalInput({
+            type: "Number",
+            list: true,
+            "min-list-entries": 3,
+            "max-list-entries": 3,
+          }),
+        ],
+      }),
+    );
+    const props = schema.properties as Record<string, JsonSchema>;
+    expect(props["input1"]?.type).toBe("array");
+    expect(props["input1"]?.minItems).toBe(3);
+    expect(props["input1"]?.maxItems).toBe(3);
+    expect((props["input1"]?.items as JsonSchema)?.type).toBe("number");
   });
 
   it("maps flag input to boolean", () => {
@@ -282,10 +303,12 @@ describe("Outputs JSON Schema generation", () => {
     expect(schema.description).toBe("A useful tool");
   });
 
-  it("emits an empty properties object for a tool with no outputs", () => {
+  it("emits only the always-present root property for a tool with no declared outputs", () => {
     const schema = outputsSchemaFor(minimalDescriptor());
-    expect(schema.properties).toEqual({});
-    expect(schema.required).toBeUndefined();
+    expect(schema.properties).toEqual({
+      root: { type: "string", "x-styx-type": "path" },
+    });
+    expect(schema.required).toEqual(["root"]);
   });
 
   it("maps a required single output to a required file-typed property", () => {
@@ -305,7 +328,7 @@ describe("Outputs JSON Schema generation", () => {
     const props = schema.properties as Record<string, JsonSchema>;
     expect(props["out"]).toEqual({
       type: "string",
-      "x-styx-type": "file",
+      "x-styx-type": "path",
       description: "The result file",
     });
     expect(schema.required).toContain("out");
@@ -323,7 +346,7 @@ describe("Outputs JSON Schema generation", () => {
     );
     const props = schema.properties as Record<string, JsonSchema>;
     expect(props["out"]?.type).toEqual(["string", "null"]);
-    expect(props["out"]?.["x-styx-type"]).toBe("file");
+    expect(props["out"]?.["x-styx-type"]).toBe("path");
     expect(schema.required).toContain("out");
   });
 
@@ -359,7 +382,7 @@ describe("Outputs JSON Schema generation", () => {
     );
     const props = schema.properties as Record<string, JsonSchema>;
     expect(props["converted"]?.type).toEqual(["string", "null"]);
-    expect(props["converted"]?.["x-styx-type"]).toBe("file");
+    expect(props["converted"]?.["x-styx-type"]).toBe("path");
     expect(schema.required).toContain("converted");
   });
 
@@ -382,7 +405,7 @@ describe("Outputs JSON Schema generation", () => {
     const props = schema.properties as Record<string, JsonSchema>;
     expect(props["out"]).toEqual({
       type: "array",
-      items: { type: "string", "x-styx-type": "file" },
+      items: { type: "string", "x-styx-type": "path" },
       description: "All results",
     });
     expect(schema.required).toContain("out");
@@ -433,7 +456,7 @@ describe("Outputs JSON Schema generation", () => {
     );
     const props = schema.properties as Record<string, JsonSchema>;
     expect(props["infile"]?.type).toBe("string");
-    expect(props["infile"]?.["x-styx-type"]).toBe("file");
+    expect(props["infile"]?.["x-styx-type"]).toBe("path");
     expect(schema.required).toContain("infile");
   });
 });
@@ -487,7 +510,7 @@ describe("JsonSchemaBackend", () => {
     expect(parsed.type).toBe("object");
     expect(parsed.properties.out).toEqual({
       type: "string",
-      "x-styx-type": "file",
+      "x-styx-type": "path",
       description: "Output",
     });
     expect(parsed.required).toContain("out");
@@ -523,7 +546,7 @@ describe("JsonSchemaBackend", () => {
     expect(props["@type"]).toEqual({ const: "unknown/bet" });
     expect(schema.required).toContain("@type");
     expect(props["infile"]?.type).toBe("string");
-    expect(props["infile"]?.["x-styx-type"]).toBe("file");
+    expect(props["infile"]?.["x-styx-type"]).toBe("path");
     expect(props["maskfile"]?.type).toBe("string");
     expect(props["fractional_intensity"]?.type).toBe("number");
     expect(props["fractional_intensity"]?.minimum).toBe(0);

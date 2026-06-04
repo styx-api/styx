@@ -14,6 +14,7 @@ import {
   type OutputShape,
   collectMutableOutputs,
   collectOutputFields,
+  rootOutput,
   streamFields,
 } from "../collect-output-fields.js";
 import { PY_KEYWORDS, emitDocstring } from "./emit.js";
@@ -366,6 +367,9 @@ export function emitBuildOutputs(
       declared.add(id);
       emitOneOutput(output, gate, field.shape, localVarOf.get(id)!, reassign, ec, cb);
     };
+    // The always-present root output directory, declared before any declared
+    // output (matches its first position in collectOutputFields).
+    emitContributor(rootOutput(ctx, pyId), []);
     for (const scope of ctx.outputScopes) {
       const scopeBinding = ctx.bindings.get(scope.scope);
       const scopeGate = scopeBinding?.gate ?? [];

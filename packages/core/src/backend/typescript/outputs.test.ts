@@ -33,12 +33,25 @@ describe("typescript outputs - codegen", () => {
     expect(code).toContain("return out;");
   });
 
-  it("omits Outputs entirely when no outputs are attached", () => {
+  it("dodges the synthetic root field when a tool declares an output named 'root'", () => {
+    const root = seq(lit("tool"), path("input"));
+    root.meta = {
+      outputs: [{ name: "root", tokens: [{ kind: "ref", target: nodeRef("input") }] }],
+    };
+    const code = generate(root, { app: { id: "tool" } });
+    // The declared output keeps "root"; the synthetic output-dir dodges to "root_".
+    expect(code).toContain("root: OutputPathType;");
+    expect(code).toContain("root_: OutputPathType;");
+    expect(code).toContain('outputs.root_ = execution.outputFile(".");');
+  });
+
+  it("still emits Outputs with only the root field when no outputs are attached", () => {
     const root = seq(lit("tool"), path("input"));
     const code = generate(root, { app: { id: "tool" } });
-    expect(code).not.toContain("ToolOutputs");
-    expect(code).not.toContain("OutputPathType");
-    expect(code).toContain("): void {");
+    expect(code).toContain("export interface ToolOutputs {");
+    expect(code).toContain("root: OutputPathType;");
+    expect(code).toContain("): ToolOutputs {");
+    expect(code).toContain('outputs.root = execution.outputFile(".");');
   });
 
   it("types gated outputs as nullable", () => {
@@ -140,7 +153,7 @@ describe("typescript outputs - execution", () => {
     const root = seq(lit("tool"));
     root.meta = { outputs: [{ name: "log", tokens: [{ kind: "literal", value: "run.log" }] }] };
     const { outputs } = executeWithOutputs(root, {}, { app: { id: "tool" } });
-    expect(outputs).toEqual({ log: "run.log" });
+    expect(outputs).toEqual({ root: ".", log: "run.log" });
   });
 
   it("interpolates a required ref into the path template", () => {
@@ -157,7 +170,7 @@ describe("typescript outputs - execution", () => {
       ],
     };
     const { outputs } = executeWithOutputs(root, { input: "/data/x" }, { app: { id: "tool" } });
-    expect(outputs).toEqual({ out_file: "/data/x.out" });
+    expect(outputs).toEqual({ root: ".", out_file: "/data/x.out" });
   });
 
   it("emits one output per element for a field inside a list-of-struct", () => {
@@ -183,7 +196,7 @@ describe("typescript outputs - execution", () => {
       },
       { app: { id: "tool" } },
     );
-    expect(outputs).toEqual({ per_item: ["/data/a.out", "/data/b.out"] });
+    expect(outputs).toEqual({ root: ".", per_item: ["/data/a.out", "/data/b.out"] });
   });
 
   it("leaves a gated output null when the optional input is absent", () => {
@@ -200,7 +213,7 @@ describe("typescript outputs - execution", () => {
       ],
     };
     const { outputs } = executeWithOutputs(root, {}, { app: { id: "tool" } });
-    expect(outputs).toEqual({ out_file: null });
+    expect(outputs).toEqual({ root: ".", out_file: null });
   });
 
   it("populates a gated output when the optional input is present", () => {
@@ -217,7 +230,7 @@ describe("typescript outputs - execution", () => {
       ],
     };
     const { outputs } = executeWithOutputs(root, { input: "/data/x" }, { app: { id: "tool" } });
-    expect(outputs).toEqual({ out_file: "/data/x.out" });
+    expect(outputs).toEqual({ root: ".", out_file: "/data/x.out" });
   });
 
   it("emits one output per element of a list ref", () => {
@@ -238,7 +251,7 @@ describe("typescript outputs - execution", () => {
       { inputs: ["a", "b", "c"] },
       { app: { id: "tool" } },
     );
-    expect(outputs).toEqual({ outs: ["a.out", "b.out", "c.out"] });
+    expect(outputs).toEqual({ root: ".", outs: ["a.out", "b.out", "c.out"] });
   });
 
   it("returns an empty list when the iterated ref is empty", () => {
@@ -255,7 +268,7 @@ describe("typescript outputs - execution", () => {
       ],
     };
     const { outputs } = executeWithOutputs(root, { inputs: [] }, { app: { id: "tool" } });
-    expect(outputs).toEqual({ outs: [] });
+    expect(outputs).toEqual({ root: ".", outs: [] });
   });
 
   it("treats an output shared by a list scope and a single scope as one list field", () => {
@@ -329,14 +342,14 @@ describe("typescript outputs - execution", () => {
       { subcmd: { "@type": "convert", src: "/data/x" } },
       { app: { id: "tool" } },
     );
-    expect(convertOuts).toEqual({ converted: "/data/x.conv" });
+    expect(convertOuts).toEqual({ root: ".", converted: "/data/x.conv" });
 
     const { outputs: inspectOuts } = executeWithOutputs(
       root,
       { subcmd: { "@type": "inspect", inspect: true } },
       { app: { id: "tool" } },
     );
-    expect(inspectOuts).toEqual({ converted: null });
+    expect(inspectOuts).toEqual({ root: ".", converted: null });
   });
 
   // Regression: when multiple union arms declare the same output name (e.g.
@@ -383,13 +396,13 @@ describe("typescript outputs - execution", () => {
       { mode: { "@type": "a", aSrc: "/data/a" } },
       { app: { id: "tool" } },
     );
-    expect(aOuts).toEqual({ result: "/data/a" });
+    expect(aOuts).toEqual({ root: ".", result: "/data/a" });
     const { outputs: bOuts } = executeWithOutputs(
       root,
       { mode: { "@type": "b", bSrc: "/data/b" } },
       { app: { id: "tool" } },
     );
-    expect(bOuts).toEqual({ result: "/data/b" });
+    expect(bOuts).toEqual({ root: ".", result: "/data/b" });
   });
 
   // Regression: when an output ref points at a binding nested inside a
@@ -411,7 +424,7 @@ describe("typescript outputs - execution", () => {
     expect(code).toContain("execution.outputFile(params.out_file)");
     expect(code).not.toMatch(/execution\.outputFile\(params[,)]/);
     const { outputs } = executeWithOutputs(root, { out_file: "/data/x" }, { app: { id: "tool" } });
-    expect(outputs).toEqual({ out: "/data/x" });
+    expect(outputs).toEqual({ root: ".", out: "/data/x" });
   });
 
   it("applies a stripExtensions list to ref tokens", () => {
@@ -436,6 +449,6 @@ describe("typescript outputs - execution", () => {
       { input: "/data/x.nii.gz" },
       { app: { id: "tool" } },
     );
-    expect(outputs).toEqual({ out_file: "/data/x.out" });
+    expect(outputs).toEqual({ root: ".", out_file: "/data/x.out" });
   });
 });

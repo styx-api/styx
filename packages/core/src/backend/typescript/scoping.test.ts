@@ -30,7 +30,7 @@ describe("TypeScript shared package scope", () => {
     const a = generateTypeScript(generateCtx(expr, { app: { id: "report" } }), scope);
     const b = generateTypeScript(generateCtx(expr, { app: { id: "report" } }), scope);
     expect(a).toMatch(/\bReport\b/);
-    expect(b).toContain("Report_2");
+    expect(b).toContain("Report2");
   });
 
   it("does not dodge when each tool gets its own scope (default)", () => {
@@ -38,6 +38,6 @@ describe("TypeScript shared package scope", () => {
     const a = generateTypeScript(generateCtx(expr, { app: { id: "report" } }));
     const b = generateTypeScript(generateCtx(expr, { app: { id: "report" } }));
     expect(a).toBe(b);
-    expect(b).not.toContain("Report_2");
+    expect(b).not.toContain("Report2");
   });
 });

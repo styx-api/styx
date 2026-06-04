@@ -44,9 +44,12 @@ export function emitValidate(
   const e: Emit = { ctx, resolve, scope: scope.child(["params"]), cb };
   emitJsDoc(
     cb,
-    "Validate the parameters. Throws StyxValidationError if the parameters are invalid.",
+    `Validate untrusted parameters. Throws StyxValidationError if \`params\` is not a valid ${paramsType}; narrows it to ${paramsType} on success.`,
   );
-  cb.line(`export function ${funcName}(params: ${paramsType}): void {`);
+  // Assertion signature over untyped input: a boundary guard usable on a parsed
+  // dict / config blob, not just an already-typed value. The body walks `params`
+  // dynamically, so the parameter is `any` (the assertion still narrows callers).
+  cb.line(`export function ${funcName}(params: any): asserts params is ${paramsType} {`);
   cb.indent(() => emitRoot(e, rootType, rootNode));
   cb.line("}");
 }

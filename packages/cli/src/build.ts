@@ -47,10 +47,24 @@ export interface BuiltFile {
   content: string;
 }
 
+/** Per-tool tallies for a catalog build (undefined for single-descriptor builds). */
+export interface BuildStats {
+  appsCompiled: number;
+  appsFailed: number;
+  appsSkipped: number;
+}
+
 export interface BuildResult {
   files: BuiltFile[];
   errors: string[];
   warnings: string[];
+  /** Catalog-build tallies; set only by `--catalog` builds. */
+  stats?: BuildStats;
+}
+
+/** Render an unknown thrown value as a message string. */
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 /**
@@ -81,7 +95,13 @@ function buildSingle(inputPath: string, options: BuildOptions): BuildResult {
   if (!ctx) return result;
 
   for (const backend of options.backends) {
-    const emitted = backend.emitApp(ctx);
+    let emitted;
+    try {
+      emitted = backend.emitApp(ctx);
+    } catch (e) {
+      result.errors.push(`[${backend.name}] ${errMsg(e)}`);
+      continue;
+    }
     appendEmitMessages(result, emitted, backend);
     for (const [name, content] of emitted.files) {
       result.files.push({
@@ -94,7 +114,12 @@ function buildSingle(inputPath: string, options: BuildOptions): BuildResult {
 }
 
 function buildCatalog(catalogPath: string, options: BuildOptions): BuildResult {
-  const result: BuildResult = { files: [], errors: [], warnings: [] };
+  const result: BuildResult = {
+    files: [],
+    errors: [],
+    warnings: [],
+    stats: { appsCompiled: 0, appsFailed: 0, appsSkipped: 0 },
+  };
   let catalog: CatalogProject;
   try {
     catalog = loadCatalog(catalogPath);
@@ -129,33 +154,41 @@ function readAndCompile(
   try {
     source = readFileSync(sourcePath, "utf8");
   } catch (e) {
-    result.errors.push(`${sourcePath}: ${e instanceof Error ? e.message : String(e)}`);
+    result.errors.push(`${sourcePath}: ${errMsg(e)}`);
     return null;
   }
 
-  // Honor the catalog's declared format when it's one we support, so we don't
-  // fall back to content sniffing (and get a clearer error if it mis-parses).
-  const parsed = compile(
-    source,
-    format && SUPPORTED_FORMATS.has(format)
-      ? { filename: sourcePath, format: format as FormatName }
-      : sourcePath,
-  );
-  for (const e of parsed.errors) result.errors.push(`${sourcePath}: ${e.message}`);
-  for (const w of parsed.warnings) result.warnings.push(`${sourcePath}: ${w.message}`);
+  // Isolate the compile pipeline: a single descriptor that makes the solver or
+  // a downstream pass throw is recorded as an error and skipped, so one bad tool
+  // can't crash a whole-catalog build.
+  try {
+    // Honor the catalog's declared format when it's one we support, so we don't
+    // fall back to content sniffing (and get a clearer error if it mis-parses).
+    const parsed = compile(
+      source,
+      format && SUPPORTED_FORMATS.has(format)
+        ? { filename: sourcePath, format: format as FormatName }
+        : sourcePath,
+    );
+    for (const e of parsed.errors) result.errors.push(`${sourcePath}: ${e.message}`);
+    for (const w of parsed.warnings) result.warnings.push(`${sourcePath}: ${w.message}`);
 
-  const piped = defaultPipeline.apply(parsed.expr);
-  if (piped.warnings) {
-    for (const w of piped.warnings) result.warnings.push(`${sourcePath}: ${w}`);
+    const piped = defaultPipeline.apply(parsed.expr);
+    if (piped.warnings) {
+      for (const w of piped.warnings) result.warnings.push(`${sourcePath}: ${w}`);
+    }
+
+    const solveResult = solve(piped.expr);
+    const outputs = resolveOutputs(piped.expr, solveResult);
+    return createContext(piped.expr, solveResult, outputs, {
+      app: parsed.meta,
+      package: pkg,
+      project: proj,
+    });
+  } catch (e) {
+    result.errors.push(`${sourcePath}: ${errMsg(e)}`);
+    return null;
   }
-
-  const solveResult = solve(piped.expr);
-  const outputs = resolveOutputs(piped.expr, solveResult);
-  return createContext(piped.expr, solveResult, outputs, {
-    app: parsed.meta,
-    package: pkg,
-    project: proj,
-  });
 }
 
 function runBackendOverCatalog(
@@ -183,6 +216,7 @@ function runBackendOverCatalog(
       if (app.sourceFormat && !SUPPORTED_FORMATS.has(app.sourceFormat)) {
         skipped++;
         if (recordWarnings) {
+          if (result.stats) result.stats.appsSkipped++;
           result.warnings.push(
             `${app.sourcePath}: skipped (unsupported source format "${app.sourceFormat}")`,
           );
@@ -191,11 +225,23 @@ function runBackendOverCatalog(
       }
 
       const ctx = readAndCompile(app.sourcePath, app.sourceFormat, pkg.meta, catalog.meta, result);
-      if (!ctx) continue;
+      if (!ctx) {
+        if (recordWarnings && result.stats) result.stats.appsFailed++;
+        continue;
+      }
 
-      const emitted = backend.emitApp(ctx, pkgScope);
+      // Isolate emit so one tool that makes a backend throw doesn't crash the run.
+      let emitted: EmittedApp;
+      try {
+        emitted = backend.emitApp(ctx, pkgScope);
+      } catch (e) {
+        result.errors.push(`[${backend.name} ${pkg.meta.name}/${app.name}] ${errMsg(e)}`);
+        if (recordWarnings && result.stats) result.stats.appsFailed++;
+        continue;
+      }
       appendEmitMessages(result, emitted, backend, `${pkg.meta.name}/${app.name}`);
       appsEmitted.push(emitted);
+      if (recordWarnings && result.stats) result.stats.appsCompiled++;
 
       for (const [name, content] of emitted.files) {
         result.files.push({ path: path.join(backendRoot, pkgDir, name), content });
@@ -213,20 +259,28 @@ function runBackendOverCatalog(
     }
 
     if (mode !== "scripts" && backend.emitPackage) {
-      const pkgEmit = backend.emitPackage(pkg.meta, appsEmitted);
-      appendEmitMessages(result, pkgEmit, backend, pkg.meta.name);
-      packagesEmitted.push(pkgEmit);
-      for (const [name, content] of pkgEmit.files) {
-        result.files.push({ path: path.join(backendRoot, pkgDir, name), content });
+      try {
+        const pkgEmit = backend.emitPackage(pkg.meta, appsEmitted);
+        appendEmitMessages(result, pkgEmit, backend, pkg.meta.name);
+        packagesEmitted.push(pkgEmit);
+        for (const [name, content] of pkgEmit.files) {
+          result.files.push({ path: path.join(backendRoot, pkgDir, name), content });
+        }
+      } catch (e) {
+        result.errors.push(`[${backend.name} ${pkgDir}] package emit failed: ${errMsg(e)}`);
       }
     }
   }
 
   if (mode === "multi" && backend.emitProject && packagesEmitted.length > 0) {
-    const projEmit = backend.emitProject(catalog.meta, packagesEmitted);
-    appendEmitMessages(result, projEmit, backend, catalog.meta.name);
-    for (const [name, content] of projEmit.files) {
-      result.files.push({ path: path.join(backendRoot, name), content });
+    try {
+      const projEmit = backend.emitProject(catalog.meta, packagesEmitted);
+      appendEmitMessages(result, projEmit, backend, catalog.meta.name);
+      for (const [name, content] of projEmit.files) {
+        result.files.push({ path: path.join(backendRoot, name), content });
+      }
+    } catch (e) {
+      result.errors.push(`[${backend.name}] project emit failed: ${errMsg(e)}`);
     }
   }
 }

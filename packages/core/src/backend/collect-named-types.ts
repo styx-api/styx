@@ -37,7 +37,12 @@ export function collectNamedTypes(
   const typeDecls: NamedType[] = [];
 
   function nameFor(hint: string, isRoot: boolean): string {
-    return scope.add(isRoot ? nameTransform(hint) : nestedPrefix + nameTransform(hint));
+    const cased = isRoot ? nameTransform(hint) : nestedPrefix + nameTransform(hint);
+    // Dedup in the cased (emitted) namespace, folding any disambiguation suffix
+    // back through nameTransform so a collision yields e.g. `Config2`, not the
+    // mixed-case `Config_2`. Uniqueness is still checked on the final form, so
+    // two hints that case-collide get distinct names.
+    return scope.add(cased, nameTransform);
   }
 
   function visit(type: BoundType, hint: string, isRoot: boolean): void {

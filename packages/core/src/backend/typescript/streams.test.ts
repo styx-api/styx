@@ -44,9 +44,10 @@ describe("TypeScript stream outputs (stdout/stderr)", () => {
     );
   });
 
-  it("does not import OutputPathType for a stream-only tool", () => {
+  it("imports OutputPathType and emits the root field for a stream-only tool", () => {
     const code = generate(seq(lit("mytool"), str("input")), { app: streamApp(true, true) });
-    expect(code).not.toContain("OutputPathType");
+    expect(code).toContain("OutputPathType");
+    expect(code).toContain("root: OutputPathType;");
   });
 
   it("bumps a stream field whose name collides with an output field", () => {
