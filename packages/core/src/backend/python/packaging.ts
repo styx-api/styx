@@ -34,9 +34,32 @@ export function pyDistName(proj: ProjectMeta, pkg: PackageMeta): string {
   return proj.name ? `${proj.name}_${name}` : name;
 }
 
+// pyproject's `[project] description` becomes the core-metadata `Summary` field,
+// which PyPI caps at 512 chars. The catalog's `doc.description` is often a full
+// paragraph (and is emitted in full into the README / long description anyway),
+// so the summary is clamped to fit.
+const SUMMARY_MAX_LEN = 512;
+
+/**
+ * Clamp a description to a <=512-char one-line summary. Prefer cutting at the
+ * last complete sentence that fits (clean, no dangling fragment); if there is no
+ * sentence boundary early enough, cut at a word boundary and mark the elision.
+ */
+function clampSummary(s: string): string {
+  if (s.length <= SUMMARY_MAX_LEN) return s;
+  const window = s.slice(0, SUMMARY_MAX_LEN);
+  const lastSentence = window.lastIndexOf(". ");
+  if (lastSentence >= 0) return s.slice(0, lastSentence + 1); // keep the period
+  const ellipsis = "...";
+  const body = window.slice(0, SUMMARY_MAX_LEN - ellipsis.length);
+  const lastSpace = body.lastIndexOf(" ");
+  return (lastSpace > 0 ? body.slice(0, lastSpace) : body).replace(/[.,;:\s]+$/, "") + ellipsis;
+}
+
 function description(doc: Documentation | undefined, fallbackName: string | undefined): string {
-  if (doc?.description) return doc.description;
-  return `Styx generated wrappers for ${doc?.title ?? fallbackName ?? "tools"}.`;
+  const summary =
+    doc?.description ?? `Styx generated wrappers for ${doc?.title ?? fallbackName ?? "tools"}.`;
+  return clampSummary(summary);
 }
 
 function authorsField(doc: Documentation | undefined): string {

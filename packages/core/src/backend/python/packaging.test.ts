@@ -124,3 +124,40 @@ describe("Python packaging TOML safety", () => {
     expect(root).toContain('authors = [{ name = "Ada Lovelace" }, { name = "Alan Turing" }]');
   });
 });
+
+describe("Python summary clamping (PyPI 512-char Summary limit)", () => {
+  const summaryOf = (toml: string): string => {
+    const cap = toml.match(/^description = "(.*)"$/m)?.[1];
+    if (cap === undefined) throw new Error("no description line");
+    return cap;
+  };
+
+  it("clamps a long multi-sentence description to a complete sentence <= 512 chars", () => {
+    const longDesc = "This sentence is a reasonably sized clause of prose. ".repeat(20); // ~1040 chars
+    const out = new PythonBackend().emitProject({ name: "proj", version: "1.0.0" }, [
+      emptyPkg({ name: "tool", doc: { description: longDesc } }),
+    ]);
+    const summary = summaryOf(out.files.get("tool/pyproject.toml")!);
+    expect(summary.length).toBeLessThanOrEqual(512);
+    // Cut on a sentence boundary - ends with a period, no dangling fragment.
+    expect(summary.endsWith(".")).toBe(true);
+    expect(summary.endsWith("...")).toBe(false);
+  });
+
+  it("falls back to a word boundary + ellipsis when no sentence boundary fits", () => {
+    const runOn = "alpha bravo charlie delta ".repeat(40); // >512, spaces but no '. '
+    const out = new PythonBackend().emitProject({ name: "proj", version: "1.0.0" }, [
+      emptyPkg({ name: "tool", doc: { description: runOn } }),
+    ]);
+    const summary = summaryOf(out.files.get("tool/pyproject.toml")!);
+    expect(summary.length).toBeLessThanOrEqual(512);
+    expect(summary.endsWith("...")).toBe(true);
+  });
+
+  it("leaves a short description untouched", () => {
+    const out = new PythonBackend().emitProject({ name: "proj", version: "1.0.0" }, [
+      emptyPkg({ name: "tool", doc: { description: "Short and sweet." } }),
+    ]);
+    expect(summaryOf(out.files.get("tool/pyproject.toml")!)).toBe("Short and sweet.");
+  });
+});
