@@ -18,7 +18,13 @@ const proj: ProjectMeta = {
 };
 
 const packages: EmittedPackage[] = [
-  emptyPkg({ name: "fsl", doc: { title: "FSL", urls: ["https://fsl.fmrib.ox.ac.uk"] } }),
+  // fsl carries its own (tool) version to prove the sub-package pyproject ignores
+  // it in favor of the project version - the wrapper ships on the project's release.
+  emptyPkg({
+    name: "fsl",
+    version: "6.0.4",
+    doc: { title: "FSL", urls: ["https://fsl.fmrib.ox.ac.uk"] },
+  }),
   emptyPkg({ name: "ants" }),
 ];
 
@@ -38,7 +44,9 @@ describe("Python emitProject packaging", () => {
     expect(sub).toBeDefined();
     expect(sub).toContain('name = "niwrap_fsl"');
     expect(sub).toContain('"styxdefs>=0.7.0,<0.8.0",');
+    // The project (catalog) version, not fsl's own tool version (6.0.4).
     expect(sub).toContain('version = "1.2.3"');
+    expect(sub).not.toContain('version = "6.0.4"');
     // Flat layout: the suite directory is the importable package.
     expect(sub).toContain('packages = ["fsl"]');
     expect(sub).toContain('package-dir = { "fsl" = "." }');
