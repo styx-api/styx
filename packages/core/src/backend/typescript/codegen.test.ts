@@ -535,6 +535,40 @@ describe("TypeScriptBackend", () => {
     expect(index).toContain('export * from "./flirt.js"');
   });
 
+  it("emitPackage emits an execute dispatcher keyed on root @type", () => {
+    const backend = new TypeScriptBackend();
+    const apps = [
+      backend.emitApp(
+        generateCtx(seq(lit("bet"), str("input")), {
+          app: { id: "bet" },
+          package: { name: "fsl" },
+        }),
+      ),
+      backend.emitApp(
+        generateCtx(seq(lit("flirt"), str("input")), {
+          app: { id: "flirt" },
+          package: { name: "fsl" },
+        }),
+      ),
+    ];
+    const index = backend.emitPackage({ name: "fsl" }, apps).files.get("index.ts")!;
+    expect(index).toContain('import { betExecute } from "./bet.js";');
+    expect(index).toContain(
+      'export function execute(params: { "@type": string }, runner: Runner | null = null): unknown {',
+    );
+    expect(index).toContain('"fsl/bet": betExecute,');
+    expect(index).toContain('"fsl/flirt": flirtExecute,');
+  });
+
+  it("emitPackage omits the dispatcher when apps have no @type (no package)", () => {
+    const backend = new TypeScriptBackend();
+    const apps = [
+      backend.emitApp(generateCtx(seq(lit("bet"), str("input")), { app: { id: "bet" } })),
+    ];
+    const index = backend.emitPackage({ name: "fsl" }, apps).files.get("index.ts")!;
+    expect(index).not.toContain("export function execute(");
+  });
+
   it("generatePackageIndex sorts modules alphabetically", () => {
     const index = generatePackageIndex([
       { meta: { id: "zeta" }, files: new Map(), errors: [], warnings: [] },

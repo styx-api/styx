@@ -560,6 +560,40 @@ describe("PythonBackend", () => {
     expect(init).toContain("from .flirt import *");
   });
 
+  it("emitPackage emits an execute dispatcher keyed on root @type", () => {
+    const backend = new PythonBackend();
+    const apps = [
+      backend.emitApp(
+        generateCtx(seq(lit("bet"), str("input")), {
+          app: { id: "bet" },
+          package: { name: "fsl" },
+        }),
+      ),
+      backend.emitApp(
+        generateCtx(seq(lit("flirt"), str("input")), {
+          app: { id: "flirt" },
+          package: { name: "fsl" },
+        }),
+      ),
+    ];
+    const init = backend.emitPackage({ name: "fsl" }, apps).files.get("__init__.py")!;
+    expect(init).toContain("from styxdefs import Runner");
+    expect(init).toContain(
+      "def execute(params: dict[str, typing.Any], runner: Runner | None = None) -> typing.Any:",
+    );
+    expect(init).toContain('"fsl/bet": bet_execute,');
+    expect(init).toContain('"fsl/flirt": flirt_execute,');
+  });
+
+  it("emitPackage omits the dispatcher when apps have no @type (no package)", () => {
+    const backend = new PythonBackend();
+    const apps = [
+      backend.emitApp(generateCtx(seq(lit("bet"), str("input")), { app: { id: "bet" } })),
+    ];
+    const init = backend.emitPackage({ name: "fsl" }, apps).files.get("__init__.py")!;
+    expect(init).not.toContain("def execute(");
+  });
+
   it("generatePackageInit sorts modules alphabetically", () => {
     const init = generatePackageInit([
       { meta: { id: "zeta" }, files: new Map(), errors: [], warnings: [] },

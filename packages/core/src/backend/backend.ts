@@ -17,8 +17,28 @@ export interface EmitWarning {
   message: string;
 }
 
+/**
+ * What the suite-level dispatcher needs to route a config object to one app's
+ * dict-style executor, keyed by the root `@type` discriminator.
+ */
+export interface AppEntrypoint {
+  /** Root `@type` discriminator value (`<package>/<app>`). */
+  type: string;
+  /**
+   * Dict-style execute function name - `<tool>Execute` / `<tool>_execute` for a
+   * struct root, `<tool>` for a non-struct root. Takes `(params, runner)`.
+   */
+  executeFn: string;
+}
+
 export interface EmittedApp extends EmitResult {
   meta?: AppMeta;
+  /**
+   * Dispatch entrypoint, present when the app has a stable `@type` (both an id
+   * and a package name are known). Consumed by `emitPackage` to build the
+   * suite-level `execute(params, runner)` dispatcher.
+   */
+  entrypoint?: AppEntrypoint;
 }
 
 export interface EmittedPackage extends EmitResult {
