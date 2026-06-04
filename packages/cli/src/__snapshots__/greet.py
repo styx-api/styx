@@ -5,7 +5,7 @@ import dataclasses
 import pathlib
 import typing
 
-from styxdefs import Execution, InputPathType, Metadata, Runner, StyxValidationError, get_global_runner
+from styxdefs import Execution, InputPathType, Metadata, Runner, StyxValidationError, OutputPathType, get_global_runner
 
 GREET_METADATA = Metadata(
     id="greet",
@@ -18,6 +18,11 @@ class Greet(typing.TypedDict):
     """Person to greet."""
     loud: typing.NotRequired[bool]
     """Shout the greeting."""
+
+@dataclasses.dataclass
+class GreetOutputs:
+    """Output paths produced by the tool."""
+    root: OutputPathType
 
 def greet_params(
     name: str,
@@ -39,8 +44,8 @@ def greet_params(
     }
     return params
 
-def greet_validate(params: Greet) -> None:
-    """Validate parameters. Raises StyxValidationError if the parameters are invalid."""
+def greet_validate(params: typing.Any) -> None:
+    """Validate untrusted parameters. Raises StyxValidationError if `params` is not a valid Greet."""
     if params is None or not isinstance(params, dict):
         raise StyxValidationError(f'Params object has the wrong type \'{type(params)}\'')
     if params.get("name", None) is None:
@@ -60,7 +65,14 @@ def greet_cargs(params: Greet, execution: Execution) -> list[str]:
         cargs.append("--loud")
     return cargs
 
-def greet_execute(params: Greet, runner: Runner | None = None) -> None:
+def greet_outputs(params: Greet, execution: Execution) -> GreetOutputs:
+    """Build the GreetOutputs object for this tool."""
+    root_v: OutputPathType = execution.output_file(".")
+    return GreetOutputs(
+        root=root_v,
+    )
+
+def greet_execute(params: Greet, runner: Runner | None = None) -> GreetOutputs:
     """
     greet
 
@@ -71,20 +83,22 @@ def greet_execute(params: Greet, runner: Runner | None = None) -> None:
         runner: Command runner (defaults to global runner).
 
     Returns:
-        None.
+        Tool outputs (paths to files produced by the tool).
     """
     greet_validate(params)
     runner = runner if runner is not None else get_global_runner()
     execution = runner.start_execution(GREET_METADATA)
     execution.params(params)
     args = greet_cargs(params, execution)
+    out = greet_outputs(params, execution)
     execution.run(args)
+    return out
 
 def greet(
     name: str,
     loud: bool = False,
     runner: Runner | None = None,
-) -> None:
+) -> GreetOutputs:
     """
     greet
 
@@ -96,18 +110,20 @@ def greet(
         runner: Command runner (defaults to global runner).
 
     Returns:
-        None.
+        Tool outputs (paths to files produced by the tool).
     """
     params = greet_params(
         name=name,
         loud=loud,
     )
-    greet_execute(params, runner)
+    return greet_execute(params, runner)
 
 __all__ = [
     "Greet",
+    "GreetOutputs",
     "GREET_METADATA",
     "greet_cargs",
+    "greet_outputs",
     "greet_params",
     "greet_execute",
     "greet_validate",

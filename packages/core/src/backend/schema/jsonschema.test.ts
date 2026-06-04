@@ -282,10 +282,12 @@ describe("Outputs JSON Schema generation", () => {
     expect(schema.description).toBe("A useful tool");
   });
 
-  it("emits an empty properties object for a tool with no outputs", () => {
+  it("emits only the always-present root property for a tool with no declared outputs", () => {
     const schema = outputsSchemaFor(minimalDescriptor());
-    expect(schema.properties).toEqual({});
-    expect(schema.required).toBeUndefined();
+    expect(schema.properties).toEqual({
+      root: { type: "string", "x-styx-type": "file" },
+    });
+    expect(schema.required).toEqual(["root"]);
   });
 
   it("maps a required single output to a required file-typed property", () => {

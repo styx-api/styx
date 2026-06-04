@@ -27,9 +27,9 @@ describe("TypeScript validation - wiring", () => {
     expect(code).toContain('import { getGlobalRunner, StyxValidationError } from "styxdefs";');
   });
 
-  it("emits a tool-prefixed validate function", () => {
+  it("emits a tool-prefixed validate function with an assertion signature over untyped input", () => {
     const code = generate(seq(lit("tool"), str("name")), { app: { id: "bet" } });
-    expect(code).toContain("export function betValidate(params:");
+    expect(code).toContain("export function betValidate(params: any): asserts params is Bet {");
   });
 
   it("calls validate first thing in the execute function", () => {

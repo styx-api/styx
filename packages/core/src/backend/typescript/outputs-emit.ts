@@ -15,6 +15,7 @@ import {
   collectMutableOutputs,
   collectOutputFields,
   outputShape,
+  rootOutput,
   streamFields,
 } from "../collect-output-fields.js";
 import { emitJsDoc, renderAccess, tsPropAccess } from "./emit.js";
@@ -343,6 +344,9 @@ export function emitBuildOutputs(
       const gate = outputGate(scopeGate, output, ctx.bindings);
       emitOneOutput(output, gate, ec, cb);
     };
+    // The always-present root output directory, assigned before any declared
+    // output (matches its first position in collectOutputFields).
+    emitContributor(rootOutput(), []);
     for (const scope of ctx.outputScopes) {
       const scopeBinding = ctx.bindings.get(scope.scope);
       const scopeGate = scopeBinding?.gate ?? [];

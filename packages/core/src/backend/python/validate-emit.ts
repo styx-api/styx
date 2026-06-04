@@ -46,11 +46,13 @@ export function emitValidate(
   cb: CodeBuilder,
 ): void {
   const e: Emit = { ctx, resolve, scope: scope.child(["params"]), cb };
-  cb.line(`def ${funcName}(params: ${paramsType}) -> None:`);
+  // Untyped input: a boundary guard usable on a parsed dict / config blob, not
+  // just an already-typed value (mirrors styx v1's `typing.Any` validator).
+  cb.line(`def ${funcName}(params: typing.Any) -> None:`);
   cb.indent(() => {
     emitDocstring(
       cb,
-      "Validate parameters. Raises StyxValidationError if the parameters are invalid.",
+      `Validate untrusted parameters. Raises StyxValidationError if \`params\` is not a valid ${paramsType}.`,
     );
     emitRoot(e, rootType, rootNode);
   });

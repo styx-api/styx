@@ -496,11 +496,11 @@ describe("Python generation - public names / __all__", () => {
     expect(allBlock).not.toContain('"run"');
   });
 
-  it("omits Outputs symbols from __all__ when no outputs are present", () => {
+  it("includes Outputs symbols in __all__ even with no declared outputs (root only)", () => {
     const code = generate(seq(lit("bet"), path("input")), { app: { id: "bet" } });
     const allBlock = code.match(/__all__ = \[([\s\S]*?)\]/)?.[1] ?? "";
-    expect(allBlock).not.toContain('"BetOutputs"');
-    expect(allBlock).not.toContain('"bet_outputs"');
+    expect(allBlock).toContain('"BetOutputs"');
+    expect(allBlock).toContain('"bet_outputs"');
   });
 
   it("uses generic names when no appId is provided", () => {
@@ -589,7 +589,9 @@ describe("Python generation - params factory & kwarg wrapper", () => {
 
   it("emits a kwarg `<tool>` wrapper that calls the factory then execute", () => {
     const code = generate(seq(lit("greet"), str("name")), { app: { id: "greet" } });
-    expect(code).toMatch(/def greet\(\s*name: str,\s*runner: Runner \| None = None,\s*\) -> None:/);
+    expect(code).toMatch(
+      /def greet\(\s*name: str,\s*runner: Runner \| None = None,\s*\) -> GreetOutputs:/,
+    );
     expect(code).toMatch(/params = greet_params\(\s*name=name,\s*\)/);
     expect(code).toContain("greet_execute(params, runner)");
   });

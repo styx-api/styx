@@ -29,9 +29,9 @@ describe("Python validation - wiring", () => {
     expect(code).toContain("StyxValidationError");
   });
 
-  it("emits a tool-prefixed validate function", () => {
+  it("emits a tool-prefixed validate function accepting untyped input", () => {
     const code = generate(seq(lit("tool"), str("name")), { app: { id: "bet" } });
-    expect(code).toContain("def bet_validate(params:");
+    expect(code).toContain("def bet_validate(params: typing.Any) -> None:");
   });
 
   it("calls validate first thing in the execute function", () => {
