@@ -369,7 +369,7 @@ export function emitBuildOutputs(
     };
     // The always-present root output directory, declared before any declared
     // output (matches its first position in collectOutputFields).
-    emitContributor(rootOutput(), []);
+    emitContributor(rootOutput(ctx, pyId), []);
     for (const scope of ctx.outputScopes) {
       const scopeBinding = ctx.bindings.get(scope.scope);
       const scopeGate = scopeBinding?.gate ?? [];

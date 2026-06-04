@@ -346,7 +346,7 @@ export function emitBuildOutputs(
     };
     // The always-present root output directory, assigned before any declared
     // output (matches its first position in collectOutputFields).
-    emitContributor(rootOutput(), []);
+    emitContributor(rootOutput(ctx, jsId), []);
     for (const scope of ctx.outputScopes) {
       const scopeBinding = ctx.bindings.get(scope.scope);
       const scopeGate = scopeBinding?.gate ?? [];

@@ -33,6 +33,18 @@ describe("typescript outputs - codegen", () => {
     expect(code).toContain("return out;");
   });
 
+  it("dodges the synthetic root field when a tool declares an output named 'root'", () => {
+    const root = seq(lit("tool"), path("input"));
+    root.meta = {
+      outputs: [{ name: "root", tokens: [{ kind: "ref", target: nodeRef("input") }] }],
+    };
+    const code = generate(root, { app: { id: "tool" } });
+    // The declared output keeps "root"; the synthetic output-dir dodges to "root_".
+    expect(code).toContain("root: OutputPathType;");
+    expect(code).toContain("root_: OutputPathType;");
+    expect(code).toContain('outputs.root_ = execution.outputFile(".");');
+  });
+
   it("still emits Outputs with only the root field when no outputs are attached", () => {
     const root = seq(lit("tool"), path("input"));
     const code = generate(root, { app: { id: "tool" } });

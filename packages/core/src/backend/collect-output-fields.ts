@@ -33,8 +33,17 @@ export type EmittedOutput = ResolvedOutput & { mutable?: boolean };
  * `outputFile(".")`. Because every tool emits it, every tool returns a
  * non-empty Outputs object (matching styx v1, which always carried `root`).
  */
-export function rootOutput(): EmittedOutput {
-  return { name: "root", tokens: [{ kind: "literal", value: "." }] };
+export function rootOutput(ctx: CodegenContext, idOf: (name: string) => string): EmittedOutput {
+  // Reserve a non-colliding field id. If a tool genuinely declares an output (or
+  // a mutable input surfaced as an output) whose id sanitizes to "root", the
+  // synthetic output-dir field dodges with a trailing "_" so it never silently
+  // clobbers that real output (or flips it optional via shape merging).
+  const taken = new Set<string>();
+  for (const scope of ctx.outputScopes) for (const o of scope.outputs) taken.add(idOf(o.name));
+  for (const o of collectMutableOutputs(ctx)) taken.add(idOf(o.name));
+  let name = "root";
+  while (taken.has(idOf(name))) name += "_";
+  return { name, tokens: [{ kind: "literal", value: "." }] };
 }
 
 /**
@@ -103,7 +112,7 @@ export function collectOutputFields(
     }
   };
   // The output directory itself, always present and ungated, listed first.
-  add(rootOutput(), []);
+  add(rootOutput(ctx, idOf), []);
   for (const scope of ctx.outputScopes) {
     const scopeBinding = ctx.bindings.get(scope.scope);
     const scopeGate = scopeBinding?.gate ?? [];
