@@ -6,6 +6,8 @@ import { type OutputShape, collectOutputFields, streamFields } from "../collect-
 import { findDoc } from "../find-doc.js";
 import { findStructNode } from "../find-struct-node.js";
 import { resolveFieldBinding } from "../resolve-field-binding.js";
+import { Scope } from "../scope.js";
+import { snakeCase } from "../string-case.js";
 
 export interface JsonSchema {
   type?: string | string[];
@@ -250,22 +252,49 @@ export function generateOutputsSchema(ctx: CodegenContext): JsonSchema {
   return schema;
 }
 
+/**
+ * Filesystem-safe, unique-within-the-package stem for one tool's schema files.
+ *
+ * In catalog mode every tool in a package emits into the same `<pkg>/` directory,
+ * so fixed `schema.json` names would clobber each other (only the last tool would
+ * survive). We prefix each tool's files with a slug derived from its app id -
+ * `snakeCase` so symbol-heavy ids like `3dfim+` / `@2dwarper.Allin` become safe,
+ * lowercase, collision-resistant stems (`3dfim` / `2dwarper_allin`) - and dedup
+ * through the shared package `scope` so the rare slug collision still gets a `_2`.
+ *
+ * Returns undefined when there is no scope (standalone single-tool emission, where
+ * one unprefixed `schema.json` is unambiguous) or no app id (anonymous descriptor).
+ */
+function schemaStem(ctx: CodegenContext, scope?: Scope): string | undefined {
+  const id = ctx.app?.id;
+  if (!id || !scope) return undefined;
+  return scope.add(snakeCase(id) || "schema");
+}
+
 export class JsonSchemaBackend implements Backend {
   readonly name = "json-schema";
   readonly target = "json-schema";
 
-  emitApp(ctx: CodegenContext): EmittedApp {
+  /** One scope per package so per-tool schema file stems stay unique in the suite directory. */
+  newPackageScope(): Scope {
+    return new Scope();
+  }
+
+  emitApp(ctx: CodegenContext, scope?: Scope): EmittedApp {
     const schema = generateSchema(ctx);
     const outputsSchema = generateOutputsSchema(ctx);
+    // In a catalog build, prefix with a per-tool stem so co-located tools don't
+    // clobber one another; standalone single-tool builds keep the bare names.
+    const stem = schemaStem(ctx, scope);
+    const prefix = stem ? `${stem}.` : "";
     return {
       meta: ctx.app,
       // Inputs and outputs are kept as two cleanly addressable artifacts
       // (mirroring v1's `<tool>.input.json` / `<tool>.output.json` split): a
-      // consumer can fetch/compute either independently, and the inputs
-      // `schema.json` stays byte-stable for existing consumers.
+      // consumer can fetch/compute either independently.
       files: new Map([
-        ["schema.json", JSON.stringify(schema, null, 2)],
-        ["outputs.schema.json", JSON.stringify(outputsSchema, null, 2)],
+        [`${prefix}schema.json`, JSON.stringify(schema, null, 2)],
+        [`${prefix}outputs.schema.json`, JSON.stringify(outputsSchema, null, 2)],
       ]),
       errors: [],
       warnings: [],
