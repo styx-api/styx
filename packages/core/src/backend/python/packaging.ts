@@ -48,10 +48,6 @@ function licenseField(proj: ProjectMeta): string {
   return `{ text = "${tomlStr(proj.license?.description ?? "unknown")}" }`;
 }
 
-function version(pkg: PackageMeta | undefined, proj: ProjectMeta): string {
-  return pkg?.version ?? proj.version ?? "0.0.0";
-}
-
 /**
  * Per-suite `pyproject.toml`. The flat layout (`python/<pkg>/bet.py`) makes the
  * directory itself the importable package, so setuptools' `package-dir` maps the
@@ -67,7 +63,11 @@ export function generateSubPyproject(proj: ProjectMeta, pkg: PackageMeta): strin
   const cb = new CodeBuilder("  ");
   cb.line("[project]");
   cb.line(`name = "${tomlStr(pyDistName(proj, pkg))}"`);
-  cb.line(`version = "${tomlStr(version(pkg, proj))}"`);
+  // The wrapper distribution is released as part of the project, so it carries
+  // the project (catalog) version - NOT the wrapped tool's version. This keeps
+  // every niwrap_<pkg> in lockstep with the niwrap meta package, matching the
+  // single-package TypeScript distribution and the v1 release scheme.
+  cb.line(`version = "${tomlStr(proj.version ?? "0.0.0")}"`);
   cb.line(`description = "${tomlStr(description(pkg.doc, pkg.name))}"`);
   cb.line(`readme = "README.md"`);
   cb.line(`license = ${licenseField(proj)}`);
