@@ -560,4 +560,46 @@ describe("JsonSchemaBackend", () => {
     expect(schema.required).not.toContain("verbose");
     expect(props["verbose"]?.default).toBe(false);
   });
+
+  /** Build a ctx for a minimal one-input descriptor under an explicit app id. */
+  function ctxWithId(id: string) {
+    const { expr } = parser.parse(
+      JSON.stringify(
+        minimalDescriptor({ "command-line": "test [INPUT1]", inputs: [minimalInput()] }),
+      ),
+    );
+    const optimized = defaultPipeline.apply(expr).expr;
+    const solveResult = solve(optimized);
+    const outputs = resolveOutputs(optimized, solveResult);
+    return createContext(optimized, solveResult, outputs, { app: { id } });
+  }
+
+  it("prefixes per-tool file names with a slug when emitting under a package scope", () => {
+    const backend = new JsonSchemaBackend();
+    const scope = backend.newPackageScope();
+    const result = backend.emitApp(ctxWithId("3dfim+"), scope);
+
+    // Symbol-heavy id -> safe, lowercase slug; both artifacts share the stem.
+    expect([...result.files.keys()].sort()).toEqual([
+      "3dfim.outputs.schema.json",
+      "3dfim.schema.json",
+    ]);
+  });
+
+  it("dedups colliding slugs across one package scope", () => {
+    const backend = new JsonSchemaBackend();
+    const scope = backend.newPackageScope();
+    // Two distinct ids that slugify to the same stem must not clobber.
+    const first = backend.emitApp(ctxWithId("FooBar"), scope);
+    const second = backend.emitApp(ctxWithId("foo_bar"), scope);
+
+    expect(first.files.has("foo_bar.schema.json")).toBe(true);
+    expect(second.files.has("foo_bar_2.schema.json")).toBe(true);
+  });
+
+  it("keeps bare file names for standalone (unscoped) single-tool emission", () => {
+    // No scope -> one schema per directory, so the names stay unambiguous.
+    const result = new JsonSchemaBackend().emitApp(ctxWithId("bet"));
+    expect([...result.files.keys()].sort()).toEqual(["outputs.schema.json", "schema.json"]);
+  });
 });
