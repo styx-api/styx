@@ -59,6 +59,16 @@ describe("build (catalog mode)", () => {
     ]);
   });
 
+  it("reports a per-tool compiled/failed/skipped tally", () => {
+    const result = build({
+      catalog: FIXTURE,
+      out: "/out",
+      backends: [new PythonBackend()],
+      mode: "scripts",
+    });
+    expect(result.stats).toEqual({ appsCompiled: 2, appsFailed: 0, appsSkipped: 0 });
+  });
+
   it("single mode adds the package-level __init__.py", () => {
     const result = build({
       catalog: FIXTURE,
