@@ -66,11 +66,18 @@ class SchemaBuilder {
         return { const: type.value };
       case "optional":
         return this.fromType(type.inner, node?.kind === "optional" ? node.attrs.node : undefined);
-      case "list":
-        return {
+      case "list": {
+        const repeat = node?.kind === "repeat" ? node : undefined;
+        const schema: JsonSchema = {
           type: "array",
-          items: this.fromType(type.item, node?.kind === "repeat" ? node.attrs.node : undefined),
+          items: this.fromType(type.item, repeat?.attrs.node),
         };
+        // Bounded/fixed-length vectors (e.g. a 3-element coordinate) carry length
+        // constraints so a form consumer can render the right number of slots.
+        if (repeat?.attrs.countMin !== undefined) schema.minItems = repeat.attrs.countMin;
+        if (repeat?.attrs.countMax !== undefined) schema.maxItems = repeat.attrs.countMax;
+        return schema;
+      }
       case "struct":
         return this.structSchema(type, node);
       case "union":
@@ -98,8 +105,7 @@ class SchemaBuilder {
       int: { type: "integer" } as JsonSchema,
       float: { type: "number" } as JsonSchema,
       str: { type: "string" } as JsonSchema,
-      // TODO: rename to "path" - keeping "file" for v1 compatibility
-      path: { type: "string", "x-styx-type": "file" } as JsonSchema,
+      path: { type: "string", "x-styx-type": "path" } as JsonSchema,
     }[scalar];
 
     const terminal = node ? this.findTerminal(node) : undefined;
@@ -184,14 +190,14 @@ function outputFieldSchema(shape: OutputShape): JsonSchema {
   // A list output is always present (an empty array when nothing is produced),
   // its elements never null: `OutputPathType[]` / `list[OutputPathType]`.
   if (shape.kind === "list") {
-    return { type: "array", items: { type: "string", "x-styx-type": "file" } };
+    return { type: "array", items: { type: "string", "x-styx-type": "path" } };
   }
   // A single output's key is always present on the Outputs object; when its gate
   // is off the value is `null` (the backends type it `OutputPathType | None` /
-  // `OutputPathType | null`). So a gated single is a file path OR null - not an
+  // `OutputPathType | null`). So a gated single is a path OR null - not an
   // absent key. We mark it `required` (see below) and carry the null branch.
-  if (shape.optional) return { type: ["string", "null"], "x-styx-type": "file" };
-  return { type: "string", "x-styx-type": "file" };
+  if (shape.optional) return { type: ["string", "null"], "x-styx-type": "path" };
+  return { type: "string", "x-styx-type": "path" };
 }
 
 /**
@@ -202,9 +208,9 @@ function outputFieldSchema(shape: OutputShape): JsonSchema {
  * the Outputs dataclass/interface, so the three describe the same shape.
  *
  * Field encoding (mirrors how the language backends type each field):
- * - required single -> `{ type: "string", x-styx-type: "file" }`
- * - optional single -> `{ type: ["string", "null"], x-styx-type: "file" }`
- * - list output     -> `{ type: "array", items: { type: "string", x-styx-type: "file" } }`
+ * - required single -> `{ type: "string", x-styx-type: "path" }`
+ * - optional single -> `{ type: ["string", "null"], x-styx-type: "path" }`
+ * - list output     -> `{ type: "array", items: { type: "string", x-styx-type: "path" } }`
  * - stream field    -> `{ type: "array", items: { type: "string" } }` (lines of
  *   text, NOT paths - the absent `x-styx-type` lets a consumer tell them apart)
  *
