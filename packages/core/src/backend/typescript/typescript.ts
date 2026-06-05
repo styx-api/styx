@@ -1,6 +1,9 @@
+import type { BoundType } from "../../bindings/index.js";
 import type { AppMeta } from "../../ir/index.js";
 import type { CodegenContext, PackageMeta, ProjectMeta } from "../../manifest/index.js";
 import type { AppEntrypoint, Backend, EmitResult, EmittedApp, EmittedPackage } from "../backend.js";
+import type { SigEntry } from "../sig-entries.js";
+import type { NamedType } from "./types.js";
 import { CodeBuilder } from "../code-builder.js";
 import { generatePackageJson, generateRootIndex, generateTsconfig } from "./packaging.js";
 import { Scope } from "../scope.js";
@@ -132,18 +135,51 @@ export function computePublicNames(appId: string | undefined): PublicNames {
   };
 }
 
-export function generateTypeScript(ctx: CodegenContext, packageScope?: Scope): string {
-  const cb = new CodeBuilder("  ");
-  // A package-shared scope keeps top-level names unique across every tool in the
-  // suite barrel; without one (standalone emit) a per-tool scope is enough.
-  const scope = packageScope ?? new Scope(TS_RESERVED);
+/**
+ * The fully-derived naming/typing model for one tool's TypeScript emission.
+ * Computed once by `buildEmitModel` so the file emitter and the call-site snippet
+ * renderer share the exact same public names and root typing - the snippet must
+ * match the function the generated code actually exposes.
+ */
+export interface TsEmitModel {
+  appId: string | undefined;
+  pkg: string;
+  names: {
+    params: string;
+    outputs: string;
+    metadata: string;
+    cargs: string;
+    outputsFn: string;
+    paramsFn: string;
+    execute: string;
+    validate: string;
+    wrapper: string;
+  };
+  rootType: BoundType;
+  rootIsStruct: boolean;
+  namedTypes: Map<string, string>;
+  typeDecls: NamedType[];
+  rootTypeTag: string | undefined;
+  paramsType: string;
+  sigEntries: SigEntry[];
+}
 
+/**
+ * Derive the public names, named-type declarations, root typing, and per-field
+ * signature entries for one tool. Mutates `scope` exactly as the emitter needs
+ * (the `reg` registrations and the `sigScope` child), so passing the same scope
+ * the emitter continues with keeps later local registrations consistent.
+ */
+export function buildEmitModel(
+  ctx: CodegenContext,
+  scope: Scope = new Scope(TS_RESERVED),
+): TsEmitModel {
   const appId = ctx.app?.id;
   const pkg = ctx.package?.name ?? "unknown";
   const publicNames = computePublicNames(appId);
 
   const rootBinding = ctx.resolve(ctx.expr);
-  const rootType = rootBinding?.type ?? { kind: "struct" as const, fields: {} };
+  const rootType: BoundType = rootBinding?.type ?? { kind: "struct", fields: {} };
   // Only treat the root as struct-shaped when there's a real binding. A
   // synthesized empty-struct fallback (no root binding) means the solver
   // collapsed everything away, so the kwarg wrapper has nothing to wrap.
@@ -177,11 +213,66 @@ export function generateTypeScript(ctx: CodegenContext, packageScope?: Scope): s
     appId ? names.params : "",
   );
 
-  const rootName =
+  names.params =
     (rootType.kind === "struct" ? namedTypes.get(structKey(rootType)) : undefined) ??
     (rootType.kind === "union" ? namedTypes.get(unionKey(rootType)) : undefined) ??
     names.params;
-  names.params = rootName;
+
+  const paramsType =
+    rootType.kind === "struct" || rootType.kind === "union"
+      ? names.params
+      : mapType(rootType, resolveTypeName(namedTypes));
+
+  // Build the per-field SigEntry list once - the factory and kwarg wrapper
+  // both consume it, so the host names registered here must satisfy both
+  // function scopes. Pre-reserve `params` (factory + wrapper body) and
+  // `runner` (wrapper signature) so a wire key matching either gets
+  // suffix-bumped. `rootType.kind === "struct"` check satisfies the `Extract`
+  // constraint when `rootIsStruct` is true.
+  const rootTypeTag = appId ? `${pkg}/${appId}` : undefined;
+  const sigScope = scope.child(["params", "runner"]);
+  const sigEntries =
+    rootIsStruct && rootType.kind === "struct"
+      ? buildSigEntries(
+          rootType,
+          collectFieldInfo(ctx, rootType),
+          (wireKey) => sigScope.add(tsScrubIdent(wireKey, TS_RESERVED)),
+          tsSigOptions(resolveTypeName(namedTypes)),
+        )
+      : [];
+
+  return {
+    appId,
+    pkg,
+    names,
+    rootType,
+    rootIsStruct,
+    namedTypes,
+    typeDecls,
+    rootTypeTag,
+    paramsType,
+    sigEntries,
+  };
+}
+
+export function generateTypeScript(ctx: CodegenContext, packageScope?: Scope): string {
+  const cb = new CodeBuilder("  ");
+  // A package-shared scope keeps top-level names unique across every tool in the
+  // suite barrel; without one (standalone emit) a per-tool scope is enough.
+  const scope = packageScope ?? new Scope(TS_RESERVED);
+
+  const {
+    appId,
+    pkg,
+    names,
+    rootType,
+    rootIsStruct,
+    namedTypes,
+    typeDecls,
+    rootTypeTag,
+    paramsType,
+    sigEntries,
+  } = buildEmitModel(ctx, scope);
 
   // Auto-generated header.
   cb.comment("This file was auto generated by Styx.");
@@ -206,33 +297,10 @@ export function generateTypeScript(ctx: CodegenContext, packageScope?: Scope): s
     cb.blank();
   }
 
-  const paramsType =
-    rootType.kind === "struct" || rootType.kind === "union"
-      ? names.params
-      : mapType(rootType, resolveTypeName(namedTypes));
-
   if (emitOutputs && needsStripExtensionsHelper(ctx)) {
     emitStripExtensionsHelper(cb);
     cb.blank();
   }
-
-  // Build the per-field SigEntry list once - the factory and kwarg wrapper
-  // both consume it, so the host names registered here must satisfy both
-  // function scopes. Pre-reserve `params` (factory + wrapper body) and
-  // `runner` (wrapper signature) so a wire key matching either gets
-  // suffix-bumped. `rootType.kind === "struct"` check satisfies the `Extract`
-  // constraint when `rootIsStruct` is true.
-  const rootTypeTag = appId ? `${pkg}/${appId}` : undefined;
-  const sigScope = scope.child(["params", "runner"]);
-  const sigEntries =
-    rootIsStruct && rootType.kind === "struct"
-      ? buildSigEntries(
-          rootType,
-          collectFieldInfo(ctx, rootType),
-          (wireKey) => sigScope.add(tsScrubIdent(wireKey, TS_RESERVED)),
-          tsSigOptions(resolveTypeName(namedTypes)),
-        )
-      : [];
 
   // Params factory (struct-rooted tools only): a kwarg-style builder for the
   // params object. Useful for callers that want to build a params object to

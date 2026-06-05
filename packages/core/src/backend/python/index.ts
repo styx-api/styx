@@ -6,3 +6,4 @@ export {
   generatePython,
   PythonBackend,
 } from "./python.js";
+export { renderPythonCall } from "./snippet.js";

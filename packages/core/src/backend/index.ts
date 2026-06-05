@@ -25,11 +25,15 @@ export {
   planOutput,
   planScope,
 } from "./resolve-output-tokens.js";
-export { generatePython, PythonBackend } from "./python/index.js";
+export { generatePython, PythonBackend, renderPythonCall } from "./python/index.js";
 export { Scope } from "./scope.js";
 export type { JsonSchema } from "./schema/index.js";
 export { generateOutputsSchema, generateSchema, JsonSchemaBackend } from "./schema/index.js";
+export { buildSigEntries } from "./sig-entries.js";
+export type { SigEntry, SigOptions } from "./sig-entries.js";
+export { renderStructLiteral, renderValue } from "./snippet-core.js";
+export type { SnippetDialect, SnippetOptions } from "./snippet-core.js";
 export { camelCase, pascalCase, screamingSnakeCase, snakeCase } from "./string-case.js";
 export { PYTHON_RUNNER_DEPS, STYXDEFS_COMPAT } from "./styxdefs-compat.js";
 export { structKey, typeKey, unionKey } from "./type-keys.js";
-export { generateTypeScript, TypeScriptBackend } from "./typescript/index.js";
+export { generateTypeScript, renderTypeScriptCall, TypeScriptBackend } from "./typescript/index.js";
