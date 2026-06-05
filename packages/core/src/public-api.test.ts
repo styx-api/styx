@@ -30,6 +30,10 @@ const HUB_SURFACE = [
   // TypeScript backend (transpile-and-run for cargs/outputs)
   "generateTypeScript",
   "TypeScriptBackend",
+  // dispatch-entrypoint resolver: the authoritative `@type` -> execute-fn-name
+  // map (struct root -> `<tool>Execute`, non-struct -> wrapper) the hub uses to
+  // invoke the right export after transpiling, without recomputing names.
+  "appEntrypoint",
   // call-site snippet renderers (replace the hub's pythonCodeGen.ts + symbolmaps)
   "renderPythonCall",
   "renderTypeScriptCall",
@@ -54,6 +58,7 @@ describe("@styx-api/core public API (niwrap-hub surface)", () => {
       "generateSchema",
       "generateOutputsSchema",
       "generateTypeScript",
+      "appEntrypoint",
       "renderPythonCall",
       "renderTypeScriptCall",
       "buildSigEntries",
