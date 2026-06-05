@@ -7,3 +7,4 @@ export {
   generateTypeScript,
   TypeScriptBackend,
 } from "./typescript.js";
+export { renderTypeScriptCall } from "./snippet.js";
