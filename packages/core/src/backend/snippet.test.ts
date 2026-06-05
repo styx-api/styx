@@ -172,6 +172,26 @@ describe("renderPythonCall - nested / union / list", () => {
     );
     expect(code).toBe(["p.t(", "    dims=[1, 2, 3],", ")"].join("\n"));
   });
+
+  it("renders an explicitly-null optional struct/list field as None, not {}/[]", () => {
+    // A form may emit `null` for an unset optional rather than omitting the key;
+    // coercing that into an empty literal would be a value the generated code
+    // rejects (a struct missing required keys / a non-list).
+    const ctx = generateCtx(
+      seq(
+        lit("t"),
+        opt(seq(lit("--b"), int("min"), int("max")), { name: "bounds" }),
+        opt(seq(lit("-c"), rep(int("d"), "dims"))),
+      ),
+      { app: { id: "t" }, package: { name: "p" } },
+    );
+    const code = renderPythonCall(
+      ctx,
+      { "@type": "p/t", bounds: null, dims: null },
+      { includeImport: false },
+    );
+    expect(code).toBe(["p.t(", "    bounds=None,", "    dims=None,", ")"].join("\n"));
+  });
 });
 
 describe("renderPythonCall - union root", () => {
@@ -288,6 +308,25 @@ describe("renderTypeScriptCall - nested / union / list", () => {
     expect(code).toContain("    {");
     expect(code).toContain('      name: "a",');
     expect(code).toContain("      value: 1,");
+  });
+
+  it("renders an explicitly-null optional struct/list field as null, not {}/[]", () => {
+    const ctx = generateCtx(
+      seq(
+        lit("t"),
+        opt(seq(lit("--b"), int("min"), int("max")), { name: "bounds" }),
+        opt(seq(lit("-c"), rep(int("d"), "dims"))),
+      ),
+      { app: { id: "t" }, package: { name: "p" } },
+    );
+    const code = renderTypeScriptCall(
+      ctx,
+      { "@type": "p/t", bounds: null, dims: null },
+      { includeImport: false },
+    );
+    expect(code).toBe(
+      ["p.tExecute({", '  "@type": "p/t",', "  bounds: null,", "  dims: null,", "})"].join("\n"),
+    );
   });
 });
 

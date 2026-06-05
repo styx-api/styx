@@ -165,6 +165,12 @@ export function renderValue(
   indent: string,
   d: SnippetDialect,
 ): string {
+  // A present null/undefined renders as the host null literal regardless of the
+  // declared type. An explicitly-unset optional field (a form may emit `null`
+  // rather than omitting the key) must not be coerced into an empty `{}` / `[]`
+  // by the struct/list branches below - that would be a value the generated code
+  // rejects (a struct missing its required keys, a non-array for a list).
+  if (value === null || value === undefined) return d.null;
   const t = unwrap(type);
   switch (t.kind) {
     case "struct":
