@@ -4,7 +4,7 @@ import {
   PythonBackend,
   TypeScriptBackend,
   type Backend,
-} from "@styx/core";
+} from "@styx-api/core";
 
 /**
  * Registry of backends keyed by CLI alias. The alias is what users pass to

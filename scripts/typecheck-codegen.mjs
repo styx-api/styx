@@ -8,8 +8,8 @@
 // classes of bugs those tests miss (declaration ordering / forward references,
 // optional-omit NotRequired, union-output `never` collapses, indexability).
 //
-// Prereq: @styx/core and @styx/cli must be built (run `npm run build -w
-// @styx/core -w @styx/cli`). The `typecheck:codegen` npm script does this for
+// Prereq: @styx-api/core and @styx-api/cli must be built (run `npm run build -w
+// @styx-api/core -w @styx-api/cli`). The `typecheck:codegen` npm script does this for
 // you; CI builds in a prior step. Also requires `mypy` on PATH (Python) - tsc
 // comes from the repo's dev dependency.
 //
@@ -63,7 +63,7 @@ function run(label, cmd, args) {
 if (!existsSync(cliBin)) {
   process.stderr.write(
     `error: CLI not built (${path.relative(repoRoot, cliBin)} missing).\n` +
-      `  Run: npm run build -w @styx/core -w @styx/cli\n`,
+      `  Run: npm run build -w @styx-api/core -w @styx-api/cli\n`,
   );
   process.exit(2);
 }

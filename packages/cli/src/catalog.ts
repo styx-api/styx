@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import * as path from "node:path";
 
-import type { Documentation, PackageMeta, ProjectMeta } from "@styx/core";
+import type { Documentation, PackageMeta, ProjectMeta } from "@styx-api/core";
 
 /**
  * Loaded catalog: a project containing packages, each holding one or more

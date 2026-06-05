@@ -16,7 +16,7 @@ npm test
 
 ```bash
 # Terminal 1: Watch core library
-npm run dev -w @styx/core
+npm run dev -w @styx-api/core
 
 # Terminal 2: Run playground
 npm run dev
@@ -26,7 +26,7 @@ npm run dev
 
 ```
 styx2/
-├── packages/core/    # @styx/core - compiler library
+├── packages/core/    # @styx-api/core - compiler library
 ├── playground/       # Svelte interactive compiler explorer
 └── ...
 ```

@@ -32,7 +32,7 @@ jobs:
         run: npm run format:check
 
       - name: Build (core + cli)
-        run: npm run build -w @styx/core -w @styx/cli
+        run: npm run build -w @styx-api/core -w @styx-api/cli
 
       - name: Typecheck
         run: npx tsc --noEmit -p packages/core/tsconfig.json
@@ -64,7 +64,7 @@ jobs:
         run: pip install mypy
 
       - name: Build (core + cli)
-        run: npm run build -w @styx/core -w @styx/cli
+        run: npm run build -w @styx-api/core -w @styx-api/cli
 
       - name: Type-check generated code (mypy + tsc)
         run: node scripts/typecheck-codegen.mjs

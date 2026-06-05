@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { PythonBackend, TypeScriptBackend } from "@styx/core";
+import { PythonBackend, TypeScriptBackend } from "@styx-api/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { build } from "./build.js";

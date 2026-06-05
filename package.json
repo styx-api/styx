@@ -7,13 +7,13 @@
     "playground"
   ],
   "scripts": {
-    "build": "npm run build -w @styx/core",
+    "build": "npm run build -w @styx-api/core",
     "dev": "npm run dev -w playground",
     "test": "vitest",
     "test:watch": "vitest --watch",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "typecheck:codegen": "npm run build -w @styx/core -w @styx/cli && node scripts/typecheck-codegen.mjs",
+    "typecheck:codegen": "npm run build -w @styx-api/core -w @styx-api/cli && node scripts/typecheck-codegen.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

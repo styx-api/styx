@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { detectFormat } from "@styx/core";
-  import type { FormatName } from "@styx/core";
+  import { detectFormat } from "@styx-api/core";
+  import type { FormatName } from "@styx-api/core";
   import { onMount } from "svelte";
   import InputPanel from "./lib/InputPanel.svelte";
   import OutputPanel from "./lib/OutputPanel.svelte";

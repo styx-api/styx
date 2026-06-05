@@ -1,5 +1,5 @@
-import { compile, solve, resolveOutputs, createContext } from "@styx/core";
-import type { ParseResult, SolveResult, CodegenContext } from "@styx/core";
+import { compile, solve, resolveOutputs, createContext } from "@styx-api/core";
+import type { ParseResult, SolveResult, CodegenContext } from "@styx-api/core";
 import { buildPipeline, type PassConfig } from "./passes.js";
 
 export interface SolvedParseResult {

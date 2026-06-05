@@ -5,8 +5,8 @@ import {
   JsonSchemaBackend,
   PythonBackend,
   TypeScriptBackend,
-} from "@styx/core";
-import type { Backend } from "@styx/core";
+} from "@styx-api/core";
+import type { Backend } from "@styx-api/core";
 import type { BundledLanguage } from "shiki";
 import type { Compilation, SolvedParseResult } from "./compiler.js";
 
