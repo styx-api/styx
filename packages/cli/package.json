@@ -1,6 +1,6 @@
 {
   "name": "@styx-api/cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Command-line interface for the Styx compiler (@styx-api/core): build typed wrappers from CLI tool descriptors and catalogs.",
   "keywords": [
     "styx",
@@ -48,7 +48,7 @@
     "prepublishOnly": "tsdown"
   },
   "dependencies": {
-    "@styx-api/core": "0.1.0",
+    "@styx-api/core": "0.2.0",
     "cac": "^6.7.14"
   },
   "devDependencies": {
