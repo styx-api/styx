@@ -29,6 +29,14 @@ const tsDialect: SnippetDialect = {
  * The snippet matches the *standalone* (single-descriptor) emission of the same
  * context - which is how the hub compiles - not a catalog emission where a
  * shared package scope could suffix-bump a name.
+ *
+ * @param ctx - The compiled context (compile -> pipeline -> solve ->
+ *   resolveOutputs -> createContext, as in the CLI's `readAndCompile`).
+ * @param config - The params object, keyed by Boutiques *wire* names. Every
+ *   union-typed value - including the root of a union-rooted tool - must carry
+ *   its `@type` discriminator so the variant can be matched; the root struct's
+ *   `@type` is supplied by the renderer, so omit it there.
+ * @param opts - Import and package-root options.
  */
 export function renderTypeScriptCall(
   ctx: CodegenContext,
