@@ -14,7 +14,7 @@ import {
   type FormatName,
   type PackageMeta,
   type ProjectMeta,
-} from "@styx/core";
+} from "@styx-api/core";
 
 import { loadCatalog, type CatalogProject } from "./catalog.js";
 

@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { PythonBackend, TypeScriptBackend } from "@styx/core";
+import { PythonBackend, TypeScriptBackend } from "@styx-api/core";
 import { describe, expect, it } from "vitest";
 
 import { build } from "./build.js";

@@ -1,5 +1,5 @@
-import { flatten, simplify, removeEmpty, canonicalize, createPipeline } from "@styx/core";
-import type { Pass } from "@styx/core";
+import { flatten, simplify, removeEmpty, canonicalize, createPipeline } from "@styx-api/core";
+import type { Pass } from "@styx-api/core";
 
 export interface PassDef {
   key: string;

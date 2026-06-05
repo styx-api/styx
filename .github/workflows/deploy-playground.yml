@@ -32,8 +32,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build @styx/core
-        run: npm run build -w @styx/core
+      - name: Build @styx-api/core
+        run: npm run build -w @styx-api/core
 
       - name: Build playground
         run: npm run build -w playground

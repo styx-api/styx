@@ -1,0 +1,53 @@
+name: Publish to npm
+
+# Manual-only: publishes @styx-api/core then @styx-api/cli at the versions in their
+# package.json. Re-running is safe - a version already on the registry is skipped.
+# Requires the NPM_TOKEN repo secret (read/write to the @styx-api scope).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (core + cli)
+        run: npm run build -w @styx-api/core -w @styx-api/cli
+
+      - name: Publish @styx-api/core
+        run: |
+          version=$(node -p "require('./packages/core/package.json').version")
+          if npm view "@styx-api/core@$version" version > /dev/null 2>&1; then
+            echo "@styx-api/core@$version already published, skipping"
+          else
+            npm publish -w @styx-api/core --provenance --access public
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @styx-api/cli
+        run: |
+          version=$(node -p "require('./packages/cli/package.json').version")
+          if npm view "@styx-api/cli@$version" version > /dev/null 2>&1; then
+            echo "@styx-api/cli@$version already published, skipping"
+          else
+            npm publish -w @styx-api/cli --provenance --access public
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

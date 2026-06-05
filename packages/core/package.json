@@ -1,6 +1,25 @@
 {
-  "name": "@styx/core",
-  "version": "0.0.1",
+  "name": "@styx-api/core",
+  "version": "0.1.0",
+  "description": "Styx compiler core: parses CLI tool descriptors (e.g. Boutiques), optimizes an IR, solves typed parameter bindings, and generates type-safe wrappers (TypeScript, Python, JSON Schema). Part of the Styx/NiWrap ecosystem.",
+  "keywords": [
+    "styx",
+    "niwrap",
+    "boutiques",
+    "code-generation",
+    "compiler",
+    "cli"
+  ],
+  "license": "MIT",
+  "homepage": "https://niwrap.dev/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/styx-api/styx-ts.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/styx-api/styx-ts/issues"
+  },
   "type": "module",
   "exports": {
     ".": {
@@ -14,14 +33,22 @@
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
   "files": [
-    "dist"
+    "dist",
+    "src",
+    "!src/**/*.test.ts",
+    "!src/**/test-helpers.ts"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsdown",
-    "dev": "tsdown --watch"
+    "dev": "tsdown --watch",
+    "prepublishOnly": "tsdown"
   },
   "devDependencies": {
     "@types/node": "^25.0.3",
+    "rolldown": "1.0.0-rc.1",
     "styxdefs": "^0.2.0",
     "tsdown": "^0.20.1"
   }

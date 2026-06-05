@@ -1,6 +1,24 @@
 {
-  "name": "@styx/cli",
-  "version": "0.0.1",
+  "name": "@styx-api/cli",
+  "version": "0.1.0",
+  "description": "Command-line interface for the Styx compiler (@styx-api/core): build typed wrappers from CLI tool descriptors and catalogs.",
+  "keywords": [
+    "styx",
+    "niwrap",
+    "boutiques",
+    "code-generation",
+    "cli"
+  ],
+  "license": "MIT",
+  "homepage": "https://niwrap.dev/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/styx-api/styx-ts.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/styx-api/styx-ts/issues"
+  },
   "type": "module",
   "bin": {
     "styx": "./dist/bin.mjs"
@@ -17,14 +35,20 @@
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
   "files": [
-    "dist"
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsdown",
-    "dev": "tsdown --watch"
+    "dev": "tsdown --watch",
+    "prepublishOnly": "tsdown"
   },
   "dependencies": {
-    "@styx/core": "*",
+    "@styx-api/core": "0.1.0",
     "cac": "^6.7.14"
   },
   "devDependencies": {
