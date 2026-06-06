@@ -60,17 +60,23 @@ describe("Python emitProject packaging", () => {
     expect(readme).toContain("no affiliation with the original authors");
   });
 
-  it("emits a root pyproject depending on runners and sub-distributions", () => {
+  it("emits a root pyproject depending on styxkit and sub-distributions", () => {
     const root = out.files.get("pyproject.toml");
     expect(root).toBeDefined();
     expect(root).toContain('name = "niwrap"');
-    expect(root).toContain('"styxdocker",');
-    expect(root).toContain('"styxsingularity",');
-    expect(root).toContain('"styxgraph",');
+    // The runner stack now arrives via styxkit[all], not three separate deps.
+    expect(root).toContain('"styxkit[all]",');
+    expect(root).not.toContain('"styxdocker",');
     expect(root).toContain('"niwrap_fsl",');
     expect(root).toContain('"niwrap_ants",');
-    // Metapackage owns no modules of its own.
-    expect(root).toContain("packages = []");
+    // Metapackage now ships its own importable module (the styxkit re-export).
+    expect(root).toContain('packages = ["niwrap"]');
+    expect(root).toContain('"niwrap" = ["py.typed"]');
+  });
+
+  it("emits a root __init__ re-exporting styxkit, plus a py.typed marker", () => {
+    expect(out.files.get("niwrap/__init__.py")).toContain("from styxkit import *");
+    expect(out.files.get("niwrap/py.typed")).toBe("");
   });
 
   it("emits a requirements.txt for local installs (suites then root)", () => {

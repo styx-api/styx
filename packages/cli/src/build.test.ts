@@ -95,6 +95,9 @@ describe("build (catalog mode)", () => {
     expect(result.errors).toEqual([]);
     expect(relPaths(result.files, "/out")).toEqual([
       "python/README.md",
+      // The metapackage's own importable module (thin styxkit re-export).
+      "python/miniproject/__init__.py",
+      "python/miniproject/py.typed",
       "python/pyproject.toml",
       "python/requirements.txt",
       "python/tools/README.md",

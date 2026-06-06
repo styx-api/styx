@@ -6,11 +6,13 @@ import type { SigEntry } from "../sig-entries.js";
 import type { NamedType } from "./types.js";
 import {
   generateRequirementsTxt,
+  generateRootInitPy,
   generateRootPyproject,
   generateRootReadme,
   generateSubPyproject,
   generateSubReadme,
   pyDistName,
+  rootModuleName,
 } from "./packaging.js";
 import { CodeBuilder } from "../code-builder.js";
 import { Scope } from "../scope.js";
@@ -549,7 +551,13 @@ export class PythonBackend implements Backend {
       files.set(`${dir}/README.md`, generateSubReadme(proj, pkg));
     }
 
-    files.set("pyproject.toml", generateRootPyproject(proj, distNames));
+    // The metapackage ships its own importable module: a thin styxkit re-export
+    // so `import <project>; <project>.use_docker()` works (PEP 561 typed).
+    const rootMod = rootModuleName(proj);
+    files.set(`${rootMod}/__init__.py`, generateRootInitPy());
+    files.set(`${rootMod}/py.typed`, "");
+
+    files.set("pyproject.toml", generateRootPyproject(proj, distNames, rootMod));
     files.set("README.md", generateRootReadme(proj, distNames));
     files.set("requirements.txt", generateRequirementsTxt(pkgDirs));
 
