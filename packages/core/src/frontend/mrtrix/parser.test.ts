@@ -161,22 +161,17 @@ describe("MrtrixParser", () => {
       expect(p.attrs.node.kind).toBe("repeat");
     });
 
-    it("maps int/float seq to a repeat (comma-joined only when described so)", () => {
-      const plain = parse(minimal({ arguments: [arg({ type: "int seq" })] }));
-      const repPlain = params(plain)[0] as Repeat;
-      expect(repPlain.kind).toBe("repeat");
-      expect(repPlain.attrs.node.kind).toBe("int");
-      expect(repPlain.attrs.join).toBeUndefined();
+    it("maps int/float seq to a comma-joined repeat (MRtrix seqs are always comma-separated)", () => {
+      const ints = parse(minimal({ arguments: [arg({ type: "int seq" })] }));
+      const repInt = params(ints)[0] as Repeat;
+      expect(repInt.kind).toBe("repeat");
+      expect(repInt.attrs.node.kind).toBe("int");
+      expect(repInt.attrs.join).toBe(",");
 
-      const comma = parse(
-        minimal({
-          synopsis: "uses a comma-separated list",
-          arguments: [arg({ type: "float seq" })],
-        }),
-      );
-      const repComma = params(comma)[0] as Repeat;
-      expect(repComma.attrs.node.kind).toBe("float");
-      expect(repComma.attrs.join).toBe(",");
+      const floats = parse(minimal({ arguments: [arg({ type: "float seq" })] }));
+      const repFloat = params(floats)[0] as Repeat;
+      expect(repFloat.attrs.node.kind).toBe("float");
+      expect(repFloat.attrs.join).toBe(",");
     });
 
     it("maps `various` to a str|file union of single-field structs with variantTags", () => {

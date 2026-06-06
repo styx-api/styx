@@ -62,10 +62,10 @@ function emptyExpr(): Sequence {
  *
  * Type mapping mirrors the v1 `mrt2bt.js` converter's `set_type`. The dump does
  * not carry choice values, so a `choice` argument degrades to a plain string
- * (as it did in v1). Per-command quirks v1 hand-coded (e.g. dwi2fod/mtnormalise
- * paired in/out args, mrconvert comma lists) are intentionally NOT special-cased
- * here - they are patched on the niwrap side post-dump, keeping this frontend
- * format-general.
+ * (as it did in v1). Per-command quirks v1 hand-coded that the flat dump cannot
+ * express (e.g. dwi2fod/mtnormalise paired in/out args) are intentionally NOT
+ * special-cased here - they are patched on the niwrap side post-dump, keeping
+ * this frontend format-general.
  */
 export class MrtrixParser implements Frontend {
   readonly name = "mrtrix";
@@ -162,13 +162,11 @@ export class MrtrixParser implements Frontend {
 
   /**
    * Lower one MRtrix argument to its terminal node (carrying name + doc) and,
-   * for output types, an accompanying `Output`. `commaText` is the description
-   * used to decide whether a numeric sequence is comma-joined (v1 heuristic).
+   * for output types, an accompanying `Output`.
    */
   private buildArgTerminal(
     arg: Record<string, unknown>,
     meta: NodeMeta,
-    commaText: string,
   ): { node: Expr; output?: Output } | null {
     const argType = arg.type;
     if (!isString(argType)) {
@@ -176,7 +174,6 @@ export class MrtrixParser implements Frontend {
       return null;
     }
 
-    const commaJoined = commaText.includes("comma-separated");
     const name = meta.name!;
 
     switch (argType) {
@@ -188,13 +185,15 @@ export class MrtrixParser implements Frontend {
       case "choice": // choice values are not emitted in the dump; treat as string
       case "undefined":
         return { node: str(meta) };
+      // MRtrix sequences are always a single comma-separated token (parse_ints /
+      // parse_floats split on `,`), so the list is comma-joined, never spaced.
       case "int seq": {
-        const node = commaJoined ? repJoin(",", int()) : rep(int());
+        const node = repJoin(",", int());
         node.meta = meta;
         return { node };
       }
       case "float seq": {
-        const node = commaJoined ? repJoin(",", float()) : rep(float());
+        const node = repJoin(",", float());
         node.meta = meta;
         return { node };
       }
@@ -236,7 +235,7 @@ export class MrtrixParser implements Frontend {
    * A positional argument: typed terminal, wrapped for cardinality. Output-type
    * positionals push their `Output` onto the root's `outputs` collector.
    */
-  private buildPositional(arg: unknown, commaText: string, rootOutputs: Output[]): Expr | null {
+  private buildPositional(arg: unknown, rootOutputs: Output[]): Expr | null {
     if (!isObject(arg)) {
       this.warn("Skipping non-object argument");
       return null;
@@ -250,7 +249,7 @@ export class MrtrixParser implements Frontend {
       name: this.uniqueName(snakeCase(id)),
       ...this.docMeta(arg.description),
     };
-    const built = this.buildArgTerminal(arg, meta, commaText);
+    const built = this.buildArgTerminal(arg, meta);
     if (!built) return null;
     if (built.output) rootOutputs.push(built.output);
 
@@ -298,7 +297,6 @@ export class MrtrixParser implements Frontend {
     const flag = `-${id}`;
     const name = this.uniqueName(snakeCase(id));
     const optDoc = this.docFrom(option.description);
-    const optDescText = isString(option.description) ? option.description : "";
     const args = asArray(option.arguments);
 
     const required = option.optional === false;
@@ -324,7 +322,7 @@ export class MrtrixParser implements Frontend {
         return null;
       }
       const meta: NodeMeta = { name, ...(optDoc && { doc: optDoc }) };
-      const built = this.buildArgTerminal(arg, meta, optDescText);
+      const built = this.buildArgTerminal(arg, meta);
       if (!built) return null;
       const valueNode = this.applyCardinality(built.node, arg, built.output !== undefined);
       const flagSeq = seq(lit(flag), valueNode);
@@ -348,7 +346,7 @@ export class MrtrixParser implements Frontend {
       // Fall back to the option's doc when the argument carries none.
       const argDoc = this.docFrom(rawArg.description) ?? optDoc;
       const meta: NodeMeta = { name: snakeCase(argId), ...(argDoc && { doc: argDoc }) };
-      const built = this.buildArgTerminal(rawArg, meta, optDescText);
+      const built = this.buildArgTerminal(rawArg, meta);
       if (!built) continue;
       const valueNode = this.applyCardinality(built.node, rawArg, built.output !== undefined);
       inner.push(valueNode);
@@ -386,19 +384,12 @@ export class MrtrixParser implements Frontend {
       return { expr: emptyExpr(), errors: this.errors, warnings: this.warnings };
     }
 
-    // Combined tool description drives comma-join detection for positionals,
-    // matching v1's `obj.description.includes("comma-separated")`.
-    const toolText = [
-      isString(cmd.synopsis) ? cmd.synopsis : "",
-      asArray(cmd.description).filter(isString).join("\n"),
-    ].join("\n");
-
     const nodes: Expr[] = [lit(cmd.name)];
     const rootOutputs: Output[] = [];
 
     // Positionals first (ergonomic signature; MRtrix parses options anywhere).
     for (const arg of asArray(cmd.arguments)) {
-      const node = this.buildPositional(arg, toolText, rootOutputs);
+      const node = this.buildPositional(arg, rootOutputs);
       if (node) nodes.push(node);
     }
 
