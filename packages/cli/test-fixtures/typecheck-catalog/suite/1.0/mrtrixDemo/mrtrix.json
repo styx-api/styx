@@ -10,6 +10,14 @@
   "examples": [],
   "arguments": [
     {
+      "id": "algorithm",
+      "description": "the algorithm to use",
+      "type": "choice",
+      "choices": ["csd", "msmt_csd"],
+      "optional": false,
+      "allow_multiple": false
+    },
+    {
       "id": "input",
       "description": "the input image",
       "type": "image in",
@@ -52,6 +60,7 @@
               "id": "value",
               "description": "",
               "type": "float",
+              "min": 0,
               "optional": false,
               "allow_multiple": false
             }
@@ -124,6 +133,8 @@
               "id": "number",
               "description": "",
               "type": "integer",
+              "min": 0,
+              "max": 16,
               "optional": false,
               "allow_multiple": false
             }
