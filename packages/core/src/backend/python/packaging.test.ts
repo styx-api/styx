@@ -105,6 +105,23 @@ describe("Python packaging without project metadata", () => {
   });
 });
 
+describe("Python metapackage module naming", () => {
+  it("scrubs a project name that is a Python keyword into an importable module", () => {
+    const out = new PythonBackend().emitProject({ name: "import" }, [emptyPkg({ name: "fsl" })]);
+    // `import import` is a SyntaxError, so the reserved word must be dodged.
+    expect(out.files.has("import_/__init__.py")).toBe(true);
+    expect(out.files.get("pyproject.toml")).toContain('packages = ["import_"]');
+  });
+
+  it("dodges a project module that collides with a suite directory", () => {
+    const out = new PythonBackend().emitProject({ name: "fsl" }, [emptyPkg({ name: "fsl" })]);
+    // The styxkit-re-export stub must not clobber the suite's real fsl/ module.
+    expect(out.files.has("fsl_/__init__.py")).toBe(true);
+    expect(out.files.has("fsl/__init__.py")).toBe(false);
+    expect(out.warnings.some((w) => w.message.includes("collides"))).toBe(true);
+  });
+});
+
 describe("Python packaging TOML safety", () => {
   it("escapes quotes and strips control chars in emitted strings", () => {
     const out = new PythonBackend().emitProject(
