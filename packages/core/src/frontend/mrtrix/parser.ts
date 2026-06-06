@@ -22,6 +22,10 @@ function isString(x: unknown): x is string {
   return typeof x === "string";
 }
 
+function isNumber(x: unknown): x is number {
+  return typeof x === "number" && Number.isFinite(x);
+}
+
 function isArray(x: unknown): x is unknown[] {
   return Array.isArray(x);
 }
@@ -60,9 +64,10 @@ function emptyExpr(): Sequence {
  *   - option, 1 arg          -> opt(seq(lit(-switch), value))      (flat optional)
  *   - option, >1 arg / multi -> opt|rep(seq(lit(-switch), ...))    (sub-struct)
  *
- * Type mapping mirrors the v1 `mrt2bt.js` converter's `set_type`. The dump does
- * not carry choice values, so a `choice` argument degrades to a plain string
- * (as it did in v1). Per-command quirks v1 hand-coded that the flat dump cannot
+ * Type mapping mirrors the v1 `mrt2bt.js` converter's `set_type`, plus `choice`
+ * values: when the dump carries `choices` it lowers to an enum (an alternative
+ * of literals), else a plain string (older dumps that omit the values - as v1
+ * always did). Per-command quirks v1 hand-coded that the flat dump cannot
  * express (e.g. dwi2fod/mtnormalise paired in/out args) are intentionally NOT
  * special-cased here - they are patched on the niwrap side post-dump, keeping
  * this frontend format-general.
@@ -161,6 +166,20 @@ export class MrtrixParser implements Frontend {
   // -- Terminals --
 
   /**
+   * Integer/float bounds, when the dump carries them. The C++ hook serializes
+   * `Argument::limits.{i,f}.{min,max}` as `min`/`max`, omitting the unbounded
+   * sentinels - so a present value is a real, tool-enforced bound.
+   */
+  private numericBounds(arg: Record<string, unknown>): { minValue?: number; maxValue?: number } {
+    const lo = arg.min;
+    const hi = arg.max;
+    return {
+      ...(isNumber(lo) && { minValue: lo }),
+      ...(isNumber(hi) && { maxValue: hi }),
+    };
+  }
+
+  /**
    * Lower one MRtrix argument to its terminal node (carrying name + doc) and,
    * for output types, an accompanying `Output`.
    */
@@ -177,14 +196,38 @@ export class MrtrixParser implements Frontend {
     const name = meta.name!;
 
     switch (argType) {
-      case "integer":
-        return { node: int(meta) };
-      case "float":
-        return { node: float(meta) };
+      case "integer": {
+        const node = int(meta);
+        Object.assign(node.attrs, this.numericBounds(arg));
+        return { node };
+      }
+      case "float": {
+        const node = float(meta);
+        Object.assign(node.attrs, this.numericBounds(arg));
+        return { node };
+      }
       case "text":
-      case "choice": // choice values are not emitted in the dump; treat as string
       case "undefined":
+      case "boolean":
+        // `boolean` rarely (if ever) appears in a dump; treat its literal token
+        // as a string rather than erroring on an unknown type.
         return { node: str(meta) };
+      case "choice": {
+        // A `choice` carries its allowed values in `choices` (the C++ hook
+        // serializes `Argument::limits.choices`). Lower to an enum: an
+        // alternative of string literals. Older dumps omit the values - fall
+        // back to a plain string so they still compile.
+        const choices = arg.choices;
+        if (isArray(choices)) {
+          const alts = choices.filter(isString).map((c) => lit(c));
+          if (alts.length > 0) {
+            const node = alt(...alts);
+            node.meta = meta;
+            return { node };
+          }
+        }
+        return { node: str(meta) };
+      }
       // MRtrix sequences are always a single comma-separated token (parse_ints /
       // parse_floats split on `,`), so the list is comma-joined, never spaced.
       case "int seq": {

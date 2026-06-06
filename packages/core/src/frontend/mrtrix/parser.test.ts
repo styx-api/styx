@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { Output } from "../../ir/index.js";
-import type { Alternative, Expr, Literal, Optional, Repeat, Sequence } from "../../ir/node.js";
+import type {
+  Alternative,
+  Expr,
+  Float,
+  Int,
+  Literal,
+  Optional,
+  Repeat,
+  Sequence,
+} from "../../ir/node.js";
 import { MrtrixParser } from "./parser.js";
 
 const parser = new MrtrixParser();
@@ -172,6 +181,41 @@ describe("MrtrixParser", () => {
       const repFloat = params(floats)[0] as Repeat;
       expect(repFloat.attrs.node.kind).toBe("float");
       expect(repFloat.attrs.join).toBe(",");
+    });
+
+    it("threads integer/float min/max bounds onto the terminal", () => {
+      const ints = parse(
+        minimal({ arguments: [arg({ id: "n", type: "integer", min: 0, max: 8 })] }),
+      );
+      expect((params(ints)[0] as Int).attrs).toEqual({ minValue: 0, maxValue: 8 });
+
+      // a one-sided bound: only max present
+      const floats = parse(minimal({ arguments: [arg({ id: "x", type: "float", max: 1 })] }));
+      expect((params(floats)[0] as Float).attrs).toEqual({ maxValue: 1 });
+
+      // unbounded: no min/max keys
+      const plain = parse(minimal({ arguments: [arg({ id: "m", type: "integer" })] }));
+      expect((params(plain)[0] as Int).attrs).toEqual({});
+    });
+
+    it("maps a `choice` with values to an enum (alternative of literals)", () => {
+      const r = parse(
+        minimal({
+          arguments: [arg({ id: "algorithm", type: "choice", choices: ["csd", "msmt_csd"] })],
+        }),
+      );
+      const u = params(r)[0] as Alternative;
+      expect(u.kind).toBe("alternative");
+      expect(u.meta?.name).toBe("algorithm");
+      expect(u.attrs.alts).toEqual([
+        { kind: "literal", attrs: { str: "csd" } },
+        { kind: "literal", attrs: { str: "msmt_csd" } },
+      ]);
+    });
+
+    it("falls back to str for a `choice` with no values (older dumps)", () => {
+      const r = parse(minimal({ arguments: [arg({ id: "algorithm", type: "choice" })] }));
+      expect(params(r)[0]?.kind).toBe("str");
     });
 
     it("maps `various` to a str|file union of single-field structs with variantTags", () => {
