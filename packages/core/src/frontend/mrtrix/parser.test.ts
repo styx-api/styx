@@ -261,6 +261,81 @@ describe("MrtrixParser", () => {
       );
       expect(collectOutputs(r.expr).map((o) => o.name)).toContain("export");
     });
+
+    it("maps a 0-arg repeatable option to a counted flag (rep, not bool)", () => {
+      const r = parse(
+        minimal({
+          option_groups: [{ name: "g", options: [option({ id: "add", allow_multiple: true })] }],
+        }),
+      );
+      const rep = params(r)[0] as Repeat;
+      expect(rep.kind).toBe("repeat");
+      expect(rep.attrs.node).toEqual({ kind: "literal", attrs: { str: "-add" } });
+      expect(rep.meta?.name).toBe("add");
+      expect(rep.meta?.defaultValue).toBeUndefined();
+    });
+
+    it("keeps a required option (optional=false) un-wrapped", () => {
+      const r = parse(
+        minimal({
+          option_groups: [
+            {
+              name: "g",
+              options: [
+                option({
+                  id: "mask",
+                  optional: false,
+                  arguments: [arg({ id: "image", type: "image in" })],
+                }),
+              ],
+            },
+          ],
+        }),
+      );
+      const seq = params(r)[0] as Sequence;
+      expect(seq.kind).toBe("sequence");
+      expect((seq.attrs.nodes[0] as Literal).attrs.str).toBe("-mask");
+      expect(seq.attrs.nodes[1]?.kind).toBe("path");
+    });
+
+    it("collects a multi-arg option's output on the struct sequence meta", () => {
+      const r = parse(
+        minimal({
+          option_groups: [
+            {
+              name: "g",
+              options: [
+                option({
+                  id: "export_grad",
+                  arguments: [
+                    arg({ id: "bvecs", type: "file out" }),
+                    arg({ id: "bvals", type: "file out" }),
+                  ],
+                }),
+              ],
+            },
+          ],
+        }),
+      );
+      const seq = (params(r)[0] as Optional).attrs.node as Sequence;
+      expect(seq.meta?.outputs?.map((o) => o.name)).toEqual(["bvecs", "bvals"]);
+      expect(collectOutputs(r.expr).map((o) => o.name)).toEqual(["bvecs", "bvals"]);
+    });
+
+    it("maps a `various` option argument to a union", () => {
+      const r = parse(
+        minimal({
+          option_groups: [
+            {
+              name: "g",
+              options: [option({ id: "op", arguments: [arg({ id: "x", type: "various" })] })],
+            },
+          ],
+        }),
+      );
+      const seq = (params(r)[0] as Optional).attrs.node as Sequence;
+      expect(seq.attrs.nodes[1]?.kind).toBe("alternative");
+    });
   });
 
   describe("structure", () => {
@@ -296,6 +371,34 @@ describe("MrtrixParser", () => {
       expect((seq.attrs.nodes[0] as Literal).attrs.str).toBe("-directions");
       expect((seq.attrs.nodes[1] as Expr).meta?.name).toBe("directions_2");
       expect(r.warnings.some((w) => /Duplicate id 'directions'/.test(w.message))).toBe(true);
+    });
+
+    it("scopes dedup to root siblings, not sub-struct inner arg names", () => {
+      // A positional `key` and a `-config key value` option both use the id
+      // `key`; the inner struct arg lives in its own scope and must stay `key`.
+      const r = parse(
+        minimal({
+          arguments: [arg({ id: "key", type: "text" })],
+          option_groups: [
+            {
+              name: "g",
+              options: [
+                option({
+                  id: "config",
+                  allow_multiple: true,
+                  arguments: [arg({ id: "key", type: "text" }), arg({ id: "value", type: "text" })],
+                }),
+              ],
+            },
+          ],
+        }),
+      );
+      const [pos, rep] = params(r);
+      expect(pos?.meta?.name).toBe("key");
+      const seq = (rep as Repeat).attrs.node as Sequence;
+      // inner arg keeps its own id despite the root positional also being `key`
+      expect(seq.attrs.nodes[1]?.meta?.name).toBe("key");
+      expect(r.warnings.some((w) => /Duplicate id/.test(w.message))).toBe(false);
     });
   });
 });

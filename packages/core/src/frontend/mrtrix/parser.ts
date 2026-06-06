@@ -301,15 +301,22 @@ export class MrtrixParser implements Frontend {
     const optDescText = isString(option.description) ? option.description : "";
     const args = asArray(option.arguments);
 
-    // Bool flag: no arguments.
+    const required = option.optional === false;
+
+    // Flag: no arguments. Repeatable -> a count (rep of the bare switch, like a
+    // mrcalc stack operator that may be applied many times); otherwise a bool.
     if (args.length === 0) {
+      if (option.allow_multiple === true) {
+        return { node: rep(lit(flag), { name, ...(optDoc && { doc: optDoc }) }), rootOutputs: [] };
+      }
       const meta: NodeMeta = { name, ...(optDoc && { doc: optDoc }), defaultValue: false };
       return { node: opt(lit(flag), meta), rootOutputs: [] };
     }
 
-    // Single value, single occurrence: flat optional scalar named by the option.
-    // The argument's own id is usually a generic metavar ("number"/"image"), so
-    // the binding takes the option's id + description (matches v1).
+    // Single value, single occurrence: flat scalar named by the option (the
+    // argument's own id is usually a generic metavar like "number"/"image", so
+    // the binding takes the option's id + description, matching v1). Optional
+    // unless the option is explicitly required.
     if (args.length === 1 && option.allow_multiple !== true) {
       const arg = args[0];
       if (!isObject(arg)) {
@@ -320,7 +327,8 @@ export class MrtrixParser implements Frontend {
       const built = this.buildArgTerminal(arg, meta, optDescText);
       if (!built) return null;
       const valueNode = this.applyCardinality(built.node, arg, built.output !== undefined);
-      const node = opt(seq(lit(flag), valueNode));
+      const flagSeq = seq(lit(flag), valueNode);
+      const node = required ? flagSeq : opt(flagSeq);
       return { node, rootOutputs: built.output ? [built.output] : [] };
     }
 
@@ -350,8 +358,16 @@ export class MrtrixParser implements Frontend {
     const structSeq = seq(...inner);
     structSeq.meta = { name, ...(structOutputs.length > 0 && { outputs: structOutputs }) };
     const wrapperMeta: NodeMeta | undefined = optDoc ? { doc: optDoc } : undefined;
-    const node =
-      option.allow_multiple === true ? rep(structSeq, wrapperMeta) : opt(structSeq, wrapperMeta);
+    let node: Expr;
+    if (option.allow_multiple === true) {
+      node = rep(structSeq, wrapperMeta);
+    } else if (required) {
+      // Required, non-repeatable: keep the struct bare; doc lives on its meta.
+      if (optDoc) structSeq.meta = { ...structSeq.meta, doc: optDoc };
+      node = structSeq;
+    } else {
+      node = opt(structSeq, wrapperMeta);
+    }
     return { node, rootOutputs: [] };
   }
 
