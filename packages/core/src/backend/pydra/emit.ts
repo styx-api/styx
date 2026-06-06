@@ -112,10 +112,12 @@ function validatorExpr(p: TypedParam, imp: Imports): string | undefined {
   }
   if (checks.length === 0) return undefined;
   imp.attrs = true;
-  let v = checks.length === 1 ? checks[0]! : `attrs.validators.and_(${checks.join(", ")})`;
-  // A None default would otherwise trip the validator; skip it when absent.
-  if (p.optional && !p.hasDefault) v = `attrs.validators.optional(${v})`;
-  return v;
+  const inner = checks.length === 1 ? checks[0]! : `attrs.validators.and_(${checks.join(", ")})`;
+  // Skip validation for unset (attrs.NOTHING) / None values. A bare attrs
+  // validator runs against the NOTHING sentinel of an unset mandatory field and
+  // would crash construction; `_styx_optional` guards both NOTHING and None
+  // (attrs.validators.optional only guards None).
+  return `_styx_optional(${inner})`;
 }
 
 /** Help text: doc + degrade / media-type notes. */
@@ -221,6 +223,22 @@ export function emitPydraTask(ctx: CodegenContext, spec: TypedSpec, names: Pydra
   cb.line(`from .${names.styxStem} import ${spec.delegation.wrapperFn}`);
   cb.blank();
   cb.blank();
+
+  if (imp.attrs) {
+    cb.line("def _styx_optional(validator):");
+    cb.indent(() => {
+      cb.line('"""Apply an attrs validator only to a set (non-NOTHING), non-None value."""');
+      cb.line("def _check(instance, attribute, value):");
+      cb.indent(() => {
+        cb.line("if value is attrs.NOTHING or value is None:");
+        cb.indent(() => cb.line("return"));
+        cb.line("validator(instance, attribute, value)");
+      });
+      cb.line("return _check");
+    });
+    cb.blank();
+    cb.blank();
+  }
 
   if (needsPath) {
     cb.line("def _styx_path(value):");

@@ -23,6 +23,17 @@ function call(ctor: string, args: string[]): string {
   return `${ctor}(${args.join(", ")})`;
 }
 
+/**
+ * Render a numeric literal, forcing a float form (e.g. `0.0`) for a float field.
+ * `traits.Range` infers its numeric type from the bound literals, so integer
+ * bounds on a float field (e.g. `low=0, high=1`) would build an *integer* range
+ * that rejects `0.5`. Emitting `0.0`/`1.0` keeps it a float range.
+ */
+function renderNum(value: string | number | boolean, asFloat: boolean): string {
+  if (asFloat && typeof value === "number" && Number.isInteger(value)) return `${value}.0`;
+  return renderPyLiteral(value);
+}
+
 /** Human-readable `desc=` text: doc + degrade/media-type notes. */
 function descText(p: TypedParam): string | undefined {
   const parts: string[] = [];
@@ -83,16 +94,20 @@ export function renderInputTrait(p: TypedParam): string {
       ]);
     case "int":
     case "float": {
+      const asFloat = p.kind === "float";
       if (p.range) {
         const a: string[] = [];
-        if (hasDef) a.push(`value=${renderPyLiteral(def!)}`);
-        if (p.range.min !== undefined) a.push(`low=${renderPyLiteral(p.range.min)}`);
-        if (p.range.max !== undefined) a.push(`high=${renderPyLiteral(p.range.max)}`);
+        if (hasDef) a.push(`value=${renderNum(def!, asFloat)}`);
+        if (p.range.min !== undefined) a.push(`low=${renderNum(p.range.min, asFloat)}`);
+        if (p.range.max !== undefined) a.push(`high=${renderNum(p.range.max, asFloat)}`);
         if (hasDef) a.push("usedefault=True");
         return call("traits.Range", [...a, ...tail]);
       }
       const ctor = p.kind === "int" ? "traits.Int" : "traits.Float";
-      return call(ctor, [...(hasDef ? [renderPyLiteral(def!), "usedefault=True"] : []), ...tail]);
+      return call(ctor, [
+        ...(hasDef ? [renderNum(def!, asFloat), "usedefault=True"] : []),
+        ...tail,
+      ]);
     }
     case "str":
       return call("traits.Str", [
@@ -122,10 +137,14 @@ export function renderInputTrait(p: TypedParam): string {
   }
 }
 
-/** Map an output field to its nipype output trait expression. */
-function renderOutputTrait(f: OutputField): string {
+/**
+ * Map an output field to its nipype output trait expression. `isRoot` is the
+ * synthetic output directory, typed as a `Directory` rather than a `File`.
+ */
+function renderOutputTrait(f: OutputField, isRoot: boolean): string {
   const tail = f.doc ? [`desc=${pyStr(f.doc)}`] : [];
   if (f.shape.kind === "list") return call("traits.List", ["File()", ...tail]);
+  if (isRoot) return call("Directory", tail);
   return call("File", tail);
 }
 
@@ -147,6 +166,7 @@ export function emitNipypeInterface(
   cb.indent(() => {
     cb.line("BaseInterface,");
     cb.line("BaseInterfaceInputSpec,");
+    cb.line("Directory,");
     cb.line("File,");
     cb.line("TraitedSpec,");
     cb.line("isdefined,");
@@ -181,7 +201,7 @@ export function emitNipypeInterface(
       cb.line("pass");
       return;
     }
-    for (const f of spec.outputs) cb.line(`${f.id} = ${renderOutputTrait(f)}`);
+    spec.outputs.forEach((f, i) => cb.line(`${f.id} = ${renderOutputTrait(f, i === 0)}`));
     for (const s of spec.streams) {
       const tail = s.doc ? `, desc=${pyStr(s.doc)}` : "";
       cb.line(`${s.id} = traits.List(traits.Str()${tail})`);

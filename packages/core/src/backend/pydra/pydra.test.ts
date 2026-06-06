@@ -85,15 +85,15 @@ describe("pydra inputs - rich python.arg fields", () => {
     );
   });
 
-  it("enforces a numeric range via attrs validators (mandatory int)", () => {
+  it("enforces a numeric range via a NOTHING-guarded attrs validator (mandatory int)", () => {
     expect(bet()).toContain(
-      '"iters": python.arg(type=int, validator=attrs.validators.and_(attrs.validators.ge(1), attrs.validators.le(100))),',
+      '"iters": python.arg(type=int, validator=_styx_optional(attrs.validators.and_(attrs.validators.ge(1), attrs.validators.le(100)))),',
     );
   });
 
   it("carries a float default alongside its range validator", () => {
     expect(bet()).toContain(
-      '"frac": python.arg(type=float, default=0.5, validator=attrs.validators.and_(attrs.validators.ge(0), attrs.validators.le(1))),',
+      '"frac": python.arg(type=float, default=0.5, validator=_styx_optional(attrs.validators.and_(attrs.validators.ge(0), attrs.validators.le(1)))),',
     );
   });
 
@@ -105,10 +105,16 @@ describe("pydra inputs - rich python.arg fields", () => {
     expect(bet()).toContain('"mode": python.arg(type=str, allowed_values=["fast", "robust"]),');
   });
 
-  it("wraps an optional list in ty.Optional + attrs.optional length validator", () => {
+  it("wraps an optional list in ty.Optional + a guarded length validator", () => {
     expect(bet()).toContain(
-      '"center": python.arg(type=ty.Optional[list[int]], default=None, validator=attrs.validators.optional(attrs.validators.and_(attrs.validators.min_len(3), attrs.validators.max_len(3)))),',
+      '"center": python.arg(type=ty.Optional[list[int]], default=None, validator=_styx_optional(attrs.validators.and_(attrs.validators.min_len(3), attrs.validators.max_len(3)))),',
     );
+  });
+
+  it("emits the NOTHING/None-guard helper when validators are present", () => {
+    const code = bet();
+    expect(code).toContain("def _styx_optional(validator):");
+    expect(code).toContain("if value is attrs.NOTHING or value is None:");
   });
 });
 

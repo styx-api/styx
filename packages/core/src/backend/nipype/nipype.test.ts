@@ -90,11 +90,20 @@ describe("nipype InputSpec - rich traits", () => {
     );
   });
 
-  it("maps a float range + default to traits.Range with usedefault", () => {
-    expect(bet()).toContain("frac = traits.Range(value=0.5, low=0, high=1, usedefault=True)");
+  it("maps a float range + default to traits.Range with float bounds + usedefault", () => {
+    // Whole-number bounds must render as floats so traits keeps a float range
+    // (an integer range would reject 0.5 at runtime).
+    expect(bet()).toContain("frac = traits.Range(value=0.5, low=0.0, high=1.0, usedefault=True)");
   });
 
-  it("maps a mandatory int range to traits.Range(mandatory=True)", () => {
+  it("renders whole-number float bounds as floats even without a default", () => {
+    const code = generateNipype(
+      generateCtx(seq(lit("t"), floatRange("ratio", 0, 1)), { app: { id: "t" } }),
+    );
+    expect(code).toContain("ratio = traits.Range(low=0.0, high=1.0, mandatory=True)");
+  });
+
+  it("keeps integer ranges as integer bounds", () => {
     expect(bet()).toContain("iters = traits.Range(low=1, high=100, mandatory=True)");
   });
 
@@ -112,8 +121,8 @@ describe("nipype InputSpec - rich traits", () => {
 });
 
 describe("nipype OutputSpec + execution glue", () => {
-  it("declares output traits including the synthetic root", () => {
-    expect(bet()).toContain("root = File(");
+  it("declares the synthetic root output as a Directory", () => {
+    expect(bet()).toContain("root = Directory(");
   });
 
   it("builds kwargs (mandatory direct, optional guarded) and delegates to the wrapper", () => {
