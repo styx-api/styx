@@ -1,7 +1,14 @@
 import type { BoundType } from "../../bindings/index.js";
 import type { AppMeta } from "../../ir/index.js";
 import type { CodegenContext, PackageMeta, ProjectMeta } from "../../manifest/index.js";
-import type { AppEntrypoint, Backend, EmitResult, EmittedApp, EmittedPackage } from "../backend.js";
+import type {
+  AppEntrypoint,
+  Backend,
+  EmitResult,
+  EmittedApp,
+  EmittedPackage,
+  EmitWarning,
+} from "../backend.js";
 import type { SigEntry } from "../sig-entries.js";
 import type { NamedType } from "./types.js";
 import {
@@ -12,7 +19,6 @@ import {
   generateSubPyproject,
   generateSubReadme,
   pyDistName,
-  rootModuleName,
 } from "./packaging.js";
 import { CodeBuilder } from "../code-builder.js";
 import { Scope } from "../scope.js";
@@ -539,6 +545,7 @@ export class PythonBackend implements Backend {
     const files = new Map<string, string>();
     const distNames: string[] = [];
     const pkgDirs: string[] = [];
+    const warnings: EmitWarning[] = [];
 
     for (const p of packages) {
       const pkg = p.meta ?? {};
@@ -552,8 +559,18 @@ export class PythonBackend implements Backend {
     }
 
     // The metapackage ships its own importable module: a thin styxkit re-export
-    // so `import <project>; <project>.use_docker()` works (PEP 561 typed).
-    const rootMod = rootModuleName(proj);
+    // so `import <project>; <project>.use_docker()` works (PEP 561 typed). Scrub
+    // the project name to a valid, non-keyword identifier, then dodge any suite
+    // directory so the stub never clobbers a suite's real wrapper module.
+    const rawMod = proj.name && proj.name.trim() ? proj.name : "project";
+    let rootMod = pyScrubIdent(rawMod, PY_RESERVED);
+    if (pkgDirs.includes(rootMod)) {
+      const collided = rootMod;
+      while (pkgDirs.includes(rootMod)) rootMod += "_";
+      warnings.push({
+        message: `metapackage module "${collided}" collides with a suite directory; emitting as "${rootMod}" instead`,
+      });
+    }
     files.set(`${rootMod}/__init__.py`, generateRootInitPy());
     files.set(`${rootMod}/py.typed`, "");
 
@@ -561,6 +578,6 @@ export class PythonBackend implements Backend {
     files.set("README.md", generateRootReadme(proj, distNames));
     files.set("requirements.txt", generateRequirementsTxt(pkgDirs));
 
-    return { files, errors: [], warnings: [] };
+    return { files, errors: [], warnings };
   }
 }

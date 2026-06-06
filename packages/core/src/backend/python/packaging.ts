@@ -112,18 +112,6 @@ export function generateSubPyproject(proj: ProjectMeta, pkg: PackageMeta): strin
 }
 
 /**
- * Project name as an importable Python module directory. Sanitized to a valid
- * identifier (non-word chars -> `_`, digit-leading -> `_` prefix); falls back to
- * `project`. This is the metapackage's own importable module - it ships the
- * styxkit re-export so `import <project>; <project>.use_docker()` works.
- */
-export function rootModuleName(proj: ProjectMeta): string {
-  const raw = proj.name && proj.name.trim() ? proj.name : "project";
-  const scrubbed = raw.replace(/\W/g, "_");
-  return /^[0-9]/.test(scrubbed) ? `_${scrubbed}` : scrubbed;
-}
-
-/**
  * The metapackage's `__init__.py`. A thin re-export of styxkit so the runner
  * configuration helpers (`use_docker`, `use_local`, `set_global_runner`, ...)
  * are reachable as `<project>.<name>` - the v1 ergonomic that the v2 split into
