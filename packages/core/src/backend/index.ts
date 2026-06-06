@@ -16,6 +16,10 @@ export type { NamedType } from "./collect-named-types.js";
 export { collectNamedTypes, resolveTypeName } from "./collect-named-types.js";
 export { findDoc } from "./find-doc.js";
 export { findStructNode } from "./find-struct-node.js";
+export type { NipypeNames } from "./nipype/index.js";
+export { generateNipype, NipypeBackend, nipypeNames } from "./nipype/index.js";
+export type { PydraNames } from "./pydra/index.js";
+export { generatePydra, PydraBackend, pydraNames } from "./pydra/index.js";
 export { resolveFieldBinding } from "./resolve-field-binding.js";
 export type { OutputEmitPlan } from "./resolve-output-tokens.js";
 export {
@@ -26,7 +30,7 @@ export {
   planOutput,
   planScope,
 } from "./resolve-output-tokens.js";
-export { generatePython, PythonBackend, renderPythonCall } from "./python/index.js";
+export { buildEmitModel, generatePython, PythonBackend, renderPythonCall } from "./python/index.js";
 export { Scope } from "./scope.js";
 export type { JsonSchema } from "./schema/index.js";
 export { generateOutputsSchema, generateSchema, JsonSchemaBackend } from "./schema/index.js";
@@ -36,6 +40,14 @@ export { renderStructLiteral, renderValue } from "./snippet-core.js";
 export type { SnippetDialect, SnippetOptions } from "./snippet-core.js";
 export { camelCase, pascalCase, screamingSnakeCase, snakeCase } from "./string-case.js";
 export { PYTHON_RUNNER_DEPS, STYXDEFS_COMPAT } from "./styxdefs-compat.js";
+export type {
+  DelegationTarget,
+  TypedParam,
+  TypedParamItem,
+  TypedParamKind,
+  TypedSpec,
+} from "./typed-spec.js";
+export { buildTypedSpec } from "./typed-spec.js";
 export { structKey, typeKey, unionKey } from "./type-keys.js";
 export {
   appEntrypoint,

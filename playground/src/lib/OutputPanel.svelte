@@ -113,6 +113,7 @@
   .tab-bar {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     flex-shrink: 0;
     border-bottom: 1px solid var(--border);
     padding: 0 0.5rem;

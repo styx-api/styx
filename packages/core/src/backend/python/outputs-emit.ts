@@ -394,7 +394,7 @@ export function emitBuildOutputs(
 }
 
 /** Sanitize an output name to a valid Python identifier. */
-function pyId(name: string): string {
+export function pyId(name: string): string {
   let s = name.replace(/[^a-zA-Z0-9_]/g, "_");
   if (/^\d/.test(s)) s = "_" + s;
   if (s === "") s = "_";

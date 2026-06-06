@@ -1,6 +1,8 @@
 import {
   BoutiquesBackend,
   JsonSchemaBackend,
+  NipypeBackend,
+  PydraBackend,
   PythonBackend,
   TypeScriptBackend,
   type Backend,
@@ -17,6 +19,8 @@ const registry: Record<string, () => Backend> = {
   schema: () => new JsonSchemaBackend(),
   "json-schema": () => new JsonSchemaBackend(),
   boutiques: () => new BoutiquesBackend(),
+  nipype: () => new NipypeBackend(),
+  pydra: () => new PydraBackend(),
 };
 
 export const knownBackends = Object.keys(registry);
