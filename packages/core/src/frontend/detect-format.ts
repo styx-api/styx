@@ -1,4 +1,4 @@
-export type FormatName = "boutiques" | "argdump" | "workbench";
+export type FormatName = "boutiques" | "argdump" | "workbench" | "mrtrix";
 
 /**
  * Auto-detect the format of a JSON descriptor source string.
@@ -26,6 +26,15 @@ export function detectFormat(source: string): FormatName | null {
   // Workbench: has a "command" switch plus "short_description"
   if (typeof obj.command === "string" && typeof obj.short_description === "string") {
     return "workbench";
+  }
+
+  // MRtrix C++ dump: a "synopsis" string plus "option_groups" and "arguments" arrays
+  if (
+    typeof obj.synopsis === "string" &&
+    Array.isArray(obj.option_groups) &&
+    Array.isArray(obj.arguments)
+  ) {
+    return "mrtrix";
   }
 
   // Boutiques: has "command-line" or "inputs" array

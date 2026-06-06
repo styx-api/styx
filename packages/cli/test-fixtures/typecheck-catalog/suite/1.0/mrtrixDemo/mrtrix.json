@@ -1,0 +1,135 @@
+{
+  "name": "mrtrix_demo",
+  "synopsis": "Demo MRtrix command exercising the native dump frontend",
+  "requires_at_least_one_argument": true,
+  "author": "Styx tests",
+  "version": "3.0.4",
+  "copyright": "Copyright (c) test",
+  "description": ["A demo command. The -coord option takes a comma-separated list."],
+  "references": ["Ref A", "Ref B"],
+  "examples": [],
+  "arguments": [
+    {
+      "id": "input",
+      "description": "the input image",
+      "type": "image in",
+      "optional": false,
+      "allow_multiple": false
+    },
+    {
+      "id": "output",
+      "description": "the output image",
+      "type": "image out",
+      "optional": false,
+      "allow_multiple": false
+    },
+    {
+      "id": "operand",
+      "description": "one or more operands, each a number or an image",
+      "type": "various",
+      "optional": false,
+      "allow_multiple": true
+    }
+  ],
+  "option_groups": [
+    {
+      "name": "OPTIONS",
+      "options": [
+        {
+          "id": "force",
+          "description": "force overwrite",
+          "optional": true,
+          "allow_multiple": false,
+          "arguments": []
+        },
+        {
+          "id": "scale",
+          "description": "apply a scale factor",
+          "optional": true,
+          "allow_multiple": false,
+          "arguments": [
+            {
+              "id": "value",
+              "description": "",
+              "type": "float",
+              "optional": false,
+              "allow_multiple": false
+            }
+          ]
+        },
+        {
+          "id": "coord",
+          "description": "the coordinates, as a comma-separated list",
+          "optional": true,
+          "allow_multiple": false,
+          "arguments": [
+            {
+              "id": "values",
+              "description": "",
+              "type": "int seq",
+              "optional": false,
+              "allow_multiple": false
+            }
+          ]
+        },
+        {
+          "id": "output",
+          "description": "also export to a side file (id collides with the positional)",
+          "optional": true,
+          "allow_multiple": false,
+          "arguments": [
+            {
+              "id": "file",
+              "description": "",
+              "type": "file out",
+              "optional": false,
+              "allow_multiple": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "__standard_options",
+      "options": [
+        {
+          "id": "config",
+          "description": "temporarily set a config entry",
+          "optional": true,
+          "allow_multiple": true,
+          "arguments": [
+            {
+              "id": "key",
+              "description": "",
+              "type": "text",
+              "optional": false,
+              "allow_multiple": false
+            },
+            {
+              "id": "value",
+              "description": "",
+              "type": "text",
+              "optional": false,
+              "allow_multiple": false
+            }
+          ]
+        },
+        {
+          "id": "nthreads",
+          "description": "number of threads",
+          "optional": true,
+          "allow_multiple": false,
+          "arguments": [
+            {
+              "id": "number",
+              "description": "",
+              "type": "integer",
+              "optional": false,
+              "allow_multiple": false
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

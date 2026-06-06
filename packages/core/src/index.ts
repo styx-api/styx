@@ -1,5 +1,6 @@
 import { ArgdumpParser } from "./frontend/argdump/index.js";
 import { BoutiquesParser } from "./frontend/boutiques/index.js";
+import { MrtrixParser } from "./frontend/mrtrix/index.js";
 import { WorkbenchParser } from "./frontend/workbench/index.js";
 import { detectFormat } from "./frontend/detect-format.js";
 import type { FormatName } from "./frontend/detect-format.js";
@@ -36,6 +37,8 @@ export function compile(
       ? new ArgdumpParser()
       : format === "workbench"
         ? new WorkbenchParser()
-        : new BoutiquesParser();
+        : format === "mrtrix"
+          ? new MrtrixParser()
+          : new BoutiquesParser();
   return parser.parse(source, options.filename);
 }
