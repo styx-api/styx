@@ -18,6 +18,8 @@ export { findDoc } from "./find-doc.js";
 export { findStructNode } from "./find-struct-node.js";
 export type { NipypeNames } from "./nipype/index.js";
 export { generateNipype, NipypeBackend, nipypeNames } from "./nipype/index.js";
+export type { PydraNames } from "./pydra/index.js";
+export { generatePydra, PydraBackend, pydraNames } from "./pydra/index.js";
 export { resolveFieldBinding } from "./resolve-field-binding.js";
 export type { OutputEmitPlan } from "./resolve-output-tokens.js";
 export {
