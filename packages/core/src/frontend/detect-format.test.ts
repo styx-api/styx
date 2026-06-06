@@ -34,6 +34,16 @@ describe("detectFormat", () => {
     expect(detectFormat(source)).toBe("workbench");
   });
 
+  it("detects mrtrix by synopsis + option_groups + arguments", () => {
+    const source = JSON.stringify({
+      name: "5tt2gmwmi",
+      synopsis: "Generate a mask image",
+      arguments: [{ id: "in", type: "image in" }],
+      option_groups: [{ name: "OPTIONS", options: [] }],
+    });
+    expect(detectFormat(source)).toBe("mrtrix");
+  });
+
   it("returns null for invalid JSON", () => {
     expect(detectFormat("not json")).toBeNull();
   });

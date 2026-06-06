@@ -1,0 +1,10 @@
+{
+  "name": "mrtrix_demo",
+  "source": {
+    "type": "mrtrix",
+    "path": "mrtrix.json"
+  },
+  "docs": {
+    "description": "Hand-written MRtrix native-dump descriptor: the only `mrtrix` source-format fixture. Exercises the frontend's output-file args, the `various` str|file union (VariousString/VariousFile), a comma-separated int seq, a repeatable multi-arg option (-config), and a positional/option id collision (`output`) that the frontend disambiguates (output -> output_2) - shapes unique to the MRtrix C++ dump frontend."
+  }
+}

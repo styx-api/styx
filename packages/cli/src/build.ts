@@ -25,6 +25,7 @@ const SUPPORTED_FORMATS: ReadonlySet<string> = new Set<FormatName>([
   "boutiques",
   "argdump",
   "workbench",
+  "mrtrix",
 ]);
 
 export interface BuildOptions {
