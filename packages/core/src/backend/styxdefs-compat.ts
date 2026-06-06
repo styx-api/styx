@@ -14,8 +14,10 @@ export const STYXDEFS_COMPAT = {
 } as const;
 
 /**
- * Extra Python runtime packages the root distribution pulls in (container +
- * graph runners). Left unpinned - styxdefs's floor constrains them transitively
- * via their own inter-package pins.
+ * Extra Python runtime packages the root metapackage pulls in. `styxkit[all]`
+ * provides the cross-backend runner-selection helpers (`use_docker`, `use_auto`,
+ * ...) that the metapackage's `__init__` re-exports, and transitively installs
+ * every container/graph runner backend. Left unpinned - styxkit's own styxdefs
+ * floor constrains the stack.
  */
-export const PYTHON_RUNNER_DEPS = ["styxdocker", "styxsingularity", "styxgraph"] as const;
+export const PYTHON_RUNNER_DEPS = ["styxkit[all]"] as const;
