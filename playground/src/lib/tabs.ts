@@ -3,6 +3,8 @@ import {
   formatSolveResult,
   BoutiquesBackend,
   JsonSchemaBackend,
+  NipypeBackend,
+  PydraBackend,
   PythonBackend,
   TypeScriptBackend,
 } from "@styx-api/core";
@@ -19,6 +21,8 @@ export interface TabDef {
 
 const boutiquesBackend = new BoutiquesBackend();
 const jsonSchemaBackend = new JsonSchemaBackend();
+const nipypeBackend = new NipypeBackend();
+const pydraBackend = new PydraBackend();
 const pythonBackend = new PythonBackend();
 const typescriptBackend = new TypeScriptBackend();
 
@@ -88,6 +92,18 @@ export const tabs: [TabDef, ...TabDef[]] = [
     label: "Python",
     lang: "python" as BundledLanguage,
     compute: (c) => emitWithPackage(pythonBackend, c),
+  },
+  {
+    id: "nipype",
+    label: "Nipype",
+    lang: "python" as BundledLanguage,
+    compute: (c) => emitWithPackage(nipypeBackend, c),
+  },
+  {
+    id: "pydra",
+    label: "Pydra",
+    lang: "python" as BundledLanguage,
+    compute: (c) => emitWithPackage(pydraBackend, c),
   },
   {
     id: "boutiques",
