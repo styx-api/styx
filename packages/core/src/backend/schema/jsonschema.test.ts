@@ -124,6 +124,40 @@ describe("JsonSchema generation", () => {
     expect((props["input1"]?.items as JsonSchema)?.type).toBe("number");
   });
 
+  it("keeps minItems/maxItems for an optional, flagged list (fsl bet -c shape)", () => {
+    // Regression: the list's repeat node is buried under optional(sequence(flag, ...)),
+    // so a naive `node.kind === "repeat"` check used to drop the bounds. The repeat
+    // must be located by descending through the wrappers.
+    const schema = schemaFor(
+      minimalDescriptor({
+        "command-line": "test [CENTER_OF_GRAVITY]",
+        inputs: [
+          minimalInput({
+            id: "center_of_gravity",
+            type: "Number",
+            list: true,
+            optional: true,
+            "command-line-flag": "-c",
+            "value-key": "[CENTER_OF_GRAVITY]",
+            "min-list-entries": 3,
+            "max-list-entries": 3,
+            minimum: 0,
+            maximum: 256,
+          }),
+        ],
+      }),
+    );
+    const props = schema.properties as Record<string, JsonSchema>;
+    expect(props["center_of_gravity"]?.type).toBe("array");
+    expect(props["center_of_gravity"]?.minItems).toBe(3);
+    expect(props["center_of_gravity"]?.maxItems).toBe(3);
+    const items = props["center_of_gravity"]?.items as JsonSchema;
+    expect(items?.type).toBe("number");
+    // Item-level numeric bounds are also recovered now the item node is threaded.
+    expect(items?.minimum).toBe(0);
+    expect(items?.maximum).toBe(256);
+  });
+
   it("maps flag input to boolean", () => {
     const schema = schemaFor(
       minimalDescriptor({
@@ -201,6 +235,73 @@ describe("JsonSchema generation", () => {
     const props = schema.properties as Record<string, JsonSchema>;
     expect(props["input1"]?.enum).toEqual(["a", "b", "c"]);
     expect(props["input1"]?.oneOf).toBeUndefined();
+  });
+
+  it("keeps field constraints inside union struct variants", () => {
+    // Regression: unionSchema rendered each variant with no IR node, so scalar
+    // ranges and list bounds on fields nested inside a struct variant were
+    // dropped. The arm node must be threaded so the variant's fields keep them.
+    const schema = schemaFor(
+      minimalDescriptor({
+        "command-line": "test [SUBCMD]",
+        inputs: [
+          {
+            id: "subcmd",
+            "value-key": "[SUBCMD]",
+            type: [
+              {
+                id: "alpha",
+                "command-line": "alpha [LEVEL] [COORDS]",
+                inputs: [
+                  {
+                    id: "level",
+                    "value-key": "[LEVEL]",
+                    type: "Number",
+                    integer: true,
+                    minimum: 1,
+                    maximum: 10,
+                  },
+                  {
+                    id: "coords",
+                    "value-key": "[COORDS]",
+                    "command-line-flag": "-c",
+                    type: "Number",
+                    list: true,
+                    optional: true,
+                    "min-list-entries": 3,
+                    "max-list-entries": 3,
+                    minimum: 0,
+                    maximum: 255,
+                  },
+                ],
+              },
+              {
+                id: "beta",
+                "command-line": "beta [NAME]",
+                inputs: [{ id: "name", "value-key": "[NAME]", type: "String" }],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const props = schema.properties as Record<string, JsonSchema>;
+    const arms = props["subcmd"]?.oneOf as JsonSchema[];
+    expect(arms).toBeDefined();
+    const alpha = arms.find(
+      (a) => (a.properties as Record<string, JsonSchema>)?.["@type"]?.const === "alpha",
+    );
+    expect(alpha).toBeDefined();
+    const alphaProps = alpha!.properties as Record<string, JsonSchema>;
+    // Bounded scalar field keeps its numeric range.
+    expect(alphaProps["level"]?.minimum).toBe(1);
+    expect(alphaProps["level"]?.maximum).toBe(10);
+    // Optional, flagged, bounded list field keeps both its length and item bounds.
+    expect(alphaProps["coords"]?.minItems).toBe(3);
+    expect(alphaProps["coords"]?.maxItems).toBe(3);
+    const coordItems = alphaProps["coords"]?.items as JsonSchema;
+    expect(coordItems?.minimum).toBe(0);
+    expect(coordItems?.maximum).toBe(255);
   });
 
   it("propagates title and description from node metadata", () => {

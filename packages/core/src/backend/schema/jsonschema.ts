@@ -8,6 +8,7 @@ import { findStructNode } from "../find-struct-node.js";
 import { resolveFieldBinding } from "../resolve-field-binding.js";
 import { Scope } from "../scope.js";
 import { snakeCase } from "../string-case.js";
+import { findAlternativeNode, findRepeatNode } from "../validate-walk.js";
 
 export interface JsonSchema {
   type?: string | string[];
@@ -69,7 +70,11 @@ class SchemaBuilder {
       case "optional":
         return this.fromType(type.inner, node?.kind === "optional" ? node.attrs.node : undefined);
       case "list": {
-        const repeat = node?.kind === "repeat" ? node : undefined;
+        // Descend through any optional/flag-sequence wrappers to the repeat node
+        // (matching the TS/Python backends). A naive `node.kind === "repeat"`
+        // check only matches a bare top-level list and silently drops the bounds
+        // (and item-level scalar ranges) for the common optional/flagged shape.
+        const repeat = findRepeatNode(node);
         const schema: JsonSchema = {
           type: "array",
           items: this.fromType(type.item, repeat?.attrs.node),
@@ -83,7 +88,7 @@ class SchemaBuilder {
       case "struct":
         return this.structSchema(type, node);
       case "union":
-        return this.unionSchema(type);
+        return this.unionSchema(type, node);
     }
   }
 
@@ -167,7 +172,7 @@ class SchemaBuilder {
     return schema;
   }
 
-  private unionSchema(type: Extract<BoundType, { kind: "union" }>): JsonSchema {
+  private unionSchema(type: Extract<BoundType, { kind: "union" }>, node?: Expr): JsonSchema {
     const allLiterals = type.variants.every((v: BoundVariant) => v.type.kind === "literal");
     if (allLiterals) {
       return {
@@ -176,7 +181,32 @@ class SchemaBuilder {
         ),
       };
     }
-    return { oneOf: type.variants.map((v: BoundVariant) => this.fromType(v.type)) };
+    // Thread each arm's IR node so struct-variant fields keep their constraints
+    // (numeric ranges, list bounds). `variants` stays parallel to the IR `alts`
+    // (the solver builds them together), so `alts[i]` is variant `i`'s node.
+    const altNode = findAlternativeNode(node);
+    return {
+      oneOf: type.variants.map((v: BoundVariant, i: number) => {
+        const schema = this.fromType(v.type, altNode?.attrs.alts[i]);
+        // The solver prepends a synthetic `@type` literal to each non-literal
+        // variant, but `structSchema`'s node-driven branch builds properties from
+        // the IR struct's children, which don't include `@type`. Re-add it (first,
+        // required) so each arm still carries its discriminant tag.
+        if (
+          v.type.kind === "struct" &&
+          "@type" in v.type.fields &&
+          schema.properties &&
+          !("@type" in schema.properties)
+        ) {
+          schema.properties = {
+            "@type": this.fromType(v.type.fields["@type"]!),
+            ...schema.properties,
+          };
+          schema.required = ["@type", ...(schema.required ?? [])];
+        }
+        return schema;
+      }),
+    };
   }
 }
 
