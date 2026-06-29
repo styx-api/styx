@@ -547,6 +547,14 @@ export class PythonBackend implements Backend {
     const pkgDirs: string[] = [];
     const warnings: EmitWarning[] = [];
 
+    // The metapackage's importable module doubles as the namespace every suite
+    // nests under (`<project>.<suite>`), so `from <project> import <suite>` and
+    // `<project>.use_docker()` both resolve from one shared `<project>/` package.
+    // Scrub the project name to a valid, non-keyword identifier; with no project
+    // name there is no namespace and suites stay top-level (matching the bare
+    // distribution-name fallback in `pyDistName`).
+    const nsName = proj.name && proj.name.trim() ? pyScrubIdent(proj.name, PY_RESERVED) : undefined;
+
     for (const p of packages) {
       const pkg = p.meta ?? {};
       // Mirror the CLI's `pkgDir` fallback so a nameless package's source dir
@@ -554,27 +562,31 @@ export class PythonBackend implements Backend {
       const dir = pkg.name ?? "package";
       pkgDirs.push(dir);
       distNames.push(pyDistName(proj, pkg));
-      files.set(`${dir}/pyproject.toml`, generateSubPyproject(proj, pkg));
+      // Import package: `<project>.<suite>` so it shares the metapackage's
+      // namespace; setuptools maps the flat suite dir onto this dotted path.
+      const importPkg = nsName ? `${nsName}.${dir}` : dir;
+      files.set(`${dir}/pyproject.toml`, generateSubPyproject(proj, pkg, importPkg));
       files.set(`${dir}/README.md`, generateSubReadme(proj, pkg));
     }
 
-    // The metapackage ships its own importable module: a thin styxkit re-export
-    // so `import <project>; <project>.use_docker()` works (PEP 561 typed). Scrub
-    // the project name to a valid, non-keyword identifier, then dodge any suite
-    // directory so the stub never clobbers a suite's real wrapper module.
-    const rawMod = proj.name && proj.name.trim() ? proj.name : "project";
-    let rootMod = pyScrubIdent(rawMod, PY_RESERVED);
-    if (pkgDirs.includes(rootMod)) {
-      const collided = rootMod;
-      while (pkgDirs.includes(rootMod)) rootMod += "_";
+    // The metapackage ships `<project>/__init__.py` (a thin styxkit re-export so
+    // `<project>.use_docker()` works, PEP 561 typed) into the same `<project>/`
+    // package the suites nest under. Its on-disk source dir must dodge a suite
+    // named after the project (both would write `<project>/`); the import name
+    // stays `<project>` via a `package-dir` remap so the namespace is preserved.
+    const metaImport = nsName ?? "project";
+    let metaDir = metaImport;
+    if (pkgDirs.includes(metaDir)) {
+      const collided = metaDir;
+      while (pkgDirs.includes(metaDir)) metaDir += "_";
       warnings.push({
-        message: `metapackage module "${collided}" collides with a suite directory; emitting as "${rootMod}" instead`,
+        message: `metapackage directory "${collided}" collides with a suite directory; emitting its sources in "${metaDir}" instead (import name stays "${metaImport}")`,
       });
     }
-    files.set(`${rootMod}/__init__.py`, generateRootInitPy());
-    files.set(`${rootMod}/py.typed`, "");
+    files.set(`${metaDir}/__init__.py`, generateRootInitPy());
+    files.set(`${metaDir}/py.typed`, "");
 
-    files.set("pyproject.toml", generateRootPyproject(proj, distNames, rootMod));
+    files.set("pyproject.toml", generateRootPyproject(proj, distNames, metaImport, metaDir));
     files.set("README.md", generateRootReadme(proj, distNames));
     files.set("requirements.txt", generateRequirementsTxt(pkgDirs));
 

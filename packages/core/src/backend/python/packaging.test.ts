@@ -47,10 +47,11 @@ describe("Python emitProject packaging", () => {
     // The project (catalog) version, not fsl's own tool version (6.0.4).
     expect(sub).toContain('version = "1.2.3"');
     expect(sub).not.toContain('version = "6.0.4"');
-    // Flat layout: the suite directory is the importable package.
-    expect(sub).toContain('packages = ["fsl"]');
-    expect(sub).toContain('package-dir = { "fsl" = "." }');
-    expect(sub).toContain('"fsl" = ["py.typed"]');
+    // Flat suite dir mapped onto the dotted `<project>.<suite>` import package so
+    // it nests under the metapackage namespace (`from niwrap import fsl`).
+    expect(sub).toContain('packages = ["niwrap.fsl"]');
+    expect(sub).toContain('package-dir = { "niwrap.fsl" = "." }');
+    expect(sub).toContain('"niwrap.fsl" = ["py.typed"]');
     expect(sub).toContain("setuptools.build_meta");
   });
 
@@ -69,9 +70,12 @@ describe("Python emitProject packaging", () => {
     expect(root).not.toContain('"styxdocker",');
     expect(root).toContain('"niwrap_fsl",');
     expect(root).toContain('"niwrap_ants",');
-    // Metapackage now ships its own importable module (the styxkit re-export).
+    // Metapackage now ships its own importable module (the styxkit re-export),
+    // the `niwrap/` namespace the suites nest into. No package-dir remap needed
+    // when the module name matches its source directory (the common case).
     expect(root).toContain('packages = ["niwrap"]');
     expect(root).toContain('"niwrap" = ["py.typed"]');
+    expect(root).not.toContain("package-dir");
   });
 
   it("emits a root __init__ re-exporting styxkit, plus a py.typed marker", () => {
@@ -92,10 +96,13 @@ describe("Python emitProject packaging", () => {
 });
 
 describe("Python packaging without project metadata", () => {
-  it("falls back to the bare package name as the distribution name", () => {
+  it("falls back to the bare package name as the distribution and import name", () => {
     const out = new PythonBackend().emitProject({}, [emptyPkg({ name: "fsl" })]);
     const sub = out.files.get("fsl/pyproject.toml");
     expect(sub).toContain('name = "fsl"');
+    // No project name => no namespace to nest under => top-level `fsl` import.
+    expect(sub).toContain('packages = ["fsl"]');
+    expect(sub).toContain('package-dir = { "fsl" = "." }');
   });
 
   it("covers a nameless package under the 'package' fallback dir", () => {
@@ -111,13 +118,22 @@ describe("Python metapackage module naming", () => {
     // `import import` is a SyntaxError, so the reserved word must be dodged.
     expect(out.files.has("import_/__init__.py")).toBe(true);
     expect(out.files.get("pyproject.toml")).toContain('packages = ["import_"]');
+    // Suites nest under the scrubbed namespace, not the raw keyword.
+    expect(out.files.get("fsl/pyproject.toml")).toContain('packages = ["import_.fsl"]');
   });
 
-  it("dodges a project module that collides with a suite directory", () => {
+  it("dodges the metapackage source dir when a suite is named after the project", () => {
     const out = new PythonBackend().emitProject({ name: "fsl" }, [emptyPkg({ name: "fsl" })]);
-    // The styxkit-re-export stub must not clobber the suite's real fsl/ module.
+    // Both want `fsl/` on disk: the suite's wrapper module and the metapackage's
+    // styxkit re-export. The metapackage source dir dodges to `fsl_/`...
     expect(out.files.has("fsl_/__init__.py")).toBe(true);
     expect(out.files.has("fsl/__init__.py")).toBe(false);
+    // ...but its import name stays `fsl` (via a package-dir remap) so it still
+    // shares the `fsl/` namespace the suite nests into at install time.
+    const root = out.files.get("pyproject.toml")!;
+    expect(root).toContain('packages = ["fsl"]');
+    expect(root).toContain('package-dir = { "fsl" = "fsl_" }');
+    expect(out.files.get("fsl/pyproject.toml")).toContain('packages = ["fsl.fsl"]');
     expect(out.warnings.some((w) => w.message.includes("collides"))).toBe(true);
   });
 });

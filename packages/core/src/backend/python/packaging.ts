@@ -72,17 +72,23 @@ function licenseField(proj: ProjectMeta): string {
 }
 
 /**
- * Per-suite `pyproject.toml`. The flat layout (`python/<pkg>/bet.py`) makes the
- * directory itself the importable package, so setuptools' `package-dir` maps the
- * import name (`<pkg>`) onto the distribution's root directory. The styxdefs
+ * Per-suite `pyproject.toml`. The suite source stays in a flat directory
+ * (`python/<pkg>/bet.py`), but setuptools' `package-dir` maps that directory onto
+ * the dotted import package `<project>.<pkg>`, so every suite nests under the
+ * metapackage's `<project>/` namespace. That restores `from <project> import
+ * <pkg>` while keeping each suite a separately-installable distribution (and
+ * leaves no top-level `<pkg>` polluting the global namespace). With no project
+ * name the import name is the bare `<pkg>` (top-level fallback). The styxdefs
  * floor is the only runtime dependency.
  *
- * Precondition: `pkg.name` must be a valid Python identifier - the flat layout's
- * relative imports (`from .bet import *`) already require this, and the CLI uses
- * it verbatim as the directory name, so this stays consistent with that.
+ * Precondition: `importName` is a valid (possibly dotted) Python package path -
+ * the caller scrubs the project + package names into identifiers accordingly.
  */
-export function generateSubPyproject(proj: ProjectMeta, pkg: PackageMeta): string {
-  const importName = pkgDir(pkg);
+export function generateSubPyproject(
+  proj: ProjectMeta,
+  pkg: PackageMeta,
+  importName: string,
+): string {
   const cb = new CodeBuilder("  ");
   cb.line("[project]");
   cb.line(`name = "${tomlStr(pyDistName(proj, pkg))}"`);
@@ -135,12 +141,18 @@ export function generateRootInitPy(): string {
  * Root `pyproject.toml`: a metapackage depending on `styxkit[all]` (the runner
  * stack it re-exports) plus each per-suite distribution. `packages` lists only
  * the metapackage's own module so setuptools ships the styxkit re-export without
- * sweeping the sibling suite directories into this distribution.
+ * sweeping the sibling suite directories into this distribution. The module is
+ * the `<project>/` namespace package the suites nest into, so installing the
+ * metapackage makes `<project>.use_docker()` reachable alongside the suites'
+ * `from <project> import <pkg>`. `moduleDir` is the on-disk source directory; it
+ * differs from the import `moduleName` only when a suite is named after the
+ * project, in which case a `package-dir` remap keeps the import name intact.
  */
 export function generateRootPyproject(
   proj: ProjectMeta,
   distNames: string[],
   moduleName: string,
+  moduleDir: string,
 ): string {
   const cb = new CodeBuilder("  ");
   cb.line("[project]");
@@ -158,6 +170,9 @@ export function generateRootPyproject(
   cb.blank();
   cb.line("[tool.setuptools]");
   cb.line(`packages = ["${moduleName}"]`);
+  if (moduleDir !== moduleName) {
+    cb.line(`package-dir = { "${moduleName}" = "${moduleDir}" }`);
+  }
   cb.blank();
   cb.line("[tool.setuptools.package-data]");
   cb.line(`"${moduleName}" = ["py.typed"]`);
