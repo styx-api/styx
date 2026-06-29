@@ -68,8 +68,11 @@ describe("Python emitProject packaging", () => {
     // The runner stack now arrives via styxkit[all], not three separate deps.
     expect(root).toContain('"styxkit[all]",');
     expect(root).not.toContain('"styxdocker",');
-    expect(root).toContain('"niwrap_fsl",');
-    expect(root).toContain('"niwrap_ants",');
+    // Suites pinned to the exact project version (lockstep), not bare names, so a
+    // mid-propagation install can't mix a new metapackage with an old suite.
+    expect(root).toContain('"niwrap_fsl==1.2.3",');
+    expect(root).toContain('"niwrap_ants==1.2.3",');
+    expect(root).not.toContain('"niwrap_fsl",');
     // Metapackage now ships its own importable module (the styxkit re-export),
     // the `niwrap/` namespace the suites nest into. No package-dir remap needed
     // when the module name matches its source directory (the common case).
