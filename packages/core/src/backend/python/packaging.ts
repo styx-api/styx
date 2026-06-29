@@ -139,14 +139,22 @@ export function generateRootInitPy(): string {
 
 /**
  * Root `pyproject.toml`: a metapackage depending on `styxkit[all]` (the runner
- * stack it re-exports) plus each per-suite distribution. `packages` lists only
- * the metapackage's own module so setuptools ships the styxkit re-export without
- * sweeping the sibling suite directories into this distribution. The module is
- * the `<project>/` namespace package the suites nest into, so installing the
- * metapackage makes `<project>.use_docker()` reachable alongside the suites'
- * `from <project> import <pkg>`. `moduleDir` is the on-disk source directory; it
- * differs from the import `moduleName` only when a suite is named after the
- * project, in which case a `package-dir` remap keeps the import name intact.
+ * stack it re-exports) plus each per-suite distribution, pinned to this exact
+ * project version (`niwrap_fsl==1.2.3`). The suites all ride the project version
+ * and ship in lockstep, so an exact pin keeps `pip install niwrap==X` consistent:
+ * during the post-release index-propagation window (or any momentary registry
+ * inconsistency) pip errors cleanly instead of silently grafting an older suite
+ * whose layout no longer matches the metapackage. Mirrors the way the CLI pins
+ * `@styx-api/core` exactly.
+ *
+ * `packages` lists only the metapackage's own module so setuptools ships the
+ * styxkit re-export without sweeping the sibling suite directories into this
+ * distribution. The module is the `<project>/` namespace package the suites nest
+ * into, so installing the metapackage makes `<project>.use_docker()` reachable
+ * alongside the suites' `from <project> import <pkg>`. `moduleDir` is the on-disk
+ * source directory; it differs from the import `moduleName` only when a suite is
+ * named after the project, in which case a `package-dir` remap keeps the import
+ * name intact.
  */
 export function generateRootPyproject(
   proj: ProjectMeta,
@@ -165,7 +173,10 @@ export function generateRootPyproject(
   cb.line(`requires-python = "${REQUIRES_PYTHON}"`);
   cb.line("dependencies = [");
   for (const dep of PYTHON_RUNNER_DEPS) cb.line(`  "${dep}",`);
-  for (const dist of distNames) cb.line(`  "${tomlStr(dist)}",`);
+  // Pin each suite to the exact project version (they ship in lockstep) so a
+  // mid-propagation install can't mix a new metapackage with an old suite.
+  const suitePin = tomlStr(proj.version ?? "0.0.0");
+  for (const dist of distNames) cb.line(`  "${tomlStr(dist)}==${suitePin}",`);
   cb.line("]");
   cb.blank();
   cb.line("[tool.setuptools]");
