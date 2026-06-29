@@ -50,8 +50,14 @@ export function emitMetadata(ctx: CodegenContext, metaConst: string, cb: CodeBui
     if (ctx.app?.doc?.literature?.length) {
       cb.line(`citations=[${ctx.app.doc.literature.map(pyStr).join(", ")}],`);
     }
-    if (ctx.app?.container?.image) {
-      cb.line(`container_image_tag=${pyStr(ctx.app.container.image)},`);
+    // The package/version-level container is authoritative: niwrap curates one
+    // container per tool version (version.json) and applies it to every app, so
+    // it overrides a descriptor's incidental inline container-image. The inline
+    // image is only a fallback for a standalone single-descriptor build that has
+    // no package context.
+    const containerImage = ctx.package?.docker ?? ctx.app?.container?.image;
+    if (containerImage) {
+      cb.line(`container_image_tag=${pyStr(containerImage)},`);
     }
   });
   cb.line(")");

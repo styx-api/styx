@@ -1,7 +1,7 @@
 import ts from "typescript";
 import type { AppMeta, Expr } from "../../ir/index.js";
 import { alt, float, int, lit, opt, path, rep, repJoin, seq, seqJoin } from "../../ir/index.js";
-import type { CodegenContext } from "../../manifest/index.js";
+import type { CodegenContext, PackageMeta } from "../../manifest/index.js";
 import { resolveOutputs, solve } from "../../solver/index.js";
 import { createContext } from "../../manifest/context.js";
 import { computePublicNames, generateTypeScript } from "./typescript.js";
@@ -24,16 +24,13 @@ export function namedAlt(name: string, ...alts: Expr[]): Expr {
 // -- Generate helpers --
 
 /** Generate the single-file TypeScript source for an expression. */
-export function generate(
-  expr: Expr,
-  options?: { app?: AppMeta; package?: { name?: string } },
-): string {
+export function generate(expr: Expr, options?: { app?: AppMeta; package?: PackageMeta }): string {
   return generateTypeScript(generateCtx(expr, options));
 }
 
 export function generateCtx(
   expr: Expr,
-  options?: { app?: AppMeta; package?: { name?: string } },
+  options?: { app?: AppMeta; package?: PackageMeta },
 ): CodegenContext {
   const solveResult = solve(expr);
   const outputs = resolveOutputs(expr, solveResult);
@@ -119,7 +116,7 @@ export function executeExport(ctx: CodegenContext): string {
 export function execute(
   expr: Expr,
   params: Record<string, unknown>,
-  options?: { app?: AppMeta; package?: { name?: string } },
+  options?: { app?: AppMeta; package?: PackageMeta },
 ): string[] {
   const ctx = generateCtx(expr, options);
   return runGenerated(generateTypeScript(ctx), params, executeExport(ctx)).args;
@@ -128,7 +125,7 @@ export function execute(
 export function executeWithOutputs(
   expr: Expr,
   params: Record<string, unknown>,
-  options?: { app?: AppMeta; package?: { name?: string } },
+  options?: { app?: AppMeta; package?: PackageMeta },
 ): RunResult {
   const ctx = generateCtx(expr, options);
   return runGenerated(generateTypeScript(ctx), params, executeExport(ctx));

@@ -1,6 +1,6 @@
 import type { AppMeta, Expr } from "../../ir/index.js";
 import { alt, float, int, lit, opt, path, rep, repJoin, seq, seqJoin } from "../../ir/index.js";
-import type { CodegenContext } from "../../manifest/index.js";
+import type { CodegenContext, PackageMeta } from "../../manifest/index.js";
 import { createContext } from "../../manifest/context.js";
 import { resolveOutputs, solve } from "../../solver/index.js";
 import { generatePython } from "./python.js";
@@ -19,16 +19,13 @@ export function namedAlt(name: string, ...alts: Expr[]): Expr {
 }
 
 /** Generate the single-file Python source for an expression. */
-export function generate(
-  expr: Expr,
-  options?: { app?: AppMeta; package?: { name?: string } },
-): string {
+export function generate(expr: Expr, options?: { app?: AppMeta; package?: PackageMeta }): string {
   return generatePython(generateCtx(expr, options));
 }
 
 export function generateCtx(
   expr: Expr,
-  options?: { app?: AppMeta; package?: { name?: string } },
+  options?: { app?: AppMeta; package?: PackageMeta },
 ): CodegenContext {
   const solveResult = solve(expr);
   const outputs = resolveOutputs(expr, solveResult);

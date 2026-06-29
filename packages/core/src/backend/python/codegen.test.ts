@@ -43,6 +43,30 @@ describe("Python generation - structure", () => {
     expect(code).toContain('package="fsl"');
   });
 
+  it("uses the package/version container as the tool's image", () => {
+    const code = generate(seq(lit("bet")), {
+      app: { id: "bet" },
+      package: { name: "fsl", docker: "brainlife/fsl:6.0.4-patched2" },
+    });
+    expect(code).toContain('container_image_tag="brainlife/fsl:6.0.4-patched2"');
+  });
+
+  it("lets the package/version container override a descriptor's inline image", () => {
+    const code = generate(seq(lit("bet")), {
+      app: { id: "bet", container: { image: "incidental/bet:1.0" } },
+      package: { name: "fsl", docker: "brainlife/fsl:6.0.4-patched2" },
+    });
+    expect(code).toContain('container_image_tag="brainlife/fsl:6.0.4-patched2"');
+    expect(code).not.toContain("incidental/bet");
+  });
+
+  it("falls back to a descriptor's inline container-image with no package context", () => {
+    const code = generate(seq(lit("bet")), {
+      app: { id: "bet", container: { image: "standalone/bet:1.0" } },
+    });
+    expect(code).toContain('container_image_tag="standalone/bet:1.0"');
+  });
+
   it("emits wrapper function with tool-prefixed name", () => {
     const code = generate(seq(lit("tool"), str("input")), {
       app: { id: "my-tool" },
