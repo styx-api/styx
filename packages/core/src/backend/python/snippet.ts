@@ -3,6 +3,8 @@ import type { CodegenContext } from "../../manifest/index.js";
 import type { SigEntry } from "../sig-entries.js";
 import type { SnippetDialect, SnippetOptions } from "../snippet-core.js";
 import { renderValue } from "../snippet-core.js";
+import { structKey } from "../type-keys.js";
+import type { PyEmitModel } from "./python.js";
 import { buildEmitModel } from "./python.js";
 import { pyStr } from "./typemap.js";
 
@@ -17,6 +19,49 @@ const pyDialect: SnippetDialect = {
 };
 
 /**
+ * Build a Python dialect that renders nested structs as `_params` factory calls
+ * (matching the generated code's per-struct builders) rather than plain dicts.
+ * Each factory is looked up by the struct's structural key; field values use the
+ * factory's scrubbed host kwarg names (from the same `buildSigEntries` the
+ * generated factory is built from), and the function name is package-qualified
+ * so the call resolves through `from <root> import <pkg>`. A struct with no
+ * registered factory (shouldn't happen for well-formed nested types) falls back
+ * to the plain dict literal.
+ */
+function pyDialectWithFactories(model: PyEmitModel, pkg: string | undefined): SnippetDialect {
+  // Keyed only by the NESTED factories - the root struct is intentionally
+  // absent (it has no entry in `model.nestedFactories`), so a struct that is
+  // structurally identical to the root falls through to the plain dict literal
+  // rather than a factory call. That case is rare (requires no `@type`
+  // injection) and harmless; this is not a missed registration.
+  const byKey = new Map<string, { call: string; nameByWire: Map<string, string> }>();
+  for (const f of model.nestedFactories) {
+    byKey.set(f.structKey, {
+      call: pkg ? `${pkg}.${f.funcName}` : f.funcName,
+      nameByWire: new Map(f.sigEntries.map((e) => [e.wireKey, e.name])),
+    });
+  }
+  return {
+    ...pyDialect,
+    structConstructor(type, value, indent, d) {
+      const entry = byKey.get(structKey(type));
+      if (!entry) return undefined;
+      const inner = indent + d.indentUnit;
+      const lines: string[] = [];
+      for (const [wireKey, fieldType] of Object.entries(type.fields)) {
+        if (wireKey === "@type") continue; // injected by the factory
+        if (fieldType.kind === "literal") continue; // no runtime representation
+        if (!(wireKey in value)) continue; // omitted optional / absent field
+        const name = entry.nameByWire.get(wireKey) ?? wireKey;
+        lines.push(`${inner}${name}=${renderValue(value[wireKey], fieldType, inner, d)},`);
+      }
+      if (lines.length === 0) return `${entry.call}()`;
+      return `${entry.call}(\n${lines.join("\n")}\n${indent})`;
+    },
+  };
+}
+
+/**
  * Render a Python call snippet for one tool from a config object (the params
  * dict the form produces, keyed by Boutiques wire names).
  *
@@ -25,8 +70,9 @@ const pyDialect: SnippetDialect = {
  * *scrubbed host* identifiers (`float` -> `float_`), not the wire keys; the
  * per-field mapping comes from the same `buildSigEntries` the generated wrapper
  * is built from, so the snippet matches the real signature. Nested structs /
- * union variants / lists-of-structs have no constructor in the generated code,
- * so they render as plain dict literals keyed by wire names.
+ * union variants / lists-of-structs render as calls to their generated
+ * `_params` factory (`fsl.bet_x_params(...)`), matching the per-struct builders
+ * the Python backend emits.
  *
  * Union- (or otherwise non-struct-) rooted tools have no kwarg wrapper; the
  * single dict-style `<tool>` entry is called with one object-literal argument.
@@ -51,11 +97,12 @@ export function renderPythonCall(
   const model = buildEmitModel(ctx);
   const pkg = ctx.package?.name;
   const callee = pkg ? `${pkg}.${model.names.wrapper}` : model.names.wrapper;
+  const dialect = pyDialectWithFactories(model, pkg);
 
   const call =
     model.rootIsStruct && model.rootType.kind === "struct"
-      ? renderKwargCall(callee, model.sigEntries, model.rootType, config)
-      : `${callee}(${renderValue(config, model.rootType, "", pyDialect)})`;
+      ? renderKwargCall(callee, model.sigEntries, model.rootType, config, dialect)
+      : `${callee}(${renderValue(config, model.rootType, "", dialect)})`;
 
   if (opts.includeImport === false || !pkg) return call;
   const root = opts.packageRoot ?? ctx.project?.name;
@@ -69,15 +116,16 @@ function renderKwargCall(
   sigEntries: readonly SigEntry[],
   rootType: Extract<BoundType, { kind: "struct" }>,
   config: Record<string, unknown>,
+  dialect: SnippetDialect,
 ): string {
   const nameFor = new Map(sigEntries.map((e) => [e.wireKey, e.name]));
-  const indent = pyDialect.indentUnit;
+  const indent = dialect.indentUnit;
   const lines: string[] = [];
   for (const [wireKey, fieldType] of Object.entries(rootType.fields)) {
     if (fieldType.kind === "literal") continue; // @type / consts injected by the wrapper
     if (!(wireKey in config)) continue;
     const name = nameFor.get(wireKey) ?? wireKey;
-    lines.push(`${indent}${name}=${renderValue(config[wireKey], fieldType, indent, pyDialect)},`);
+    lines.push(`${indent}${name}=${renderValue(config[wireKey], fieldType, indent, dialect)},`);
   }
   if (lines.length === 0) return `${callee}()`;
   return `${callee}(\n${lines.join("\n")}\n)`;
