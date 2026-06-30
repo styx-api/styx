@@ -93,7 +93,7 @@ describe("renderPythonCall - host-name scrubbing", () => {
 });
 
 describe("renderPythonCall - nested / union / list", () => {
-  it("renders a nested struct as a dict literal keyed by wire names", () => {
+  it("renders a nested struct via its generated _params factory", () => {
     const ctx = generateCtx(
       seq(lit("t"), opt(seq(lit("--bounds"), int("min"), int("max")), { name: "bounds" })),
       { app: { id: "t" }, package: { name: "p" } },
@@ -104,11 +104,18 @@ describe("renderPythonCall - nested / union / list", () => {
       { includeImport: false },
     );
     expect(code).toBe(
-      ["p.t(", "    bounds={", '        "min": 1,', '        "max": 10,', "    },", ")"].join("\n"),
+      [
+        "p.t(",
+        "    bounds=p.t_bounds_params(",
+        "        min=1,",
+        "        max=10,",
+        "    ),",
+        ")",
+      ].join("\n"),
     );
   });
 
-  it("renders a discriminated union variant as a dict literal with its @type", () => {
+  it("renders a discriminated union variant as its variant _params factory call", () => {
     const ctx = generateCtx(
       seq(
         lit("t"),
@@ -121,12 +128,14 @@ describe("renderPythonCall - nested / union / list", () => {
       { "@type": "p/t", source: { "@type": "variant_0", file: "/data/x" } },
       { includeImport: false },
     );
-    expect(code).toContain("source={");
-    expect(code).toContain('"@type": "variant_0",');
-    expect(code).toContain('"file": "/data/x",');
+    // The factory injects `@type`, so the snippet picks the matching variant
+    // factory and passes only the user-facing fields.
+    expect(code).toContain("source=p.t_variant0_params(");
+    expect(code).toContain('file="/data/x",');
+    expect(code).not.toContain('"@type"');
   });
 
-  it("renders a list of structs, one object literal per element", () => {
+  it("renders a list of structs as one factory call per element", () => {
     const ctx = generateCtx(seq(lit("t"), rep(seq(str("name"), int("value")), "items")), {
       app: { id: "t" },
       package: { name: "p" },
@@ -146,14 +155,14 @@ describe("renderPythonCall - nested / union / list", () => {
       [
         "p.t(",
         "    items=[",
-        "        {",
-        '            "name": "a",',
-        '            "value": 1,',
-        "        },",
-        "        {",
-        '            "name": "b",',
-        '            "value": 2,',
-        "        },",
+        "        p.t_items_params(",
+        '            name="a",',
+        "            value=1,",
+        "        ),",
+        "        p.t_items_params(",
+        '            name="b",',
+        "            value=2,",
+        "        ),",
         "    ],",
         ")",
       ].join("\n"),
@@ -195,8 +204,9 @@ describe("renderPythonCall - nested / union / list", () => {
 });
 
 describe("renderPythonCall - union root", () => {
-  it("calls the dict-style wrapper with a single object-literal argument", () => {
-    // A root-level alternative solves to a union root (no kwarg wrapper).
+  it("calls the dict-style wrapper with the matching variant _params factory", () => {
+    // A root-level alternative solves to a union root (no kwarg wrapper). The
+    // variant struct still gets a factory, so the snippet passes that call.
     const ctx = generateCtx(alt(seq(lit("a"), str("x")), seq(lit("b"), str("y"))), {
       app: { id: "t" },
       package: { name: "p" },
@@ -206,7 +216,7 @@ describe("renderPythonCall - union root", () => {
       { "@type": "variant_0", x: "hello" },
       { includeImport: false },
     );
-    expect(code).toBe(["p.t({", '    "@type": "variant_0",', '    "x": "hello",', "})"].join("\n"));
+    expect(code).toBe(["p.t(p.t_variant0_params(", '    x="hello",', "))"].join("\n"));
   });
 });
 

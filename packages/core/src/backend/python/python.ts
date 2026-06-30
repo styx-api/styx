@@ -166,6 +166,28 @@ export function computePublicNames(appId: string | undefined): PublicNames {
 }
 
 /**
+ * A kwarg `_params` builder for one nested (non-root) struct - a union variant
+ * or a plain nested sub-struct. Lets callers write
+ * `output=tool_corrected_output_params(...)` instead of hand-authoring a
+ * `{"@type": ...}` dict. The root struct's factory is `names.paramsFn`; this
+ * covers everything below it.
+ */
+export interface NestedFactory {
+  /** The struct's TypedDict name (factory return + `params` annotation type). */
+  typeName: string;
+  /** Structural identity key of the struct - used by the snippet renderer to
+   * route a nested struct value to its factory. */
+  structKey: string;
+  /** Registered factory function name (e.g. `tool_corrected_output_params`). */
+  funcName: string;
+  /** The struct's `@type` discriminator, injected by the factory; undefined for
+   * a plain sub-struct that carries no discriminator. */
+  typeTag: string | undefined;
+  /** Per-field signature entries (shared with the snippet renderer). */
+  sigEntries: SigEntry[];
+}
+
+/**
  * The fully-derived naming/typing model for one tool's Python emission. Computed
  * once by `buildEmitModel` so the file emitter and the call-site snippet renderer
  * share the exact same public names, scrubbed kwarg names, and root typing - the
@@ -192,6 +214,7 @@ export interface PyEmitModel {
   rootTypeTag: string | undefined;
   paramsType: string;
   sigEntries: SigEntry[];
+  nestedFactories: NestedFactory[];
 }
 
 /**
@@ -257,22 +280,87 @@ export function buildEmitModel(
       ? names.params
       : mapType(rootType, resolveTypeName(namedTypes));
 
+  // Host kwarg names are snake_cased so a tool's signature reads idiomatically
+  // (`corrected_output_file_name=`) regardless of how the descriptor authored
+  // the wire id (camelCase Boutiques sub-ids, etc.); the dict key keeps the
+  // original wire name, so this divergence is the same one as `float` ->
+  // `float_`. Scrubbed for validity / reserved words, then deduped through the
+  // function scope. Shared by the root wrapper and every nested factory so they
+  // stay in lockstep.
+  const hostName = (childScope: Scope, wireKey: string): string =>
+    childScope.add(pyScrubIdent(snakeCase(wireKey), PY_RESERVED));
+
   // Build the per-field SigEntry list once - the factory and kwarg wrapper
   // both consume it, so the host names registered here must satisfy both
   // function scopes. Pre-reserve `params` (factory + wrapper body) and
   // `runner` (wrapper signature) so a wire key matching either gets
   // suffix-bumped. `rootType` is narrowed by `rootIsStruct` for the `Extract`
   // constraint.
+  const resolve = resolveTypeName(namedTypes);
   const sigScope = scope.child(["params", "runner"]);
   const sigEntries =
     rootIsStruct && rootType.kind === "struct"
       ? buildSigEntries(
           rootType,
           collectFieldInfo(ctx, rootType),
-          (wireKey) => sigScope.add(pyScrubIdent(wireKey, PY_RESERVED)),
-          pySigOptions(resolveTypeName(namedTypes)),
+          (wireKey) => hostName(sigScope, wireKey),
+          pySigOptions(resolve),
         )
       : [];
+
+  // Nested-struct factories: every non-root struct (union variants and plain
+  // nested sub-structs, all already collected into `typeDecls`) gets a kwarg
+  // `_params` builder so callers don't have to hand-author `{"@type": ...}`
+  // dicts. Unions are bare type aliases (the caller picks a variant), so only
+  // struct decls get a factory. The factory name is derived from the
+  // (already tool-prefixed, unique) TypedDict name and registered in the shared
+  // scope so it stays unique across the suite's flat `from .x import *`.
+  //
+  // Why this is Python-only (the TypeScript backend keeps nested objects as
+  // inline literals): a nested object literal is idiomatic, well-typed API
+  // design in TypeScript, but in Python it reads as an untyped dict blob.
+  // niwrap's Python audience has used the factory-builder pattern since v1
+  // (`tool_sub_params(...)`), so emitting these factories restores the
+  // convention downstream users expect rather than forcing raw tagged dicts.
+  // The two backends deliberately diverge here; see `structConstructor` in
+  // snippet-core for the matching seam on the snippet side.
+  const rootStructKey =
+    rootIsStruct && rootType.kind === "struct" ? structKey(rootType) : undefined;
+  const nestedFactories: NestedFactory[] = [];
+  for (const decl of typeDecls) {
+    if (decl.type.kind !== "struct") continue;
+    const sKey = structKey(decl.type);
+    if (sKey === rootStructKey) continue; // root already has its `_params` factory
+    const funcName = scope.add(pyScrubIdent(snakeCase(decl.name) + "_params", PY_RESERVED));
+    // Union variants carry their discriminator as a required `@type` literal
+    // field; the factory injects it. A plain nested sub-struct has none.
+    //
+    // The `string` narrowing is total in practice, not a silent drop: the
+    // solver always builds `@type` from a variant's string `name`, so the
+    // literal value is invariably a string. (If a numeric `@type` ever slipped
+    // through, `emitStructTypedDict` would still emit it as a required
+    // `Literal[<n>]` field, so the un-injected dict would fail the mypy --strict
+    // codegen gate rather than miscompile silently.)
+    const atType = decl.type.fields["@type"];
+    const typeTag =
+      atType && atType.kind === "literal" && typeof atType.value === "string"
+        ? atType.value
+        : undefined;
+    const factoryScope = scope.child(["params"]);
+    const factorySig = buildSigEntries(
+      decl.type,
+      collectFieldInfo(ctx, decl.type),
+      (wireKey) => hostName(factoryScope, wireKey),
+      pySigOptions(resolve),
+    );
+    nestedFactories.push({
+      typeName: decl.name,
+      structKey: sKey,
+      funcName,
+      typeTag,
+      sigEntries: factorySig,
+    });
+  }
 
   return {
     appId,
@@ -285,6 +373,7 @@ export function buildEmitModel(
     rootTypeTag,
     paramsType,
     sigEntries,
+    nestedFactories,
   };
 }
 
@@ -303,6 +392,7 @@ export function generatePython(ctx: CodegenContext, packageScope?: Scope): strin
     rootTypeTag,
     paramsType,
     sigEntries,
+    nestedFactories,
   } = buildEmitModel(ctx, scope);
 
   // Auto-generated header.
@@ -338,6 +428,15 @@ export function generatePython(ctx: CodegenContext, packageScope?: Scope): strin
   // executing.
   if (rootIsStruct) {
     emitParamsFactory(sigEntries, names.paramsFn, paramsType, rootTypeTag, cb);
+    cb.blank();
+  }
+
+  // Nested-struct factories: one kwarg `_params` builder per union variant /
+  // nested sub-struct, so callers can write `output=tool_x_params(...)` instead
+  // of a hand-authored `{"@type": ...}` dict. Their TypedDicts are already
+  // declared above (emitTypeDeclarations), so the eager annotations resolve.
+  for (const nf of nestedFactories) {
+    emitParamsFactory(nf.sigEntries, nf.funcName, nf.typeName, nf.typeTag, cb);
     cb.blank();
   }
 
@@ -403,6 +502,7 @@ export function generatePython(ctx: CodegenContext, packageScope?: Scope): strin
     names.cargs,
     ...(emitOutputs ? [names.outputsFn] : []),
     ...(rootIsStruct ? [names.paramsFn, names.execute] : []),
+    ...nestedFactories.map((nf) => nf.funcName),
     names.validate,
     names.wrapper,
   ];

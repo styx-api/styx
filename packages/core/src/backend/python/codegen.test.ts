@@ -499,6 +499,93 @@ describe("Python generation - discriminated unions", () => {
   });
 });
 
+describe("Python generation - nested-struct factories", () => {
+  it("emits a `_params` factory for each union variant struct", () => {
+    const code = generate(
+      seq(
+        lit("t"),
+        namedAlt("source", seq(lit("--file"), path("file")), seq(lit("--url"), str("url"))),
+      ),
+      { app: { id: "t" }, package: { name: "p" } },
+    );
+    // One factory per struct variant, returning the variant's TypedDict and
+    // injecting its `@type` discriminator.
+    expect(code).toMatch(/def t_variant0_params\(\s*file: InputPathType,\s*\) -> TVariant0:/);
+    expect(code).toContain('"@type": "variant_0",');
+    expect(code).toMatch(/def t_variant1_params\(\s*url: str,\s*\) -> TVariant1:/);
+    expect(code).toContain('"@type": "variant_1",');
+  });
+
+  it("emits a `_params` factory for a plain nested sub-struct (no @type)", () => {
+    const code = generate(
+      seq(lit("t"), opt(seq(lit("--bounds"), int("min"), int("max")), { name: "bounds" })),
+      { app: { id: "t" }, package: { name: "p" } },
+    );
+    expect(code).toMatch(/def t_bounds_params\(/);
+    expect(code).toContain("-> TBounds:");
+  });
+
+  it("exports the nested factories in __all__", () => {
+    const code = generate(
+      seq(
+        lit("t"),
+        namedAlt("source", seq(lit("--file"), path("file")), seq(lit("--url"), str("url"))),
+      ),
+      { app: { id: "t" }, package: { name: "p" } },
+    );
+    const allBlock = code.match(/__all__ = \[([\s\S]*?)\]/)?.[1] ?? "";
+    expect(allBlock).toContain('"t_variant0_params"');
+    expect(allBlock).toContain('"t_variant1_params"');
+  });
+
+  it("declares each factory's TypedDict before the factory (eager annotations)", () => {
+    const code = generate(
+      seq(lit("t"), opt(seq(lit("--bounds"), int("min"), int("max")), { name: "bounds" })),
+      { app: { id: "t" }, package: { name: "p" } },
+    );
+    const declIdx = code.search(
+      /^(?:class TBounds\(typing\.TypedDict|TBounds = typing\.TypedDict)/m,
+    );
+    const fnIdx = code.indexOf("def t_bounds_params(");
+    expect(declIdx).toBeGreaterThanOrEqual(0);
+    expect(fnIdx).toBeGreaterThan(declIdx);
+  });
+
+  it("snake_cases camelCase wire keys into kwargs while keeping the wire dict key", () => {
+    // The headline ergonomic: a camelCase Boutiques sub-id becomes a snake_case
+    // kwarg, but the dict it builds still keys off the original wire name.
+    const code = generate(
+      seq(
+        lit("t"),
+        opt(seq(lit("--out"), str("correctedOutputFileName"), str("noiseFile")), {
+          name: "output",
+        }),
+      ),
+      { app: { id: "t" }, package: { name: "p" } },
+    );
+    expect(code).toContain("def t_output_params(");
+    expect(code).toMatch(/corrected_output_file_name: str/);
+    expect(code).toMatch(/noise_file: str/);
+    // Dict key preserves the wire name (this is the host-name/wire-key split).
+    expect(code).toContain('"correctedOutputFileName": corrected_output_file_name');
+    expect(code).toContain('"noiseFile": noise_file');
+  });
+
+  it("dedupes wire keys that snake_case-collide, consistently between kwarg and dict key", () => {
+    // `fooBar` and `foo_bar` both snake to `foo_bar`; the second is suffix-bumped
+    // to `foo_bar_2`. Each dict assignment must still target its own wire key, so
+    // the host-name divergence stays internally consistent.
+    const code = generate(
+      seq(lit("t"), opt(seq(lit("--c"), str("fooBar"), str("foo_bar")), { name: "coll" })),
+      { app: { id: "t" }, package: { name: "p" } },
+    );
+    expect(code).toMatch(/foo_bar: str/);
+    expect(code).toMatch(/foo_bar_2: str/);
+    expect(code).toContain('"fooBar": foo_bar');
+    expect(code).toContain('"foo_bar": foo_bar_2');
+  });
+});
+
 describe("Python generation - public names / __all__", () => {
   it("emits tool-prefixed public names directly in the tool file", () => {
     const code = generate(seq(lit("bet"), str("input")), { app: { id: "bet" } });

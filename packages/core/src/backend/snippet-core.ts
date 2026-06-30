@@ -19,6 +19,24 @@ export interface SnippetDialect {
   null: string;
   /** Render an object-literal key from a wire key, quoting when not a bare identifier. */
   objKey(wireKey: string): string;
+  /**
+   * Optional: render a nested struct as a constructor/factory call instead of a
+   * plain object literal. A backend that generates per-struct builders (Python's
+   * `tool_x_params(...)`) supplies this; one that doesn't (TypeScript) leaves it
+   * unset and gets the object-literal form. Return `undefined` to fall back to
+   * the object literal for this particular struct (e.g. no matching factory).
+   *
+   * The Python/TypeScript divergence is deliberate: nested object literals are
+   * idiomatic in TypeScript, whereas Python's niwrap audience expects the
+   * factory-builder pattern (`tool_sub_params(...)`) it has used since v1. See
+   * the nested-factory block in `python.ts` for the full rationale.
+   */
+  structConstructor?(
+    type: Extract<BoundType, { kind: "struct" }>,
+    value: Record<string, unknown>,
+    indent: string,
+    d: SnippetDialect,
+  ): string | undefined;
 }
 
 /** Options shared by both language renderers. */
@@ -67,9 +85,13 @@ function structAtType(type: Extract<BoundType, { kind: "struct" }>): string | un
 
 /**
  * Render a struct config as a host object literal (Python dict / TS object).
- * Keys are the Boutiques wire names (the generated TypedDict / interface keys) -
- * nested structs have no constructor function in the generated code, so callers
- * build them as plain object literals.
+ * Keys are the Boutiques wire names (the generated TypedDict / interface keys).
+ *
+ * When the dialect supplies `structConstructor` (Python, which generates a
+ * per-struct `_params` builder), the struct is rendered as that factory call
+ * instead - e.g. `tool_corrected_output_params(file="...")`. Backends without
+ * per-struct builders (TypeScript) leave the hook unset and build the plain
+ * object literal below.
  *
  * `@type` is emitted from the struct's literal discriminator field when present
  * (union variants carry a required, load-bearing `@type`); for the root call the
@@ -85,6 +107,13 @@ export function renderStructLiteral(
   injectAtType?: string,
 ): string {
   const obj = isRecord(value) ? value : {};
+  // A factory call carries its own `@type`, so it's only valid when the struct's
+  // discriminator comes from the struct itself (or none) - not when the tag must
+  // be injected from outside (the root call, which never reaches this path).
+  if (injectAtType === undefined && d.structConstructor) {
+    const call = d.structConstructor(type, obj, indent, d);
+    if (call !== undefined) return call;
+  }
   const inner = indent + d.indentUnit;
   const lines: string[] = [];
 
