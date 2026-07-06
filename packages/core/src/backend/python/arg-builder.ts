@@ -25,6 +25,14 @@ export function resultToStmt(r: ArgResult): string {
 }
 
 function appendLines(cb: CodeBuilder, code: string): void {
+  // Every caller emits `code` as an indented branch body (an `if`/`elif`/`else`
+  // or optional block). A union variant or optional can legitimately contribute
+  // no command-line arguments (e.g. an "off"/"none" mode), leaving `code` empty -
+  // emit `pass` so the block is valid Python instead of an empty, un-indented one.
+  if (code.trim() === "") {
+    cb.line("pass");
+    return;
+  }
   for (const line of code.split("\n")) cb.line(line);
 }
 
