@@ -43,6 +43,15 @@ export const exampleGroups: [ExampleGroup, ...ExampleGroup[]] = [
       },
     ],
   },
+  {
+    label: "argtype",
+    examples: [
+      {
+        name: "FSL bet",
+        url: import.meta.env.BASE_URL + "examples/bet.argtype",
+      },
+    ],
+  },
 ];
 
 export const defaultExample = exampleGroups[0].examples[0];

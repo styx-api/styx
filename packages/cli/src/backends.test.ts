@@ -7,7 +7,14 @@ describe("backends", () => {
     expect(knownBackends).toContain("python");
     expect(knownBackends).toContain("typescript");
     expect(knownBackends).toContain("boutiques");
+    expect(knownBackends).toContain("argtype");
     expect(knownBackends).toContain("schema");
+  });
+
+  it("resolves the argtype serialization backend", () => {
+    const { backends, unknown } = resolveBackends(["argtype"]);
+    expect(unknown).toEqual([]);
+    expect(backends.map((b) => b.name)).toEqual(["argtype"]);
   });
 
   it("resolves aliases to backend instances", () => {

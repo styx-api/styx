@@ -8,6 +8,7 @@ export type {
   EmitWarning,
   TypeMap,
 } from "./backend.js";
+export { ArgtypeBackend, generateArgtype } from "./argtype/index.js";
 export { BoutiquesBackend, generateBoutiques } from "./boutiques/index.js";
 export { CodeBuilder } from "./code-builder.js";
 export type { FieldInfo } from "./collect-field-info.js";

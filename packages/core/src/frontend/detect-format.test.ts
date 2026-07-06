@@ -44,8 +44,36 @@ describe("detectFormat", () => {
     expect(detectFormat(source)).toBe("mrtrix");
   });
 
-  it("returns null for invalid JSON", () => {
+  it("detects argtype by a combinator call", () => {
+    expect(detectFormat("bet: seq(infile: path)")).toBe("argtype");
+    expect(detectFormat("x: opt(str)")).toBe("argtype");
+  });
+
+  it("detects argtype by a leading frontmatter fence", () => {
+    expect(detectFormat('---\nexe: "bet"\n---\nbet: path')).toBe("argtype");
+  });
+
+  it("detects argtype by a frontmatter fence after leading blank lines", () => {
+    // The parser tolerates blank lines before the fence, so detection must too.
+    expect(detectFormat('\n\n---\nexe: "bet"\n---\nbet: path')).toBe("argtype");
+  });
+
+  it("detects a combinator-free argtype definition (bare terminal root)", () => {
+    expect(detectFormat("bet: path")).toBe("argtype");
+    expect(detectFormat("x: int")).toBe("argtype");
+    expect(detectFormat('greeting: "hello"')).toBe("argtype");
+    expect(detectFormat('"1deval": path')).toBe("argtype");
+  });
+
+  it("returns null for non-JSON prose that is not argtype", () => {
     expect(detectFormat("not json")).toBeNull();
+    expect(detectFormat("the cat sat (here)")).toBeNull();
+  });
+
+  it("never misclassifies valid JSON as argtype even if a string contains seq(", () => {
+    // Valid JSON parses successfully and never reaches the argtype text check.
+    const source = JSON.stringify({ foo: "this mentions seq( in a value" });
+    expect(detectFormat(source)).toBeNull();
   });
 
   it("returns null for non-object JSON", () => {

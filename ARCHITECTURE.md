@@ -102,7 +102,7 @@ Long-term, Boutiques shifts from being the primary frontend to primarily a **bac
 - **Boutiques** - remains as both a frontend and a backend
 - **Serialized Python argparse** (`argdump`) - implemented
 - **Connectome Workbench** (`workbench`) - implemented; covers NiWrap's `wb_command` suite
-- **Custom TypeScript-types-like language** (planned) - the intended primary way to define CLI specs
+- **argtype** (`argtype`) - implemented as both a frontend and a backend; the hand-authored, TypeScript-types-like DSL (see the [argtype spec](https://nx10.dev/argtype/)) intended as the primary way to define CLI specs. Covers the core grammar plus the `outputs`, `mediatypes`, and `paths` (`.mutable()` / `.resolveParent()`) extensions; `set` lowers to a sequence, `any` to its first branch, and the draft `constraints` extension is parsed-and-ignored. Frontend lives in `frontend/argtype/`, backend (IR -> argtype source, the round-trip/dogfooding path) in `backend/argtype/`
 
 ## Ecosystem Context
 

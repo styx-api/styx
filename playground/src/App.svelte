@@ -22,8 +22,14 @@
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const jsonData = await res.json();
-      input = JSON.stringify(jsonData, null, 2);
+      const text = await res.text();
+      // JSON descriptors are pretty-printed; non-JSON sources (argtype) are
+      // shown verbatim.
+      try {
+        input = JSON.stringify(JSON.parse(text), null, 2);
+      } catch {
+        input = text;
+      }
     } catch (e) {
       input = `// Failed to load: ${e instanceof Error ? e.message : e}`;
     } finally {

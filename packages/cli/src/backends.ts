@@ -1,4 +1,5 @@
 import {
+  ArgtypeBackend,
   BoutiquesBackend,
   JsonSchemaBackend,
   NipypeBackend,
@@ -19,6 +20,7 @@ const registry: Record<string, () => Backend> = {
   schema: () => new JsonSchemaBackend(),
   "json-schema": () => new JsonSchemaBackend(),
   boutiques: () => new BoutiquesBackend(),
+  argtype: () => new ArgtypeBackend(),
   nipype: () => new NipypeBackend(),
   pydra: () => new PydraBackend(),
 };

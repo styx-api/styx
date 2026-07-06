@@ -26,6 +26,7 @@ const SUPPORTED_FORMATS: ReadonlySet<string> = new Set<FormatName>([
   "argdump",
   "workbench",
   "mrtrix",
+  "argtype",
 ]);
 
 export interface BuildOptions {
