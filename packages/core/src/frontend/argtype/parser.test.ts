@@ -333,4 +333,38 @@ tool: seq(x: path).output(result: \`{x}.nii\`.mystery("z"))`);
     expect(r.errors).toEqual([]);
     expect(r.warnings.some((w) => /mystery/.test(w.message))).toBe(true);
   });
+
+  it("scans interpolations quote-aware and brace-balanced", () => {
+    // A `}` inside a quoted ref name, and nested `{}` inside a quoted op arg,
+    // must not prematurely end the interpolation.
+    const r = parse(`---
+extensions:
+  - outputs
+---
+tool: seq("a}b": path, x: path).output(
+  one: \`{"a}b"}.nii\`,
+  two: \`{x.or("{fallback}")}.nii\`,
+)`);
+    expect(r.errors).toEqual([]);
+    const outs = r.expr.meta?.outputs ?? [];
+    const refName = (i: number) => {
+      const t = outs[i]?.tokens.find((tk) => tk.kind === "ref");
+      return t?.kind === "ref" ? t.target.name : undefined;
+    };
+    expect(refName(0)).toBe("a}b");
+    const two = outs[1]?.tokens.find((t) => t.kind === "ref");
+    expect(two?.kind === "ref" ? two.fallback : undefined).toBe("{fallback}");
+  });
+
+  it("accepts .title()/.description() on an output template", () => {
+    const r = parse(`---
+extensions:
+  - outputs
+---
+tool: seq(x: path).output(mask: \`{x}.nii\`.title("Brain mask").description("The mask file."))`);
+    expect(r.errors).toEqual([]);
+    const out = r.expr.meta?.outputs?.[0];
+    expect(out?.doc?.title).toBe("Brain mask");
+    expect(out?.doc?.description).toBe("The mask file.");
+  });
 });

@@ -15,6 +15,31 @@ export interface TemplateParseResult {
   errors: string[];
 }
 
+/**
+ * Index of the `}` that closes an interpolation opened at `open` (the position
+ * just past the `{`), or -1 if unterminated. A naive `indexOf("}")` would stop
+ * at the first `}` even when it sits inside a quoted ref name (`{"a}b"}`) or a
+ * quoted operation argument (`{a.or("{b}")}`); this scan skips double-quoted
+ * spans (honoring `\"`) and balances nested `{}` so those round-trip.
+ */
+function interpolationEnd(body: string, open: number): number {
+  let depth = 1;
+  let inQuote = false;
+  for (let j = open; j < body.length; j++) {
+    const c = body[j]!;
+    if (inQuote) {
+      if (c === "\\")
+        j++; // skip the escaped char (e.g. \" or \`)
+      else if (c === '"') inQuote = false;
+      continue;
+    }
+    if (c === '"') inQuote = true;
+    else if (c === "{") depth++;
+    else if (c === "}" && --depth === 0) return j;
+  }
+  return -1;
+}
+
 export function parseTemplate(body: string): TemplateParseResult {
   const tokens: AstOutputToken[] = [];
   const errors: string[] = [];
@@ -39,7 +64,7 @@ export function parseTemplate(body: string): TemplateParseResult {
       continue;
     }
     if (ch === "{") {
-      const close = body.indexOf("}", i);
+      const close = interpolationEnd(body, i + 1);
       if (close === -1) {
         errors.push("Unterminated '{' in output template");
         lit += body.slice(i);
@@ -70,8 +95,9 @@ function parseRef(inner: string): { token: AstOutputToken; error?: string } {
   const quoted = /^"((?:[^"\\]|\\.)*)"/.exec(inner);
   if (quoted) {
     // A quoted target name carries an arbitrary (non-identifier) name verbatim,
-    // mirroring a quoted `label:`. (A `}` inside the name is not supported: the
-    // template scanner ends the interpolation at the first `}`.)
+    // mirroring a quoted `label:` (a `}` inside the quotes is fine - the scanner
+    // is quote-aware). A literal backtick still cannot appear in a name: the
+    // lexer ends the template at the first unescaped backtick.
     token.name = unescapeArg(quoted[1]!);
     rest = inner.slice(quoted[0].length);
   } else {

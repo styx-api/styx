@@ -283,6 +283,31 @@ describe("argtype emitter: doc round-trip and non-finite numbers", () => {
     expect(innerPath(r)?.meta?.doc?.description).toBe("body");
   });
 
+  it("round-trips an output-entry `# ...` description via chaining, not a `///` block", () => {
+    const p: Path = { kind: "path", attrs: {}, meta: { name: "x" } };
+    const expr = seq(lit("tool"), p);
+    expr.meta = {
+      name: "tool",
+      outputs: [
+        {
+          name: "mask",
+          doc: { description: "# produced\nthe mask file" },
+          tokens: [
+            { kind: "literal", value: "" },
+            { kind: "ref", target: { kind: "node-ref", name: "x" } },
+            { kind: "literal", value: ".nii" },
+          ],
+        },
+      ],
+    };
+    const { source } = generateArgtype(expr);
+    const r = new ArgtypeParser().parse(source);
+    expect(r.errors).toEqual([]);
+    const out = r.expr.meta?.outputs?.[0];
+    expect(out?.doc?.description).toBe("# produced\nthe mask file");
+    expect(out?.doc?.title).toBeUndefined();
+  });
+
   it("drops a non-finite value bound with a warning instead of emitting an un-parseable token", () => {
     const n = int();
     n.attrs.maxValue = Infinity;

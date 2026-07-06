@@ -551,9 +551,14 @@ class ArgtypeEmitter {
 
   private emitOutputs(outputs: Output[], level: number): string {
     const items = outputs.map((o) => {
-      // A `///` doc block precedes the output entry (title-convention split).
-      const docs = this.docLines(o.doc).map((l) => pad(level + 1) + l);
-      return [...docs, pad(level + 1) + this.emitOutputTemplate(o)].join("\n");
+      // A `///` doc block precedes the output entry (title-convention split),
+      // unless that block would be misread - then it round-trips as `.title()` /
+      // `.description()` chaining on the template, as node docs do.
+      const useChain = this.docNeedsChain(o.doc);
+      const docs = useChain ? [] : this.docLines(o.doc).map((l) => pad(level + 1) + l);
+      let template = pad(level + 1) + this.emitOutputTemplate(o);
+      if (useChain) template += this.docChain(o.doc);
+      return [...docs, template].join("\n");
     });
     return `.output(\n${items.join(",\n")},\n${pad(level)})`;
   }

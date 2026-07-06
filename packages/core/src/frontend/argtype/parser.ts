@@ -399,16 +399,22 @@ class Parser {
       this.error(`Expected an output template literal`);
     }
 
-    // Template-level chaining: .name("x") / .or("fallback"). An unrecognized
-    // method is an ignorable extension annotation (same rule as node method
-    // chains): skip its arguments and warn rather than failing the parse.
+    // Template-level chaining: .name("x") / .or("fallback") / .title("t") /
+    // .description("d") (alias .doc("d")). An unrecognized method is an ignorable
+    // extension annotation (same rule as node method chains): skip its arguments
+    // and warn rather than failing the parse.
+    const CHAIN = new Set(["name", "or", "title", "description", "doc"]);
     while (this.at("dot")) {
       this.next();
       const m = this.expect("ident", "a template method");
-      if (m.value === "name" || m.value === "or") {
-        const args = this.parseScalarArgs();
-        if (m.value === "name" && typeof args[0] === "string") name = args[0];
-        else if (m.value === "or" && typeof args[0] === "string") out.fallback = args[0];
+      if (CHAIN.has(m.value)) {
+        const arg = this.parseScalarArgs()[0];
+        if (typeof arg === "string") {
+          if (m.value === "name") name = arg;
+          else if (m.value === "or") out.fallback = arg;
+          else if (m.value === "title") out.title = arg;
+          else out.description = arg; // description | doc
+        }
       } else {
         this.skipBalancedArgs();
         this.warn(`Ignoring unsupported output-template method '.${m.value}()'`, m);
