@@ -497,6 +497,17 @@ describe("Python generation - discriminated unions", () => {
     expect(code).toContain('if params["mode"]["@type"] == "variant_1":');
     expect(code).toContain('cargs.append(str(params["mode"]))');
   });
+
+  // Regression: a union variant can legitimately contribute no command-line
+  // arguments (an "off"/"none"/help mode). Its dispatch branch must be a valid,
+  // non-empty Python block - `pass`, not an empty `if` body (IndentationError).
+  it("emits `pass` for a union variant with no command-line arguments", () => {
+    const code = generate(
+      seq(lit("cmd"), namedAlt("mode", seq(), seq(lit("--full"), str("level")))),
+      { app: { id: "t" } },
+    );
+    expect(code).toMatch(/== "variant_0":\n\s+pass\b/);
+  });
 });
 
 describe("Python generation - nested-struct factories", () => {
