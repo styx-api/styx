@@ -240,6 +240,21 @@ describe("Boutiques generation", () => {
     expect(inputs[0]!["command-line-flag-separator"]).toBe("=");
   });
 
+  it("keeps a flag literal ending in '=' as the flag (no separator) when unjoined", () => {
+    // `command-line-flag: "QWERT="` with no separator means two argv tokens
+    // (`QWERT=` then the value); it must NOT be re-split into flag + separator,
+    // which would fuse them into one token on re-parse.
+    const bt = emitFor(
+      minimalDescriptor({
+        "command-line": "test [INPUT1]",
+        inputs: [minimalInput({ type: "String", "command-line-flag": "QWERT=", optional: true })],
+      }),
+    );
+    const inputs = bt.inputs as Record<string, unknown>[];
+    expect(inputs[0]!["command-line-flag"]).toBe("QWERT=");
+    expect(inputs[0]!["command-line-flag-separator"]).toBeUndefined();
+  });
+
   it("handles file input with resolve-parent and mutable", () => {
     const bt = emitFor(
       minimalDescriptor({

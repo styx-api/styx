@@ -297,7 +297,10 @@ class BoutiquesEmitter {
     }
     if (peeled.flag) {
       input["command-line-flag"] = peeled.flag;
-      if (peeled.flagSeparator) input["command-line-flag-separator"] = peeled.flagSeparator;
+      // Emit the separator whenever the flag is fused with its value, including
+      // the empty (direct-concatenation) case; absent means the default space.
+      if (peeled.flagSeparator !== undefined)
+        input["command-line-flag-separator"] = peeled.flagSeparator;
     }
     if (mapped.integer) input.integer = true;
     if (mapped.minimum !== undefined) input.minimum = mapped.minimum;
@@ -547,7 +550,10 @@ class BoutiquesEmitter {
     // Flag
     if (peeled.flag) {
       input["command-line-flag"] = peeled.flag;
-      if (peeled.flagSeparator) input["command-line-flag-separator"] = peeled.flagSeparator;
+      // Emit the separator whenever the flag is fused with its value, including
+      // the empty (direct-concatenation) case; absent means the default space.
+      if (peeled.flagSeparator !== undefined)
+        input["command-line-flag-separator"] = peeled.flagSeparator;
     }
 
     // Constraints from mapped type
@@ -650,9 +656,17 @@ class BoutiquesEmitter {
         const nodes = node.attrs.nodes;
         if (nodes.length === 2 && nodes[0]!.kind === "literal") {
           const flagLit = nodes[0]!.attrs.str;
-          const { flag, separator } = this.splitFlagLiteral(flagLit);
-          result.flag = flag;
-          if (separator) result.flagSeparator = separator;
+          if (node.attrs.join !== undefined) {
+            // Joined: flag + value form one argv token, so a trailing `=` (or an
+            // empty separator for direct concatenation) is the flag-separator.
+            const { flag, separator } = this.splitFlagLiteral(flagLit);
+            result.flag = flag;
+            result.flagSeparator = separator; // may be "" (direct concatenation)
+          } else {
+            // Not joined: flag and value are separate argv tokens, so the whole
+            // literal is the flag with no separator.
+            result.flag = flagLit;
+          }
           this.peelNodeInner(nodes[1]!, type, result);
         }
         // Otherwise don't peel further (it's a struct sequence or similar)

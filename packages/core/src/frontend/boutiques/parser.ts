@@ -510,13 +510,21 @@ export class BoutiquesParser implements Frontend {
     const flag = btInput["command-line-flag"];
     if (!isString(flag)) return node;
 
+    // A non-space separator (e.g. `=` or `""`) fuses the flag and value into a
+    // single argv token (`--flag=value` / `--flagvalue`), so the sequence is
+    // joined. The default/space separator keeps them as separate argv elements
+    // (`--flag value`).
     const flagSep = btInput["command-line-flag-separator"];
+    const fused = isString(flagSep) && flagSep !== " ";
     const prefix: Literal = {
       kind: "literal",
-      attrs: { str: flag + (flagSep ?? "") },
+      attrs: { str: fused ? flag + flagSep : flag },
     };
 
-    return { kind: "sequence", attrs: { nodes: [prefix, node] } };
+    return {
+      kind: "sequence",
+      attrs: { nodes: [prefix, node], ...(fused && { join: "" }) },
+    };
   }
 
   private wrapWithOptional(node: Expr): Optional {

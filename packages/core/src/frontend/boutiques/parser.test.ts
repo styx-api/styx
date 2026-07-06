@@ -656,6 +656,9 @@ describe("BoutiquesParser", () => {
       const seq = result.expr as Sequence;
       const inner = seq.attrs.nodes[1] as Sequence;
       expect(inner.attrs.nodes[0]).toMatchObject({ kind: "literal", attrs: { str: "--input=" } });
+      // A non-space separator fuses flag + value into one token, so the
+      // sequence is joined (`--input=value`, not `--input= value`).
+      expect(inner.attrs.join).toBe("");
     });
   });
 
