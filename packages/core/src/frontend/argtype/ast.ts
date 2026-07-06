@@ -34,8 +34,7 @@ export interface AstNode {
   name?: string;
   /** Title: a `# ` heading in a `///` block, or `.title("...")`. */
   title?: string;
-  /** Description: a `///` block (minus the title), or `.description("...")`
-   * (alias `.doc("...")`). */
+  /** Description: a `///` block (minus the title), or `.description("...")`. */
   description?: string;
   /** `= value` sugar / `.default(...)` (terminal only). */
   default?: string | number;

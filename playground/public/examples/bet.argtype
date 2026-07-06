@@ -3,7 +3,8 @@ exe: "bet"
 version: "6.0.4"
 authors:
   - "FMRIB Analysis Group, University of Oxford"
-url: "https://fsl.fmrib.ox.ac.uk/fsl/fslwiki"
+urls:
+  - "https://fsl.fmrib.ox.ac.uk/fsl/fslwiki"
 extensions:
   - outputs
 ---

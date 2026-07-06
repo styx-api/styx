@@ -85,16 +85,16 @@ tool: seq(A)`);
     expect(ast.doc?.root.children?.[0]?.description).toBe("The input image.");
   });
 
-  it("supports .title() and .doc() methods (set title/description directly)", () => {
-    const r = parse(`tool: seq(input: path.title("Input").doc("The image to read."))`);
+  it("supports .title() and .description() methods (set title/description directly)", () => {
+    const r = parse(`tool: seq(input: path.title("Input").description("The image to read."))`);
     expect(r.errors).toEqual([]);
     const input =
       r.expr.kind === "sequence" ? r.expr.attrs.nodes.find((n) => n.kind === "path") : undefined;
     expect(input?.meta?.doc?.title).toBe("Input");
     expect(input?.meta?.doc?.description).toBe("The image to read.");
 
-    // `.doc()` sets the description verbatim - a leading `#` is NOT a title here.
-    const r2 = parse(`tool: seq(x: str.doc("# not a title"))`);
+    // `.description()` sets the text verbatim - a leading `#` is NOT a title here.
+    const r2 = parse(`tool: seq(x: str.description("# not a title"))`);
     const x =
       r2.expr.kind === "sequence" ? r2.expr.attrs.nodes.find((n) => n.kind === "str") : undefined;
     expect(x?.meta?.doc?.title).toBeUndefined();
@@ -245,7 +245,8 @@ exe: "bet"
 version: "6.0.4"
 authors:
   - "FMRIB Analysis Group"
-url: "https://fsl.fmrib.ox.ac.uk"
+urls:
+  - "https://fsl.fmrib.ox.ac.uk"
 ---
 
 /// Brain extraction.
@@ -270,22 +271,19 @@ x: seq(@bad)`);
 });
 
 describe("argtype parser: review regressions", () => {
-  it("treats .description() as canonical and .doc() as its alias", () => {
-    const a = parse(`tool: seq(x: str.description("The image."))`);
-    const b = parse(`tool: seq(x: str.doc("The image."))`);
-    expect(a.errors).toEqual([]);
-    expect(b.errors).toEqual([]);
-    const descOf = (r: ReturnType<typeof parse>) =>
-      r.expr.kind === "sequence"
-        ? r.expr.attrs.nodes.find((n) => n.kind === "str")?.meta?.doc?.description
-        : undefined;
-    expect(descOf(a)).toBe("The image.");
-    expect(descOf(b)).toBe("The image."); // alias behaves identically
+  it("has no `.doc()` method; it is an ignorable unknown method, not a description", () => {
+    const r = parse(`tool: seq(x: str.doc("The image."))`);
+    expect(r.errors).toEqual([]);
+    const x =
+      r.expr.kind === "sequence" ? r.expr.attrs.nodes.find((n) => n.kind === "str") : undefined;
+    expect(x?.meta?.doc?.description).toBeUndefined();
+    expect(r.warnings.some((w) => /\.doc\(\)/.test(w.message))).toBe(true);
   });
 
   it("keeps an unquoted `#` inside a frontmatter value (URL fragment)", () => {
     const r = parse(`---
-url: https://fsl.fmrib.ox.ac.uk/wiki#bet
+urls:
+  - https://fsl.fmrib.ox.ac.uk/wiki#bet
 ---
 bet: path`);
     expect(r.errors).toEqual([]);

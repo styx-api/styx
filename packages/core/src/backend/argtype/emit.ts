@@ -661,7 +661,8 @@ class ArgtypeEmitter {
   private emitStream(lines: string[], key: string, stream: StreamOutput): void {
     lines.push(`${key}:`);
     lines.push(`  name: ${this.fmScalar(stream.name)}`);
-    if (stream.doc?.description) lines.push(`  doc: ${this.fmScalar(stream.doc.description)}`);
+    if (stream.doc?.description)
+      lines.push(`  description: ${this.fmScalar(stream.doc.description)}`);
     if (stream.doc?.title) {
       this.warn(`${key} stream title has no argtype surface; ignored`);
     }

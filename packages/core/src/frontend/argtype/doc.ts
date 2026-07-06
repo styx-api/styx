@@ -3,8 +3,7 @@
  *
  * The `# Title` heading convention is *sugar*: it applies only when splitting a
  * `///` block (`splitDocText`). The chaining methods `.title()` / `.description()`
- * (alias `.doc()`) set the title / description directly and are not re-parsed for
- * headings.
+ * set the title / description directly and are not re-parsed for headings.
  */
 
 export interface DocParts {

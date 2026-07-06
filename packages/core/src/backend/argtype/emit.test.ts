@@ -32,7 +32,7 @@ describe("argtype emitter: frontmatter", () => {
     expect(source).toContain(`  type: "docker"`);
     expect(source).toContain("stdout:");
     expect(source).toContain(`  name: "log"`);
-    expect(source).toContain(`  doc: "stdout log"`);
+    expect(source).toContain(`  description: "stdout log"`);
     expect(source).toContain("extensions:");
     expect(source).toContain("  - outputs");
     expect(source).toContain("  - mediatypes");

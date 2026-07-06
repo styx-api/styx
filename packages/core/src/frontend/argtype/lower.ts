@@ -416,8 +416,7 @@ export function buildAppMeta(
   const strList = (x: unknown): string[] =>
     Array.isArray(x) ? x.filter((a): a is string => typeof a === "string") : [];
   const authors = strList(fm.authors);
-  // `urls` is the list form; `url` is a singular alias for one entry.
-  const urls = fm.urls !== undefined ? strList(fm.urls) : asStr(fm.url) ? [asStr(fm.url)!] : [];
+  const urls = strList(fm.urls);
   const references = strList(fm.references);
 
   const doc: Documentation = {
@@ -461,7 +460,7 @@ function streamFrom(x: unknown, warnings: string[], key: string): StreamOutput |
       warnings.push(`Frontmatter '${key}' is missing a 'name'; ignored`);
       return undefined;
     }
-    const description = typeof x.doc === "string" ? x.doc : undefined;
+    const description = typeof x.description === "string" ? x.description : undefined;
     return { name, ...(description && { doc: { description } }) };
   }
   if (typeof x === "string") return { name: x };

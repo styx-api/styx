@@ -15,8 +15,8 @@ import { parseTemplate } from "./template.js";
 import { splitDocText } from "./doc.js";
 
 /** Split a `///` block and attach its title/description to a node, unless the
- * node already carries them (a leading doc and a chained `.doc()`/`.title()`
- * don't both win - the first assignment stays). */
+ * node already carries them (a leading doc and a chained `.title()`/
+ * `.description()` don't both win - the first assignment stays). */
 function attachDocText(target: { title?: string; description?: string }, raw: string): void {
   const { title, description } = splitDocText(raw);
   if (title !== undefined && target.title === undefined) target.title = title;
@@ -45,7 +45,6 @@ const KNOWN_METHODS = new Set([
   "name",
   "title",
   "description",
-  "doc",
   "default",
   "min",
   "max",
@@ -292,10 +291,9 @@ class Parser {
         if (typeof args[0] === "string") node.title = args[0];
         break;
       case "description":
-      case "doc":
-        // `.description()` (canonical) and its `.doc()` alias set the description
-        // directly; the `# ` heading convention is sugar for the `///` form only,
-        // so a leading `#` here is a literal part of the description, not a title.
+        // `.description()` sets the description directly; the `# ` heading
+        // convention is sugar for the `///` form only, so a leading `#` here is a
+        // literal part of the description, not a title.
         if (typeof args[0] === "string") node.description = args[0];
         break;
       case "default":
@@ -400,10 +398,10 @@ class Parser {
     }
 
     // Template-level chaining: .name("x") / .or("fallback") / .title("t") /
-    // .description("d") (alias .doc("d")). An unrecognized method is an ignorable
-    // extension annotation (same rule as node method chains): skip its arguments
-    // and warn rather than failing the parse.
-    const CHAIN = new Set(["name", "or", "title", "description", "doc"]);
+    // .description("d"). An unrecognized method is an ignorable extension
+    // annotation (same rule as node method chains): skip its arguments and warn
+    // rather than failing the parse.
+    const CHAIN = new Set(["name", "or", "title", "description"]);
     while (this.at("dot")) {
       this.next();
       const m = this.expect("ident", "a template method");
@@ -413,7 +411,7 @@ class Parser {
           if (m.value === "name") name = arg;
           else if (m.value === "or") out.fallback = arg;
           else if (m.value === "title") out.title = arg;
-          else out.description = arg; // description | doc
+          else out.description = arg; // description
         }
       } else {
         this.skipBalancedArgs();
