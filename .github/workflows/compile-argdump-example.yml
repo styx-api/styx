@@ -1,0 +1,45 @@
+name: Compile argdump (example)
+
+# Demonstrates and smoke-tests the reusable compile-argdump action by compiling
+# the bundled fmriprep argdump into a Boutiques descriptor and uploading it as
+# an artifact. Runs on manual dispatch and when the action itself changes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      argdump-file:
+        description: "Path to an argdump JSON file in the repo to compile"
+        required: false
+        default: "playground/public/examples/fmriprep_25.2.3_dump.json"
+      backend:
+        description: "Backend(s) to emit (comma-separated)"
+        required: false
+        default: "boutiques"
+  pull_request:
+    paths:
+      - ".github/actions/compile-argdump/**"
+      - ".github/workflows/compile-argdump-example.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Compile argdump
+        id: compile
+        uses: ./.github/actions/compile-argdump
+        with:
+          argdump-file: ${{ inputs.argdump-file || 'playground/public/examples/fmriprep_25.2.3_dump.json' }}
+          backend: ${{ inputs.backend || 'boutiques' }}
+          output-dir: styx-out
+
+      - name: Upload generated files
+        uses: actions/upload-artifact@v4
+        with:
+          name: styx-output
+          path: ${{ steps.compile.outputs.output-dir }}

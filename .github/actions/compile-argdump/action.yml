@@ -1,0 +1,69 @@
+name: "Compile argdump"
+description: >-
+  Compile an argdump descriptor into target-language wrappers (Boutiques by
+  default) using the published @styx-api/cli, with the default optimization
+  pipeline applied.
+
+inputs:
+  argdump-file:
+    description: "Path to the argdump JSON file to compile."
+    required: true
+  backend:
+    description: >-
+      Backend(s) to emit (comma-separated). Known: python, typescript, ts,
+      schema, json-schema, boutiques, nipype, pydra.
+    required: false
+    default: "boutiques"
+  output-dir:
+    description: >-
+      Directory to write generated files into. Per-backend output lands in
+      <output-dir>/<backend>/ (e.g. <output-dir>/boutiques/descriptor.json).
+    required: false
+    default: "styx-out"
+  mode:
+    description: "Emit tiers: scripts (app only) | single (+ package) | multi (+ project)."
+    required: false
+    default: "scripts"
+  styx-version:
+    description: "Version of @styx-api/cli to run (npm dist-tag or exact version)."
+    required: false
+    default: "latest"
+  node-version:
+    description: "Node.js version to set up."
+    required: false
+    default: "22"
+
+outputs:
+  output-dir:
+    description: "The directory generated files were written to."
+    value: ${{ inputs.output-dir }}
+  descriptor:
+    description: >-
+      Path to the generated Boutiques descriptor (<output-dir>/boutiques/descriptor.json).
+      Only meaningful when 'boutiques' is among the requested backends.
+    value: ${{ inputs.output-dir }}/boutiques/descriptor.json
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Compile argdump
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ ! -f "${{ inputs.argdump-file }}" ]; then
+          echo "::error::argdump-file not found: ${{ inputs.argdump-file }}"
+          exit 1
+        fi
+        echo "Compiling ${{ inputs.argdump-file }} -> ${{ inputs.output-dir }} (backend: ${{ inputs.backend }}, mode: ${{ inputs.mode }})"
+        npx -y --package "@styx-api/cli@${{ inputs.styx-version }}" styx build \
+          "${{ inputs.argdump-file }}" \
+          --out "${{ inputs.output-dir }}" \
+          --backend "${{ inputs.backend }}" \
+          --mode "${{ inputs.mode }}"
+        echo "Generated files:"
+        find "${{ inputs.output-dir }}" -type f | sort
