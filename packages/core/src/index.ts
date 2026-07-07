@@ -1,4 +1,5 @@
 import { ArgdumpParser } from "./frontend/argdump/index.js";
+import { ArgtypeParser } from "./frontend/argtype/index.js";
 import { BoutiquesParser } from "./frontend/boutiques/index.js";
 import { MrtrixParser } from "./frontend/mrtrix/index.js";
 import { WorkbenchParser } from "./frontend/workbench/index.js";
@@ -22,7 +23,10 @@ export function compile(
       ? { filename: filenameOrOptions }
       : (filenameOrOptions ?? {});
 
-  const format = options.format ?? detectFormat(source);
+  // An explicit `.argtype` filename selects the DSL frontend even though the
+  // source is not JSON (detection by content is a fallback).
+  const byExtension = options.filename?.endsWith(".argtype") ? "argtype" : undefined;
+  const format = options.format ?? byExtension ?? detectFormat(source);
 
   if (!format) {
     return {
@@ -32,13 +36,23 @@ export function compile(
     };
   }
 
-  const parser =
-    format === "argdump"
-      ? new ArgdumpParser()
-      : format === "workbench"
-        ? new WorkbenchParser()
-        : format === "mrtrix"
-          ? new MrtrixParser()
-          : new BoutiquesParser();
+  const parser = ((): { parse: (s: string, f?: string) => ParseResult } => {
+    switch (format) {
+      case "argdump":
+        return new ArgdumpParser();
+      case "argtype":
+        return new ArgtypeParser();
+      case "workbench":
+        return new WorkbenchParser();
+      case "mrtrix":
+        return new MrtrixParser();
+      case "boutiques":
+        return new BoutiquesParser();
+      default: {
+        const _exhaustive: never = format;
+        return new BoutiquesParser();
+      }
+    }
+  })();
   return parser.parse(source, options.filename);
 }

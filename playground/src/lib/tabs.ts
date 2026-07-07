@@ -1,6 +1,7 @@
 import {
   format,
   formatSolveResult,
+  ArgtypeBackend,
   BoutiquesBackend,
   JsonSchemaBackend,
   NipypeBackend,
@@ -19,6 +20,7 @@ export interface TabDef {
   compute: (c: Compilation) => Map<string, string>;
 }
 
+const argtypeBackend = new ArgtypeBackend();
 const boutiquesBackend = new BoutiquesBackend();
 const jsonSchemaBackend = new JsonSchemaBackend();
 const nipypeBackend = new NipypeBackend();
@@ -110,5 +112,13 @@ export const tabs: [TabDef, ...TabDef[]] = [
     label: "Boutiques",
     lang: "json",
     compute: (c) => emitWithPackage(boutiquesBackend, c),
+  },
+  {
+    id: "argtype",
+    label: "argtype",
+    // No dedicated shiki grammar; argtype is TypeScript-types-like, so borrow
+    // its highlighting (strings, comments, backtick templates render sensibly).
+    lang: "typescript" as BundledLanguage,
+    compute: (c) => emitWithPackage(argtypeBackend, c),
   },
 ];
