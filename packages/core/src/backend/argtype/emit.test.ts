@@ -320,3 +320,60 @@ describe("argtype emitter: doc round-trip and non-finite numbers", () => {
     expect(new ArgtypeParser().parse(source).errors).toEqual([]);
   });
 });
+
+describe("argtype emitter: description reflow", () => {
+  const parser = new ArgtypeParser();
+  const descOf = (e: Expr, name: string): string | undefined =>
+    (e.kind === "sequence" ? e.attrs.nodes : []).find((n) => n.meta?.name === name)?.meta?.doc
+      ?.description;
+
+  it("wraps a long single-paragraph description across `///` lines and round-trips", () => {
+    const long =
+      "This is a fairly long single-paragraph description that must wrap across " +
+      "several `///` lines when emitted, rather than sitting on one giant physical line.";
+    const first = parser.parse(`tool: seq(x: str.description(${JSON.stringify(long)}))`);
+    const { source } = generateArgtype(first.expr, first.meta);
+
+    const docLines = source.split("\n").filter((l) => l.trim().startsWith("///"));
+    expect(docLines.length).toBeGreaterThan(1); // actually wrapped
+    // No emitted `///` content line runs away (prefix + ~80 content).
+    for (const l of docLines) expect(l.trim().length).toBeLessThanOrEqual(90);
+
+    const second = parser.parse(source);
+    expect(second.errors).toEqual([]);
+    expect(descOf(second.expr, "x")).toBe(long); // reflow rejoins to the original prose
+  });
+
+  it("keeps a blank `///` between paragraphs and round-trips exactly", () => {
+    const src = `tool: seq(
+      /// First paragraph, wrapped
+      /// over two source lines.
+      ///
+      /// Second paragraph.
+      x: str,
+    )`;
+    const first = parser.parse(src);
+    const { source } = generateArgtype(first.expr, first.meta);
+    expect(source).toMatch(/\/\/\/ First paragraph[\s\S]*\n\s*\/\/\/\n\s*\/\/\/ Second paragraph/);
+
+    const second = parser.parse(source);
+    expect(second.errors).toEqual([]);
+    expect(descOf(second.expr, "x")).toBe(
+      "First paragraph, wrapped over two source lines.\n\nSecond paragraph.",
+    );
+  });
+
+  it("emits a hard line break (lone `\\n`) as verbatim `.description()` chaining", () => {
+    // A lone \n would be reflowed to a space by a `///` block, so it must round-trip
+    // as chaining instead.
+    const first = parser.parse(`tool: seq(x: str.description("line one\\nline two"))`);
+    expect(descOf(first.expr, "x")).toBe("line one\nline two");
+    const { source } = generateArgtype(first.expr, first.meta);
+    expect(source).toContain(`.description("line one\\nline two")`);
+    expect(source).not.toMatch(/\/\/\/ line one/); // not a `///` block
+
+    const second = parser.parse(source);
+    expect(second.errors).toEqual([]);
+    expect(descOf(second.expr, "x")).toBe("line one\nline two"); // preserved exactly
+  });
+});
