@@ -1,6 +1,6 @@
 {
   "name": "@styx-api/core",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Styx compiler core: parses CLI tool descriptors (e.g. Boutiques), optimizes an IR, solves typed parameter bindings, and generates type-safe wrappers (TypeScript, Python, JSON Schema). Part of the Styx/NiWrap ecosystem.",
   "keywords": [
     "styx",
