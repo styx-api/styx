@@ -77,7 +77,7 @@
           {/each}
         </select>
       </div>
-      <InputPanel bind:input />
+      <InputPanel bind:input format={detectedFormat} />
     </section>
     <section class="panel">
       <OutputPanel {outcome} />

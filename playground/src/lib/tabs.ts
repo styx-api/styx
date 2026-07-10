@@ -16,7 +16,7 @@ import type { Compilation, SolvedParseResult } from "./compiler.js";
 export interface TabDef {
   id: string;
   label: string;
-  lang: BundledLanguage | "ir" | "bindings";
+  lang: BundledLanguage | "ir" | "bindings" | "argtype";
   compute: (c: Compilation) => Map<string, string>;
 }
 
@@ -116,9 +116,7 @@ export const tabs: [TabDef, ...TabDef[]] = [
   {
     id: "argtype",
     label: "argtype",
-    // No dedicated shiki grammar; argtype is TypeScript-types-like, so borrow
-    // its highlighting (strings, comments, backtick templates render sensibly).
-    lang: "typescript" as BundledLanguage,
+    lang: "argtype",
     compute: (c) => emitWithPackage(argtypeBackend, c),
   },
 ];
