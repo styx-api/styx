@@ -37,6 +37,9 @@ function docFrom(node: { title?: string; description?: string }): Documentation 
 class Lowerer {
   readonly errors: string[] = [];
   readonly warnings: string[] = [];
+  /** Extensions whose annotations the document actually uses, collected during
+   * lowering so `lowerDocument` can flag any used-but-undeclared in frontmatter. */
+  readonly usedExtensions = new Set<string>();
   private aliases = new Map<string, AstNode>();
 
   constructor(aliases: AstAlias[]) {
@@ -94,6 +97,40 @@ class Lowerer {
     if (node.join !== undefined && !joinable) {
       this.warnings.push("`.join()` is only supported on seq/set/rep/opt; ignored here");
     }
+
+    // A type-specific modifier that lands on an incompatible node is silently
+    // dropped downstream (only the matching lower* case reads it), so warn -
+    // same contract as the `.join()` check. Refs are already resolved above, so
+    // by here the node's concrete kind is known and these checks are accurate.
+    const isNumericTerminal =
+      node.kind === "terminal" && (node.terminal === "int" || node.terminal === "float");
+    const isRep = node.kind === "comb" && node.op === "rep";
+    const isPath = node.kind === "terminal" && node.terminal === "path";
+    if ((node.min !== undefined || node.max !== undefined) && !isNumericTerminal) {
+      this.warnings.push(
+        "`.min()`/`.max()` is only supported on int/float terminals; ignored here",
+      );
+    }
+    if ((node.countMin !== undefined || node.countMax !== undefined) && !isRep) {
+      this.warnings.push(
+        "`.count()`/`.countMin()`/`.countMax()` is only supported on rep; ignored here",
+      );
+    }
+    if ((node.mutable || node.resolveParent) && !isPath) {
+      this.warnings.push("`.mutable()`/`.resolveParent()` is only supported on path; ignored here");
+    }
+    if (node.mediaTypes?.length && !isPath) {
+      this.warnings.push("`.mediaType()` is only supported on path; ignored here");
+    }
+
+    // Record which extensions' annotations the author reached for, so a document
+    // that uses one without declaring it in frontmatter can be flagged. Only count
+    // an annotation that actually applies here: a misapplied `path`-only modifier
+    // is already warned about and dropped just above, so recording it would make
+    // declare-before-use contradict that ("ignored" yet "declare it").
+    if (node.outputs?.length) this.usedExtensions.add("outputs");
+    if (node.mediaTypes?.length && isPath) this.usedExtensions.add("mediatypes");
+    if ((node.mutable || node.resolveParent) && isPath) this.usedExtensions.add("paths");
 
     // A `.output()` on a non-sequence node attaches to the enclosing sequence
     // scope (`sink`); seq/set own their outputs (handled in `lowerComb`).
@@ -178,12 +215,9 @@ class Lowerer {
         return e;
       }
       case "str": {
+        // A `str.mediaType(...)` is warned about generically in `lowerNode`
+        // (media types are a `path`-only annotation), so nothing to do here.
         const e = str();
-        if (node.mediaTypes?.length) {
-          // The IR carries media types on `path` only; a `str.mediaType(...)` has
-          // nowhere to live, so warn rather than dropping it silently.
-          this.warnings.push("`.mediaType()` on a `str` is not represented in the IR; ignored");
-        }
         this.applyMeta(e, node);
         return e;
       }
@@ -231,7 +265,14 @@ class Lowerer {
         return e;
       }
       case "alt": {
-        const e = alt(...lowerChildren(sink));
+        // An alt arm's name is its discriminant, scoped to the union. Two arms
+        // with the same label would collide the same way two same-named seq/set
+        // fields do (the solver keys variants by name), so disambiguate them the
+        // same way. `any` is exempt: it emits branch 0 and its branches are
+        // deliberately binding-compatible (same names by design).
+        const arms = lowerChildren(sink);
+        this.dedupeSiblingNames(arms);
+        const e = alt(...arms);
         this.applyMeta(e, node);
         return e;
       }
@@ -302,9 +343,11 @@ class Lowerer {
 
   /**
    * Disambiguate duplicate explicit names among the direct children of a
-   * sequence/set. The solver turns each named child into a struct field keyed
-   * by its name; two siblings with the same name would silently collapse (the
-   * second overwrites the first, dropping a parameter). argtype is hand-authored
+   * sequence/set (struct fields) or the arms of an alternative (union
+   * discriminants). The solver turns each named child into a struct field / union
+   * variant keyed by its name; two siblings with the same name would silently
+   * collapse (the second overwrites the first, dropping a parameter). argtype is
+   * hand-authored
    * and gives no uniqueness guarantee, so - like the mrtrix frontend - we rename
    * collisions (`name_2`, `name_3`, ...) and warn. (This catches duplicate
    * explicit labels; it does not detect collisions between solver-derived names
@@ -487,10 +530,32 @@ export function lowerDocument(doc: AstDocument): LowerResult {
     { title: doc.root.title, description: doc.root.description },
     doc.rootName,
   );
+
+  // Declare-before-use: when a document has frontmatter, an extension whose
+  // annotations it uses should be listed in `extensions:`. We only check this
+  // when frontmatter is present - a frontmatter-less snippet hasn't opted into
+  // the declaration discipline, so flagging every quick `.output()` would be
+  // noise. The warning is advisory (extensions are ignorable by contract).
+  const extWarnings: string[] = [];
+  if (doc.frontmatter) {
+    const declared = new Set(
+      Array.isArray(doc.frontmatter.extensions)
+        ? doc.frontmatter.extensions.filter((e): e is string => typeof e === "string")
+        : [],
+    );
+    for (const used of lowerer.usedExtensions) {
+      if (!declared.has(used)) {
+        extWarnings.push(
+          `Uses the '${used}' extension but does not declare it in frontmatter (add it to 'extensions:')`,
+        );
+      }
+    }
+  }
+
   return {
     ...(meta && { meta }),
     expr: result.expr,
     errors: result.errors,
-    warnings: [...result.warnings, ...warnings],
+    warnings: [...result.warnings, ...warnings, ...extWarnings],
   };
 }
