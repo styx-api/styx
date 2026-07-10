@@ -31,8 +31,43 @@ import type { EmitWarning } from "../backend.js";
 
 const INDENT = "  ";
 
+/** Target content width (excluding the `/// ` prefix and indentation) for a
+ * wrapped `///` description line. */
+const DOC_WIDTH = 80;
+
 function pad(level: number): string {
   return INDENT.repeat(level);
+}
+
+/**
+ * Wrap a description into `///`-ready content lines. Paragraphs (separated by a
+ * blank line) are word-wrapped to `width`; an empty string marks a paragraph
+ * break (the caller emits it as a bare `///`).
+ *
+ * The argtype frontend reflows a `///` block as prose - a single line break
+ * rejoins with a space, a blank line separates paragraphs - so wrapping here is
+ * the inverse: it round-trips paragraph text exactly (whitespace within a
+ * paragraph is normalized to single spaces, matching the frontend's reflow), and
+ * keeps a long description from emitting as one giant physical line.
+ */
+function wrapDoc(text: string, width: number): string[] {
+  const lines: string[] = [];
+  for (const paragraph of text.split(/\n{2,}/)) {
+    const words = paragraph.split(/\s+/).filter((w) => w.length > 0);
+    if (words.length === 0) continue; // leading/trailing blank paragraph
+    if (lines.length > 0) lines.push(""); // blank `///` between paragraphs
+    let cur = "";
+    for (const word of words) {
+      if (cur === "") cur = word;
+      else if (cur.length + 1 + word.length <= width) cur += ` ${word}`;
+      else {
+        lines.push(cur);
+        cur = word;
+      }
+    }
+    if (cur !== "") lines.push(cur);
+  }
+  return lines;
 }
 
 function num(n: number): string {
@@ -216,29 +251,39 @@ class ArgtypeEmitter {
   private docLines(doc: Documentation | undefined): string[] {
     if (!doc) return [];
     const out: string[] = [];
-    const push = (text: string): void => {
-      for (const line of text.split("\n")) out.push(`/// ${line}`);
-    };
-    if (doc.title) push(`# ${doc.title}`);
+    // The title is a single H1 line (only the first line survives the title
+    // convention, so a multi-line title routes through `docNeedsChain` instead).
+    if (doc.title) out.push(`/// # ${doc.title}`);
     if (doc.title && doc.description) out.push("///");
-    if (doc.description) push(doc.description);
+    if (doc.description) {
+      for (const line of wrapDoc(doc.description, DOC_WIDTH)) {
+        out.push(line === "" ? "///" : `/// ${line}`);
+      }
+    }
     return out;
   }
 
   /**
-   * Whether a `///` block would be misread by the title convention on re-parse,
-   * so the doc must instead be emitted as `.title()` / `.description()` chaining
-   * (which sets the fields verbatim). Two cases: a multi-line title (only its
-   * first line would survive `splitDocText`), and a title-less description whose
-   * first line looks like an H1 heading (`# ...`, which would be promoted to a
-   * spurious title). A description under a title is safe - `splitDocText` only
-   * consumes the very first line as the title.
+   * Whether a `///` block would not round-trip, so the doc must instead be
+   * emitted as `.title()` / `.description()` chaining (which sets the fields
+   * verbatim). Three cases:
+   * - a multi-line title (only its first line would survive `splitDocText`);
+   * - a description with a lone line break (a single `\n`, not a blank-line
+   *   paragraph break), which a `///` block reflows to a space - chaining keeps
+   *   the hard break intact;
+   * - a title-less description whose first line looks like an H1 heading
+   *   (`# ...`), which would be promoted to a spurious title.
+   * A blank-line paragraph break is safe: the frontend reflows a `///` block back
+   * into the same paragraphs, and a description under a title is safe too
+   * (`splitDocText` consumes only the very first line as the title).
    */
   private docNeedsChain(doc: Documentation | undefined): boolean {
     if (!doc) return false;
     if (doc.title?.includes("\n")) return true;
-    if (!doc.title && doc.description) {
-      return (doc.description.split("\n")[0] ?? "").trim().startsWith("# ");
+    const desc = doc.description;
+    if (desc) {
+      if (desc.split(/\n{2,}/).some((para) => para.includes("\n"))) return true;
+      if (!doc.title && (desc.split("\n")[0] ?? "").trim().startsWith("# ")) return true;
     }
     return false;
   }

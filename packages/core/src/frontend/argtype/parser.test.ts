@@ -148,7 +148,8 @@ tool: seq(
     const input = nodes.find((n) => n.meta?.name === "input");
     const output = nodes.find((n) => n.meta?.name === "output");
     expect(input?.meta?.doc?.title).toBe("Short title");
-    expect(input?.meta?.doc?.description).toBe("The longer description\nspanning two lines.");
+    // Single line breaks soft-wrap (join with a space); only a blank line breaks a paragraph.
+    expect(input?.meta?.doc?.description).toBe("The longer description spanning two lines.");
     // No leading `# ` -> all description, even with a blank line (no title).
     expect(output?.meta?.doc?.title).toBeUndefined();
     expect(output?.meta?.doc?.description).toBe(

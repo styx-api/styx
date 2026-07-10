@@ -529,6 +529,48 @@ describe("argtype spec: documentation", () => {
     );
   });
 
+  it("soft-wraps single line breaks in a description (join with a space)", () => {
+    const r = parse(`tool: seq(
+      /// This description is wrapped
+      /// across three consecutive
+      /// lines for readability.
+      input: path,
+    )`);
+    expect(r.errors).toEqual([]);
+    expect(find(r.expr, "input")?.meta?.doc?.description).toBe(
+      "This description is wrapped across three consecutive lines for readability.",
+    );
+  });
+
+  it("keeps blank-line paragraph breaks while soft-wrapping each paragraph", () => {
+    const r = parse(`tool: seq(
+      /// First paragraph wrapped
+      /// over two lines.
+      ///
+      /// Second paragraph also
+      /// over two lines.
+      input: path,
+    )`);
+    expect(r.errors).toEqual([]);
+    expect(find(r.expr, "input")?.meta?.doc?.description).toBe(
+      "First paragraph wrapped over two lines.\n\nSecond paragraph also over two lines.",
+    );
+  });
+
+  it("soft-wraps the description under a `# ` title too", () => {
+    const r = parse(`tool: seq(
+      /// # Threshold
+      ///
+      /// Smaller values give
+      /// larger estimates.
+      input: path,
+    )`);
+    expect(r.errors).toEqual([]);
+    const input = find(r.expr, "input");
+    expect(input?.meta?.doc?.title).toBe("Threshold");
+    expect(input?.meta?.doc?.description).toBe("Smaller values give larger estimates.");
+  });
+
   it("sets `.title()`/`.description()` verbatim (no heading re-parse)", () => {
     const r = parse(`tool: seq(x: str.description("# not a title"))`);
     expect(r.errors).toEqual([]);
