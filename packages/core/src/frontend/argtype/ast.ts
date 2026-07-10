@@ -94,7 +94,8 @@ export interface AstAlias {
 export interface AstDocument {
   frontmatter?: Record<string, unknown>;
   aliases: AstAlias[];
-  /** The single root definition (`name: expr`). */
-  rootName: string;
+  /** The root definition's name (`name: expr`). Undefined for an anonymous root
+   * (a bare top-level expression); the tool id then falls back to frontmatter. */
+  rootName?: string;
   root: AstNode;
 }

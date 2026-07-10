@@ -14,14 +14,14 @@ import { splitFrontmatter } from "./frontmatter.js";
 import { parseTemplate } from "./template.js";
 import { splitDocText } from "./doc.js";
 
-/** Split a `///` block and attach its title/description to a node, unless the
- * node already carries them (a leading doc and a chained `.title()`/
- * `.description()` don't both win - the first assignment stays). */
+/** Split a `///` block and attach its title/description to a node. Per the spec,
+ * the block "is applied first and wins": for each field the block provides it
+ * overrides a value a chained `.title()`/`.description()` already set, while a
+ * field the block leaves unset keeps whatever the chain supplied. */
 function attachDocText(target: { title?: string; description?: string }, raw: string): void {
   const { title, description } = splitDocText(raw);
-  if (title !== undefined && target.title === undefined) target.title = title;
-  if (description !== undefined && target.description === undefined)
-    target.description = description;
+  if (title !== undefined) target.title = title;
+  if (description !== undefined) target.description = description;
 }
 
 const COMBINATORS = new Set<Combinator>(["seq", "set", "opt", "rep", "alt", "any"]);
@@ -103,30 +103,37 @@ class Parser {
 
     while (!this.at("eof")) {
       const docs = this.collectDocs();
+      if (this.at("eof")) break; // trailing docs before end of file
 
-      if (!this.at("ident") && !this.at("string")) {
-        this.error(`Expected a definition (name: expr) or alias (Name = expr)`);
-        break;
-      }
-      const nameTok = this.next();
-      const quotedName = nameTok.kind === "string";
+      // An alias (`Name = expr`) or a named root (`name: expr`) both begin with
+      // an identifier / quoted label followed by `=` / `:`. Anything else at the
+      // top level is a bare, anonymous root expression - the spec lets the root
+      // be unnamed (its id then falls back to `exe`/`id` frontmatter).
+      const labelLike = this.at("ident") || this.at("string");
+      const following = this.peek(1).kind;
 
-      if (this.at("eq")) {
+      if (labelLike && following === "eq") {
         // Alias: Name = expr. Alias names must be identifiers (they are
         // referenced by bare name at each use site).
-        if (quotedName) this.error("Alias names must be identifiers, not quoted strings", nameTok);
-        this.next();
+        const nameTok = this.next();
+        if (nameTok.kind === "string")
+          this.error("Alias names must be identifiers, not quoted strings", nameTok);
+        this.next(); // '='
         const expr = this.parseElement();
         if (docs) attachDocText(expr, docs);
         aliases.push({ name: nameTok.value, expr });
-      } else if (this.at("colon")) {
-        // Root definition: name: expr
-        this.next();
+        continue;
+      }
+
+      if (labelLike && following === "colon") {
+        // Named root definition: name: expr
+        const nameTok = this.next();
+        this.next(); // ':'
         const expr = this.parseElement();
         if (docs) attachDocText(expr, docs);
         if (root) {
           this.error(
-            `Multiple root definitions; '${nameTok.value}' ignored (already have '${rootName}')`,
+            `Multiple root definitions; '${nameTok.value}' ignored (already have '${rootName ?? "<anonymous>"}')`,
             nameTok,
           );
         } else {
@@ -134,17 +141,42 @@ class Parser {
           root = expr;
           if (!root.name) root.name = nameTok.value;
         }
-      } else {
-        this.error(`Expected ':' or '=' after '${nameTok.value}'`, nameTok);
+        continue;
+      }
+
+      // Anonymous root: a bare expression (`seq(...)`, `rep(str)`, `path`,
+      // `"literal"`, `(...)`, or an alias reference). It leaves `rootName`
+      // unset; lowering derives the tool id from frontmatter. Every root
+      // expression starts with an identifier, a string, or `(`; a top-level
+      // token that cannot start an expression is a syntax error, not an
+      // anonymous root (guarding this keeps `parsePrimary`'s empty-literal
+      // fallback from being adopted as the root and then reported as a
+      // spurious duplicate of the real one).
+      if (!this.at("ident") && !this.at("string") && !this.at("lparen")) {
+        this.error(
+          "Expected a definition (name: expr), an alias (Name = expr), or a root expression",
+        );
         break;
       }
+      const expr = this.parseElement();
+      if (docs) attachDocText(expr, docs);
+      if (root) {
+        this.error("Multiple root definitions; a second top-level expression is not allowed");
+        break;
+      }
+      root = expr;
     }
 
-    if (!root || rootName === undefined) {
-      this.error("No root definition (expected `name: expr`)");
+    if (!root) {
+      this.error("No root definition (expected `name: expr` or a bare root expression)");
       return undefined;
     }
-    return { ...(frontmatter && { frontmatter }), aliases, rootName, root };
+    return {
+      ...(frontmatter && { frontmatter }),
+      aliases,
+      ...(rootName !== undefined && { rootName }),
+      root,
+    };
   }
 
   /** Collect consecutive `///` doc lines, joined with newlines. */
