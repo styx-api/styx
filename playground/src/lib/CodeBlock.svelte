@@ -6,11 +6,11 @@
     type LanguageRegistration,
   } from "shiki";
   import { onMount } from "svelte";
-  import { irGrammar, bindingsGrammar } from "./grammars.js";
+  import { irGrammar, bindingsGrammar, argtypeGrammar } from "./grammars.js";
 
   interface Props {
     code: string;
-    lang?: BundledLanguage | "ir" | "bindings";
+    lang?: BundledLanguage | "ir" | "bindings" | "argtype";
   }
 
   let { code, lang = "json" }: Props = $props();
@@ -35,6 +35,7 @@
       // Hand-authored TextMate grammars; cast to shiki's registration shape.
       await highlighter.loadLanguage(irGrammar as unknown as LanguageRegistration);
       await highlighter.loadLanguage(bindingsGrammar as unknown as LanguageRegistration);
+      await highlighter.loadLanguage(argtypeGrammar as unknown as LanguageRegistration);
 
       grammarsLoaded = true;
     } catch (e) {

@@ -1,24 +1,35 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { EditorView, minimalSetup } from "codemirror";
-  import { EditorState } from "@codemirror/state";
+  import { Compartment, EditorState, type Extension } from "@codemirror/state";
   import { json } from "@codemirror/lang-json";
   import { oneDark } from "@codemirror/theme-one-dark";
+  import type { FormatName } from "@styx-api/core";
+  import { argtype } from "./argtype-mode.js";
 
   interface Props {
     input: string;
+    format: FormatName | null;
   }
 
-  let { input = $bindable() }: Props = $props();
+  let { input = $bindable(), format }: Props = $props();
   let editorContainer: HTMLDivElement;
   let editorView: EditorView;
+
+  // Swap the syntax-highlighting language to match the detected format: the
+  // JSON frontends all use CodeMirror's JSON mode, argtype uses its own.
+  const language = new Compartment();
+
+  function languageFor(fmt: FormatName | null): Extension {
+    return fmt === "argtype" ? argtype() : json();
+  }
 
   onMount(() => {
     const state = EditorState.create({
       doc: input,
       extensions: [
         minimalSetup,
-        json(),
+        language.of(languageFor(format)),
         oneDark,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
@@ -44,6 +55,11 @@
         changes: { from: 0, to: editorView.state.doc.length, insert: input },
       });
     }
+  });
+
+  // Reconfigure the language whenever the detected format changes.
+  $effect(() => {
+    editorView?.dispatch({ effects: language.reconfigure(languageFor(format)) });
   });
 </script>
 

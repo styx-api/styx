@@ -44,6 +44,12 @@ describe("detectFormat", () => {
     expect(detectFormat(source)).toBe("mrtrix");
   });
 
+  it("detects boutiques regardless of leading whitespace before the brace", () => {
+    const source =
+      "  \n  " + JSON.stringify({ name: "tool", "command-line": "tool [X]", inputs: [] });
+    expect(detectFormat(source)).toBe("boutiques");
+  });
+
   it("detects argtype by a combinator call", () => {
     expect(detectFormat("bet: seq(infile: path)")).toBe("argtype");
     expect(detectFormat("x: opt(str)")).toBe("argtype");
@@ -65,24 +71,40 @@ describe("detectFormat", () => {
     expect(detectFormat('"1deval": path')).toBe("argtype");
   });
 
-  it("returns null for non-JSON prose that is not argtype", () => {
-    expect(detectFormat("not json")).toBeNull();
-    expect(detectFormat("the cat sat (here)")).toBeNull();
+  it("detects a bare terminal or literal root as argtype", () => {
+    // These are valid argtype but also valid JSON scalars; the leading-char
+    // rule keeps them from being swallowed and rejected as "not an object".
+    expect(detectFormat("int")).toBe("argtype");
+    expect(detectFormat('"hello"')).toBe("argtype");
+    expect(detectFormat("42")).toBe("argtype");
   });
 
-  it("never misclassifies valid JSON as argtype even if a string contains seq(", () => {
-    // Valid JSON parses successfully and never reaches the argtype text check.
+  it("treats any non-brace, non-blank source as argtype", () => {
+    // The only non-JSON frontend is argtype, so anything that does not open as
+    // a JSON object is handed to the argtype parser (which reports its own
+    // errors) rather than left undetected.
+    expect(detectFormat("not json")).toBe("argtype");
+    expect(detectFormat("the cat sat (here)")).toBe("argtype");
+    expect(detectFormat("[]")).toBe("argtype");
+  });
+
+  it("returns null for a brace-leading object that matches no known JSON format", () => {
     const source = JSON.stringify({ foo: "this mentions seq( in a value" });
     expect(detectFormat(source)).toBeNull();
   });
 
-  it("returns null for non-object JSON", () => {
-    expect(detectFormat('"string"')).toBeNull();
-    expect(detectFormat("[]")).toBeNull();
-  });
-
   it("returns null for ambiguous input", () => {
     expect(detectFormat(JSON.stringify({ foo: "bar" }))).toBeNull();
+  });
+
+  it("returns null for blank or whitespace-only input", () => {
+    expect(detectFormat("")).toBeNull();
+    expect(detectFormat("   \n  \t ")).toBeNull();
+  });
+
+  it("returns null for a brace-leading source that is not valid JSON yet", () => {
+    // Mid-edit: opens like an object but does not parse.
+    expect(detectFormat('{ "name": ')).toBeNull();
   });
 
   it("prefers $schema detection over key heuristics", () => {
