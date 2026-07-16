@@ -1036,6 +1036,10 @@ class BoutiquesEmitter {
       type: subBt,
       list: true,
       minListEntries: countMin,
+      // A count that tolerates zero occurrences may be omitted entirely.
+      // Without this, Boutiques defaults `optional` to false and rejects an
+      // invocation that leaves the flag out. Mirrors the bounded path above.
+      ...(countMin === 0 && { optional: true }),
     };
   }
 }
