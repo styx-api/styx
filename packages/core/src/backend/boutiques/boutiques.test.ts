@@ -291,6 +291,45 @@ describe("Boutiques generation", () => {
 });
 
 describe("Boutiques subcommands", () => {
+  // A wrapper flag on a subcommand-typed input lives OUTSIDE the struct body:
+  // `seq(lit("-i"), seq(fixed, moving))`. Nothing but `peelNode` serializes it,
+  // so it has to be peeled onto `command-line-flag`. Contrast the struct-body
+  // shape in "optional-value flag (struct-typed input)" below, where the
+  // literal is inside the body and must NOT be peeled. Both are struct-typed,
+  // so only the node shape tells them apart.
+  it("keeps a wrapper command-line-flag on a subcommand-typed input", () => {
+    // Regression: guarding the peel on `type.kind === "struct"` alone dropped
+    // this flag entirely, silently emitting `greedy fixed.nii moving.nii`.
+    // Shape taken from niwrap greedy's `-i` input.
+    const source = minimalDescriptor({
+      "command-line": "greedy [INPUT_IMAGES]",
+      inputs: [
+        {
+          id: "input_images",
+          "value-key": "[INPUT_IMAGES]",
+          "command-line-flag": "-i",
+          optional: true,
+          type: {
+            id: "input_images",
+            "command-line": "[FIXED] [MOVING]",
+            inputs: [
+              { id: "fixed", "value-key": "[FIXED]", type: "File" },
+              { id: "moving", "value-key": "[MOVING]", type: "File" },
+            ],
+          },
+        },
+      ],
+    });
+    const bt = emitFor(source);
+    const inp = (bt.inputs as Record<string, unknown>[]).find((i) => i.id === "input_images")!;
+
+    expect(inp["command-line-flag"]).toBe("-i");
+    const sub = inp.type as Record<string, unknown>;
+    expect(sub["command-line"]).toBe("[FIXED] [MOVING]");
+    // Exactly once, and not swallowed into the sub-descriptor.
+    expect(JSON.stringify(bt).split('"-i"').length - 1).toBe(1);
+  });
+
   it("collapses a lone (non-union) subcommand into the root command", () => {
     // The evolved model collapses `seq(T) -> T`, so a single (non-union)
     // subcommand merges into the root: its inputs surface as the tool's own
@@ -826,6 +865,77 @@ describe("argdump -> Boutiques validity", () => {
     expect(inp!.type).toBe("Number");
     expect(inp!["default-value"]).toBeUndefined();
     expect(inp!.description).toContain("Default: 0.5");
+  });
+
+  // An optional-value flag (`--cifti-output [91k|170k]`) solves to a struct
+  // whose body is `seq(lit("--cifti-output"), optional(choice))`. That leading
+  // literal is the sub-descriptor's own command-line, not a wrapper flag.
+  describe("optional-value flag (struct-typed input)", () => {
+    const CIFTI_OUTPUT = {
+      prog: "mytool",
+      actions: [
+        {
+          option_strings: ["--cifti-output"],
+          dest: "cifti_output",
+          action_type: "store",
+          nargs: "?",
+          default: false,
+          type_info: { name: "str", builtin: true },
+          choices: ["91k", "170k"],
+        },
+      ],
+    };
+
+    it("emits the flag once, inside the sub-descriptor", () => {
+      // Regression: peelNode claimed the struct's leading literal as an outer
+      // `command-line-flag` while buildSubCommand also serialized it into the
+      // nested `command-line`, rendering `mytool --cifti-output --cifti-output 91k`.
+      const bt = emitFromArgdump(CIFTI_OUTPUT);
+      const inputs = bt.inputs as Record<string, unknown>[];
+      const inp = inputs.find((i) => i.id === "cifti_output")!;
+
+      expect(inp["command-line-flag"]).toBeUndefined();
+      const sub = inp.type as Record<string, unknown>;
+      expect(sub["command-line"]).toBe("--cifti-output [CIFTI_OUTPUT]");
+      expect(JSON.stringify(bt).split("--cifti-output").length - 1).toBe(1);
+    });
+
+    it("gives the anonymous sub-descriptor an id and name", () => {
+      // Regression: a struct the frontend never named emitted a type object of
+      // just {command-line, inputs}, which `bosh validate` rejects.
+      const bt = emitFromArgdump(CIFTI_OUTPUT);
+      const inputs = bt.inputs as Record<string, unknown>[];
+      const sub = inputs.find((i) => i.id === "cifti_output")!.type as Record<string, unknown>;
+
+      expect(sub.id).toBe("cifti_output");
+      expect(sub.name).toBe("cifti_output");
+    });
+
+    it("round-trips the source command-line structure", () => {
+      // The load-bearing invariant: re-parsing the descriptor must reproduce
+      // the IR it was emitted from. Idempotence (emit -> parse -> emit) does
+      // NOT catch the duplicated flag, which is a stable fixed point.
+      const stripMeta = (e: unknown): unknown => {
+        if (Array.isArray(e)) return e.map(stripMeta);
+        if (e && typeof e === "object") {
+          const o = e as Record<string, unknown>;
+          const out: Record<string, unknown> = {};
+          for (const k of Object.keys(o).sort()) {
+            if (k !== "meta") out[k] = stripMeta(o[k]);
+          }
+          return out;
+        }
+        return e;
+      };
+
+      const source = defaultPipeline.apply(
+        argdumpParser.parse(JSON.stringify(CIFTI_OUTPUT)).expr,
+      ).expr;
+      const emitted = emitFromArgdump(CIFTI_OUTPUT);
+      const reparsed = defaultPipeline.apply(parser.parse(JSON.stringify(emitted)).expr).expr;
+
+      expect(stripMeta(reparsed)).toEqual(stripMeta(source));
+    });
   });
 });
 
