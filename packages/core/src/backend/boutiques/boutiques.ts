@@ -404,21 +404,9 @@ class BoutiquesEmitter {
         wrapperNode,
       );
 
-      // Add flag to command line if present, then value-key
-      if (peeled.flag) {
-        if (
-          fieldType.kind === "bool" ||
-          (fieldType.kind === "optional" && this.isBool(fieldType))
-        ) {
-          // Bool flags: the value-key IS the flag
-          commandParts.push(valueKeyStr);
-        } else {
-          // Value flags: flag then value-key as separate args
-          commandParts.push(valueKeyStr);
-        }
-      } else {
-        commandParts.push(valueKeyStr);
-      }
+      // The value-key alone: a peeled flag rides on the input's
+      // `command-line-flag`, and Boutiques renders it ahead of the value.
+      commandParts.push(valueKeyStr);
 
       inputs.push(input);
     }
@@ -579,6 +567,7 @@ class BoutiquesEmitter {
   // had to fall back to String.
   private finalizeInput(input: BtInput): void {
     if (input.name === undefined) input.name = input.id;
+    this.finalizeSubDescriptors(input);
 
     // A String with a bool default and no choices is really a Flag.
     if (
@@ -624,6 +613,24 @@ class BoutiquesEmitter {
     this.mergeDefaultIntoDescription(input);
   }
 
+  // A sub-descriptor used as an input `type` needs an `id`: it is required by
+  // the schema, and for union variants it doubles as the `@type` discriminator.
+  // Anonymous IR nodes (a struct the frontend never named) leave it unset, so
+  // fall back to the owning input's id, which is already unique in this scope.
+  private finalizeSubDescriptors(input: BtInput): void {
+    const type = input.type;
+    if (Array.isArray(type)) {
+      type.forEach((sub, i) => this.ensureSubDescriptorId(sub, `${input.id}_${i + 1}`));
+    } else if (typeof type === "object" && type !== null) {
+      this.ensureSubDescriptorId(type, input.id);
+    }
+  }
+
+  private ensureSubDescriptorId(sub: BtDescriptor, fallback: string): void {
+    if (sub.id === undefined) sub.id = this.sanitizeId(fallback);
+    if (sub.name === undefined) sub.name = sub.id;
+  }
+
   // Peel wrapper layers from an IR node to extract Boutiques input properties.
   // Walks from outermost to innermost, detecting optional/repeat/flag patterns.
   private peelNode(node: Expr, type: BoundType): PeeledInput {
@@ -652,6 +659,23 @@ class BoutiquesEmitter {
         break;
 
       case "sequence": {
+        // Two shapes both present as `seq(lit, x)` with a struct-typed field,
+        // and only the node tells them apart:
+        //
+        //   struct body    seq(lit("--cifti-output"), optional(choice))
+        //     - the literal is the sub-descriptor's own `command-line`, which
+        //       `buildFromStruct` serializes by walking these same children.
+        //       Peeling it would emit it twice.
+        //   flag wrapper   seq(lit("-i"), seq(fixed, moving))
+        //     - the struct body is `nodes[1]`; the literal is outside it and
+        //       nothing else serializes it. Not peeling it would drop it.
+        //
+        // `findStructNode` returns the body, so identity separates the cases.
+        const structType = this.unwrapType(type);
+        if (structType.kind === "struct" && findStructNode(node, this.ctx, structType) === node) {
+          break;
+        }
+
         // Detect flag pattern: seq(lit(flag), inner)
         const nodes = node.attrs.nodes;
         if (nodes.length === 2 && nodes[0]!.kind === "literal") {
