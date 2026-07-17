@@ -10,7 +10,10 @@ import { collectFieldInfo, resolveTypeName } from "./types.js";
 
 export function emitJsDoc(cb: CodeBuilder, description?: string): void {
   if (!description) return;
-  const lines = description.split("\n");
+  // Escape `*/` so a description containing it can't terminate the block comment
+  // early (`*\/` is not a comment terminator; the backslash is inert in comments).
+  const safe = description.replace(/\*\//g, "*\\/");
+  const lines = safe.split("\n");
   if (lines.length === 1) {
     cb.line(`/** ${lines[0]} */`);
   } else {

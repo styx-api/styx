@@ -17,8 +17,13 @@ import { collectFieldInfo, resolveTypeName } from "./types.js";
  */
 export function emitDocstring(cb: CodeBuilder, text?: string): void {
   if (!text) return;
-  const lines = text.split("\n");
-  if (lines.length === 1 && !lines[0]!.includes('"')) {
+  // Escape embedded triple-quotes so a `"""` in the text can't close the
+  // docstring early.
+  const escaped = text.replace(/"""/g, '\\"\\"\\"');
+  const lines = escaped.split("\n");
+  // Single-line form only when safe: no embedded quote, and no trailing
+  // backslash (which would escape the closing quotes, e.g. `"""x\"""`).
+  if (lines.length === 1 && !lines[0]!.includes('"') && !lines[0]!.endsWith("\\")) {
     cb.line(`"""${lines[0]}"""`);
     return;
   }
