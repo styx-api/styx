@@ -110,9 +110,20 @@ const tsStatus = run("typescript: tsc --noEmit", process.execPath, [
   tsProject,
 ]);
 
+// Resolve the Python interpreter: honor $PYTHON, else prefer `python3` then
+// `python` (Linux/macOS CI often only ships `python3`).
+function resolvePython() {
+  if (process.env.PYTHON) return process.env.PYTHON;
+  for (const cmd of ["python3", "python"]) {
+    const probe = spawnSync(cmd, ["--version"], { stdio: "ignore" });
+    if (!probe.error) return cmd;
+  }
+  return "python"; // fall back; run() reports a clear launch failure
+}
+
 // mypy: styxdefs is an external runtime, so ignore its (uninstalled) imports;
 // --strict maximizes coverage of the generated code itself.
-const pyStatus = run("python: mypy --strict", "python", [
+const pyStatus = run("python: mypy --strict", resolvePython(), [
   "-m",
   "mypy",
   "--strict",
