@@ -20,29 +20,36 @@ export function destructTemplate<T>(template: string, lookup: Record<string, T>)
       continue;
     }
 
-    let didSplit = false;
-
+    // Pick the leftmost match; on a tie in position, the longest alias wins
+    // (maximal munch), so a value-key that is a prefix of another (e.g. `foo`
+    // vs `foobar`) does not shadow it by mere iteration order.
+    let best: { idx: number; alias: string; replacement: T } | null = null;
     for (const [alias, replacement] of Object.entries(lookup)) {
+      if (alias.length === 0) continue;
       const idx = x.indexOf(alias);
-      if (idx !== -1) {
-        const left = x.slice(0, idx);
-        const right = x.slice(idx + alias.length);
-
-        if (right.length > 0) {
-          stack.unshift(right);
-        }
-        stack.unshift(replacement);
-        if (left.length > 0) {
-          stack.unshift(left);
-        }
-
-        didSplit = true;
-        break;
+      if (idx === -1) continue;
+      if (
+        best === null ||
+        idx < best.idx ||
+        (idx === best.idx && alias.length > best.alias.length)
+      ) {
+        best = { idx, alias, replacement };
       }
     }
 
-    if (!didSplit) {
+    if (best === null) {
       destructed.push(x);
+      continue;
+    }
+
+    const left = x.slice(0, best.idx);
+    const right = x.slice(best.idx + best.alias.length);
+    if (right.length > 0) {
+      stack.unshift(right);
+    }
+    stack.unshift(best.replacement);
+    if (left.length > 0) {
+      stack.unshift(left);
     }
   }
 

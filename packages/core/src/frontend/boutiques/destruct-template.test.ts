@@ -63,11 +63,17 @@ describe("destructTemplate", () => {
     ).toEqual(["hello ", "Alice", ", welcome to ", "Wonderland"]);
   });
 
-  it("handles overlapping placeholder names (first match wins)", () => {
-    // Note: iteration order dependent
-    const result = destructTemplate("foobar", { foo: 1, foobar: 2 });
-    // With object iteration, 'foo' comes first
-    expect(result).toEqual([1, "bar"]);
+  it("handles overlapping placeholder names (longest match wins)", () => {
+    // Maximal munch: a value-key that is a prefix of another must not shadow it,
+    // regardless of iteration order.
+    expect(destructTemplate("foobar", { foo: 1, foobar: 2 })).toEqual([2]);
+    expect(destructTemplate("foobar", { foobar: 2, foo: 1 })).toEqual([2]);
+  });
+
+  it("prefers the leftmost match over iteration order", () => {
+    // 'b' appears in the lookup first but 'a' occurs earlier in the template;
+    // the split must happen at the leftmost occurrence.
+    expect(destructTemplate("a-b", { b: 2, a: 1 })).toEqual([1, "-", 2]);
   });
 
   it("works with array values", () => {
