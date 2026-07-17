@@ -146,7 +146,10 @@ function emitValue(
       const itemNode = findRepeatNode(node)?.attrs.node;
       const elem = e.scope.add("e");
       e.cb.line(`for ${elem} in ${valueExpr}:`);
-      e.cb.indent(() => emitValue(e, type.item, itemNode, wireKey, elem, expected));
+      // Report the element type (e.g. `int`), not the list type (`list[int]`).
+      e.cb.indent(() =>
+        emitValue(e, type.item, itemNode, wireKey, elem, expectedType(e, type.item)),
+      );
       return;
     }
     case "struct": {
