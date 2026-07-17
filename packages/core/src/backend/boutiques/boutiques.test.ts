@@ -614,6 +614,10 @@ describe("argdump -> Boutiques validity", () => {
     expect(inp).toBeDefined();
     expect(inp!.list).toBe(true);
     expect(inp!["min-list-entries"]).toBe(0);
+    // A count tolerating zero occurrences may be omitted. `optional` defaults
+    // to false in Boutiques, so without this an invocation that leaves the
+    // flag out is rejected ("verbose: Field required").
+    expect(inp!.optional).toBe(true);
     // No list-separator: Boutiques must emit each list item as a separate
     // argv element so argparse `count` reads them as N occurrences. A
     // separator would collapse them into one space-joined argument.
