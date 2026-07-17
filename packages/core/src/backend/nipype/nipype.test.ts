@@ -118,6 +118,16 @@ describe("nipype InputSpec - rich traits", () => {
   it("maps an enum to traits.Enum over its choices", () => {
     expect(bet()).toContain('mode = traits.Enum("fast", "robust", mandatory=True)');
   });
+
+  it("does not widen the choice set with an out-of-spec default", () => {
+    const expr = seq(lit("t"), withDefault(namedAlt("mode", lit("fast"), lit("robust")), "legacy"));
+    const code = generateNipype(generateCtx(expr, { app: { id: "t" }, package: { name: "p" } }));
+    // "legacy" is not a valid choice, so it must not be prepended as an allowed
+    // value, and the enum must not claim usedefault.
+    expect(code).toContain('mode = traits.Enum("fast", "robust"');
+    expect(code).not.toContain('"legacy"');
+    expect(code).not.toMatch(/mode = traits\.Enum\([^)]*usedefault=True/);
+  });
 });
 
 describe("nipype OutputSpec + execution glue", () => {

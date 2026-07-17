@@ -116,11 +116,19 @@ export function renderInputTrait(p: TypedParam): string {
       ]);
     case "enum": {
       const choices = p.choices ?? [];
-      // nipype's first Enum arg is the default; put the styx default first.
-      const ordered = hasDef ? [def!, ...choices.filter((c) => c !== def)] : choices;
+      // nipype's first Enum arg is the default; put the styx default first, but
+      // only when it is actually one of the choices - prepending an out-of-spec
+      // default would silently widen the allowed set. (Enum choices are never
+      // booleans, so a boolean default can't be one.)
+      const defChoice =
+        hasDef && def !== undefined && typeof def !== "boolean" && choices.includes(def)
+          ? def
+          : undefined;
+      const ordered =
+        defChoice !== undefined ? [defChoice, ...choices.filter((c) => c !== defChoice)] : choices;
       return call("traits.Enum", [
         ...ordered.map((c) => renderPyLiteral(c)),
-        ...(hasDef ? ["usedefault=True"] : []),
+        ...(defChoice !== undefined ? ["usedefault=True"] : []),
         ...tail,
       ]);
     }
