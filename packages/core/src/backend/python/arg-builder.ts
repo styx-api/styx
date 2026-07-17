@@ -1,5 +1,5 @@
 import type { Binding, BindingId, BoundType, BoundVariant } from "../../bindings/index.js";
-import { collectFieldInfo } from "../collect-field-info.js";
+import { collectDefaults, rootFieldDefault } from "../field-defaults.js";
 import type { Expr } from "../../ir/index.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
@@ -97,15 +97,6 @@ interface ArgContext {
  * carrying a Boutiques default. Restricted to single-segment (root) field access
  * so a nested field can never accidentally pick up a same-named root default.
  */
-function rootFieldDefault(
-  binding: Binding,
-  defaults: ReadonlyMap<string, string>,
-): string | undefined {
-  const a = binding.access;
-  if (a.length === 1 && a[0]?.kind === "field") return defaults.get(binding.name);
-  return undefined;
-}
-
 /**
  * Render a binding's access for an UNCONDITIONAL value read (terminal, repeat
  * loop, alternative dispatch): substitutes the field's default via
@@ -145,22 +136,6 @@ function accessOf(binding: Binding, arg: ArgContext, opts: AccessOpts = {}): str
   );
 }
 
-/**
- * Build the field-name -> rendered-default map for a struct root (else empty).
- * Includes only non-optional defaulted fields (optional fields are
- * presence-guarded; their default comes from the factory's kwarg signature).
- */
-function collectDefaults(ctx: CodegenContext, rootType?: BoundType): Map<string, string> {
-  const out = new Map<string, string>();
-  if (rootType?.kind !== "struct") return out;
-  for (const [name, fi] of collectFieldInfo(ctx, rootType)) {
-    if (fi.defaultValue === undefined) continue;
-    if (rootType.fields[name]?.kind === "optional") continue;
-    out.set(name, renderPyLiteral(fi.defaultValue));
-  }
-  return out;
-}
-
 // -- Recursive descent --
 
 let loopVarCounter = 0;
@@ -179,7 +154,7 @@ export function buildArgs(rootExpr: Expr, ctx: CodegenContext, rootType?: BoundT
     joinDepth: 0,
     loopVars: new Map(),
     valueSubst: new Map(),
-    defaults: collectDefaults(ctx, rootType),
+    defaults: collectDefaults(ctx, renderPyLiteral, rootType),
   };
   return walk(rootExpr, ctx, initialCtx);
 }

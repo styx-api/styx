@@ -1,12 +1,6 @@
-import type {
-  Binding,
-  BindingId,
-  BoundType,
-  GateAtom,
-  ResolvedToken,
-} from "../../bindings/index.js";
+import type { BindingId, BoundType, GateAtom, ResolvedToken } from "../../bindings/index.js";
 import { outputGate } from "../../bindings/index.js";
-import { collectFieldInfo } from "../collect-field-info.js";
+import { collectDefaults, rootFieldDefault } from "../field-defaults.js";
 import type { CodegenContext } from "../../manifest/index.js";
 import { CodeBuilder } from "../code-builder.js";
 import {
@@ -87,32 +81,6 @@ interface OutputEmitCtx {
    * builder's `defaults`.
    */
   defaults: ReadonlyMap<string, string>;
-}
-
-/** The rendered default for a binding iff it is a root-level defaulted field. */
-function rootFieldDefault(
-  binding: Binding | undefined,
-  defaults: ReadonlyMap<string, string>,
-): string | undefined {
-  if (!binding) return undefined;
-  const a = binding.access;
-  if (a.length === 1 && a[0]?.kind === "field") return defaults.get(binding.name);
-  return undefined;
-}
-
-/** Build the field-name -> rendered-default map for the struct root (else empty).
- * Includes only non-optional defaulted fields (optional fields are
- * presence-guarded; their default comes from the factory's kwarg signature). */
-function collectDefaults(ctx: CodegenContext): Map<string, string> {
-  const out = new Map<string, string>();
-  const rootType = ctx.resolve(ctx.expr)?.type;
-  if (rootType?.kind !== "struct") return out;
-  for (const [name, fi] of collectFieldInfo(ctx, rootType)) {
-    if (fi.defaultValue === undefined) continue;
-    if (rootType.fields[name]?.kind === "optional") continue;
-    out.set(name, renderPyLiteral(fi.defaultValue));
-  }
-  return out;
 }
 
 interface WrapperRender {
@@ -339,7 +307,7 @@ export function emitBuildOutputs(
       ctx,
       iter: new Map(),
       subst: new Map(),
-      defaults: collectDefaults(ctx),
+      defaults: collectDefaults(ctx, renderPyLiteral),
     };
 
     const fields = collectOutputFields(ctx, pyId);
