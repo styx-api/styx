@@ -844,14 +844,9 @@ class BoutiquesEmitter {
       };
     }
 
-    // All-struct union -> SubCommandUnion
-    const allStruct = type.variants.every((v: BoundVariant) => v.type.kind === "struct");
-    if (allStruct) {
-      return { type: this.buildSubCommandUnion(type, node) };
-    }
-
-    // Mixed union -> wrap each variant as a SubCommand descriptor
-    return { type: this.buildMixedUnionAsSubCommands(type, node) };
+    // Any other union (all-struct or mixed) -> one SubCommand descriptor per
+    // variant: struct arms serialize recursively, non-struct arms are wrapped.
+    return { type: this.buildUnionSubCommands(type, node) };
   }
 
   private buildSubCommand(type: Extract<BoundType, { kind: "struct" }>, node: Expr): BtDescriptor {
@@ -868,29 +863,10 @@ class BoutiquesEmitter {
     return bt;
   }
 
-  private buildSubCommandUnion(
-    type: Extract<BoundType, { kind: "union" }>,
-    node: Expr,
-  ): BtDescriptor[] {
-    const alts = node.kind === "alternative" ? node.attrs.alts : [node];
-
-    return type.variants.map((variant: BoundVariant, i: number) => {
-      const altNode = alts[i] ?? node;
-      if (variant.type.kind === "struct") {
-        const bt = this.buildSubCommand(variant.type, altNode);
-        // The variant has its own name; the wrapperNode's name is the
-        // parent (mutex group) name and would otherwise leak down.
-        if (variant.name) {
-          bt.name = variant.name;
-          bt.id = this.sanitizeId(variant.name);
-        }
-        return bt;
-      }
-      return this.wrapAsDescriptor(variant, altNode);
-    });
-  }
-
-  private buildMixedUnionAsSubCommands(
+  // One SubCommand descriptor per union variant. Handles both all-struct and
+  // mixed unions: struct arms serialize recursively, non-struct arms are wrapped
+  // as a trivial single-input descriptor.
+  private buildUnionSubCommands(
     type: Extract<BoundType, { kind: "union" }>,
     node: Expr,
   ): BtDescriptor[] {
