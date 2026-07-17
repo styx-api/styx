@@ -221,7 +221,10 @@ export function loadCatalog(root: string): CatalogProject {
 
   if (level === "project") {
     const project = readJson<ProjectJson>(path.join(root, "project.json"));
-    const packageNames = project.packages ?? listSubdirs(root);
+    // Sort the directory fallback so package order (and thus emit/barrel order)
+    // is deterministic regardless of filesystem iteration order, matching the
+    // app-list fallback in loadVersion.
+    const packageNames = project.packages ?? listSubdirs(root).sort();
     const packages: CatalogPackage[] = [];
     for (const name of packageNames) {
       const pkgDir = path.join(root, name);

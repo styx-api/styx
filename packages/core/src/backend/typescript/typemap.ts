@@ -1,5 +1,13 @@
 import type { BoundType } from "../../bindings/index.js";
 
+// A valid TS identifier can be an unquoted object key; anything else (e.g. a
+// wire key like `4d_input`) must be quoted. Kept local to avoid a cycle with
+// emit.ts (which imports this module).
+const TS_IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+function objKey(key: string): string {
+  return TS_IDENT_RE.test(key) ? key : JSON.stringify(key);
+}
+
 export function mapType(type: BoundType, resolve: (type: BoundType) => string | undefined): string {
   switch (type.kind) {
     case "scalar":
@@ -27,7 +35,7 @@ export function mapType(type: BoundType, resolve: (type: BoundType) => string | 
       if (name) return name;
       const fields = Object.entries(type.fields)
         .filter(([, v]) => v.kind !== "literal")
-        .map(([k, v]) => `${k}: ${mapType(v, resolve)}`)
+        .map(([k, v]) => `${objKey(k)}: ${mapType(v, resolve)}`)
         .join("; ");
       return `{ ${fields} }`;
     }

@@ -26,7 +26,12 @@ cli
     for (const line of result.stderr) console.error(line);
     // Write whatever compiled - a catalog build returns partial output alongside
     // a non-zero exit code, and fail-hard paths return an empty file list.
-    writeFiles(result.files);
+    try {
+      writeFiles(result.files);
+    } catch (e) {
+      console.error(`error: ${e instanceof Error ? e.message : String(e)}`);
+      process.exit(1);
+    }
     for (const line of result.stdout) console.log(line);
     if (result.exitCode !== 0) process.exit(result.exitCode);
   });
