@@ -65,12 +65,22 @@ export function runBuildCommand(input: string | undefined, flags: BuildFlags): R
     stderr.push(`summary: ${appsCompiled} compiled, ${appsFailed} failed, ${appsSkipped} skipped`);
   }
 
-  if (result.errors.length > 0) {
+  const hasErrors = result.errors.length > 0;
+  // A catalog build isolates per-tool failures (`result.stats` is set), so a few
+  // broken tools must not discard every tool that compiled cleanly: write the
+  // partial output but still exit non-zero so the failure is visible to CI.
+  // A single-descriptor build has nothing partial to salvage, so it fails hard.
+  const isCatalog = result.stats !== undefined;
+  if (hasErrors && !isCatalog) {
     return { exitCode: 1, stdout, stderr, files: [] };
   }
 
-  stdout.push(`wrote ${result.files.length} file${result.files.length === 1 ? "" : "s"} to ${out}`);
-  return { exitCode: 0, stdout, stderr, files: result.files };
+  if (result.files.length > 0) {
+    stdout.push(
+      `wrote ${result.files.length} file${result.files.length === 1 ? "" : "s"} to ${out}`,
+    );
+  }
+  return { exitCode: hasErrors ? 1 : 0, stdout, stderr, files: result.files };
 }
 
 function collectList(value: string | string[] | undefined): string[] {

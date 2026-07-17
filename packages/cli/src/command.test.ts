@@ -1,5 +1,7 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { runBuildCommand } from "./command.js";
 
@@ -60,6 +62,60 @@ describe("runBuildCommand: build errors (exit 1)", () => {
     });
     expect(r.exitCode).toBe(1);
     expect(r.stderr.some((l) => l.includes("does-not-exist.json"))).toBe(true);
+  });
+});
+
+describe("runBuildCommand: partial catalog output (exit 1, files kept)", () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(path.join(os.tmpdir(), "styx-partial-"));
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  function writeFile(rel: string, content: string): void {
+    const full = path.join(tmp, rel);
+    mkdirSync(path.dirname(full), { recursive: true });
+    writeFileSync(full, content);
+  }
+
+  const BOUTIQUES = JSON.stringify({
+    name: "greet",
+    description: "Print a greeting.",
+    "tool-version": "1.0",
+    "schema-version": "0.5",
+    "command-line": "greet [NAME]",
+    inputs: [{ id: "name", name: "Name", type: "String", "value-key": "[NAME]" }],
+  });
+
+  it("keeps the files of tools that compiled when one tool in the catalog fails", () => {
+    writeFile("project.json", JSON.stringify({ name: "proj", packages: ["pkg"] }));
+    writeFile("pkg/package.json", JSON.stringify({ name: "pkg", default: "1" }));
+    writeFile("pkg/1/version.json", JSON.stringify({ name: "1", apps: ["greet", "broken"] }));
+    writeFile(
+      "pkg/1/greet/app.json",
+      JSON.stringify({ name: "greet", source: { type: "boutiques", path: "d.json" } }),
+    );
+    writeFile("pkg/1/greet/d.json", BOUTIQUES);
+    writeFile(
+      "pkg/1/broken/app.json",
+      JSON.stringify({ name: "broken", source: { type: "boutiques", path: "missing.json" } }),
+    );
+    // broken/missing.json is absent -> read failure -> real per-tool error.
+
+    const r = runBuildCommand(undefined, {
+      out: "/out",
+      catalog: tmp,
+      backend: "python",
+      mode: "multi",
+    });
+
+    // Non-zero exit so the failure is visible, but the tool that compiled survives.
+    expect(r.exitCode).toBe(1);
+    expect(r.files.some((f) => f.path.endsWith(path.join("greet.py")))).toBe(true);
+    expect(r.stdout.some((l) => /^wrote \d+ file/.test(l))).toBe(true);
   });
 });
 

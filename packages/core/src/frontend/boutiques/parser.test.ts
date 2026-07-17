@@ -402,6 +402,50 @@ describe("BoutiquesParser", () => {
       });
     });
 
+    it("rounds fractional integer bounds inward, not by plain floor", () => {
+      const result = parse(
+        minimalDescriptor({
+          "command-line": "test [INPUT1]",
+          inputs: [
+            minimalInput({
+              type: "Number",
+              integer: true,
+              minimum: 5.7, // smallest valid int is 6 (ceil), not 5 (floor)
+              maximum: 9.3, // largest valid int is 9 (floor)
+            }),
+          ],
+        }),
+      );
+      const seq = result.expr as Sequence;
+      expect(seq.attrs.nodes[1]).toMatchObject({
+        kind: "int",
+        attrs: { minValue: 6, maxValue: 9 },
+      });
+    });
+
+    it("rounds exclusive fractional integer bounds inward", () => {
+      const result = parse(
+        minimalDescriptor({
+          "command-line": "test [INPUT1]",
+          inputs: [
+            minimalInput({
+              type: "Number",
+              integer: true,
+              minimum: 5.7, // > 5.7 -> smallest valid int is 6
+              maximum: 9.3, // < 9.3 -> largest valid int is 9
+              "exclusive-minimum": true,
+              "exclusive-maximum": true,
+            }),
+          ],
+        }),
+      );
+      const seq = result.expr as Sequence;
+      expect(seq.attrs.nodes[1]).toMatchObject({
+        kind: "int",
+        attrs: { minValue: 6, maxValue: 9 },
+      });
+    });
+
     it("parses float input", () => {
       const result = parse(
         minimalDescriptor({

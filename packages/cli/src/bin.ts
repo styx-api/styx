@@ -24,7 +24,9 @@ cli
   .action((input: string | undefined, flags: BuildFlags) => {
     const result = runBuildCommand(input, flags);
     for (const line of result.stderr) console.error(line);
-    if (result.exitCode === 0) writeFiles(result.files);
+    // Write whatever compiled - a catalog build returns partial output alongside
+    // a non-zero exit code, and fail-hard paths return an empty file list.
+    writeFiles(result.files);
     for (const line of result.stdout) console.log(line);
     if (result.exitCode !== 0) process.exit(result.exitCode);
   });

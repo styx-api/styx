@@ -127,7 +127,13 @@ export const simplify: Pass = {
               node.attrs.join === ""
             ) {
               changed = true;
-              prev.attrs.str += child.attrs.str;
+              // Replace with a fresh node - `prev` is the original literal object
+              // (the `literal` case returns `node` unchanged), so mutating it in
+              // place would corrupt the caller's IR and double-append on rerun.
+              nodes[nodes.length - 1] = {
+                ...prev,
+                attrs: { ...prev.attrs, str: prev.attrs.str + child.attrs.str },
+              };
             } else {
               nodes.push(child);
             }

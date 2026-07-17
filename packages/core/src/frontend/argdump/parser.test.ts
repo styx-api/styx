@@ -510,10 +510,10 @@ describe("ArgdumpParser", () => {
       expect(nodes[0]).toMatchObject({ kind: "str" });
     });
 
-    it("REMAINDER nargs -> repeat(str())", () => {
+    it("REMAINDER nargs -> repeat(str()) preserving the positional's name", () => {
       const result = parse(
         minimalDescriptor({
-          actions: [storeAction({ nargs: { __argparse__: "REMAINDER" } })],
+          actions: [storeAction({ dest: "rest", nargs: { __argparse__: "REMAINDER" } })],
         }),
       );
       const nodes = actionNodes(result);
@@ -521,6 +521,9 @@ describe("ArgdumpParser", () => {
       expect(rep.kind).toBe("repeat");
       expect(rep.attrs.node).toMatchObject({ kind: "str" });
       expect(rep.attrs.countMin).toBe(0);
+      // The `dest` name must survive on the inner terminal, not be dropped for a
+      // solver-derived placeholder.
+      expect(rep.attrs.node.meta?.name).toBe("rest");
     });
   });
 
@@ -803,6 +806,31 @@ describe("ArgdumpParser", () => {
       // Single subparser -> unwrapped
       const subSeq = nodes[0] as Sequence;
       expect(subSeq.meta?.doc?.description).toContain("aliases: co");
+    });
+
+    it("wraps a single-choice non-required subparser in optional", () => {
+      const result = parse(
+        minimalDescriptor({
+          actions: [
+            {
+              dest: "command",
+              action_type: "parsers",
+              subparsers: {
+                only: { prog: "t only", actions: [] },
+              },
+              subparsers_required: false,
+            },
+          ],
+        }),
+      );
+      const nodes = actionNodes(result);
+      // A lone choice must not become mandatory just because there is no
+      // alternative wrapper: the non-required subparser stays optional.
+      const opt = nodes[0] as Optional;
+      expect(opt.kind).toBe("optional");
+      const inner = opt.attrs.node as Sequence;
+      expect(inner.kind).toBe("sequence");
+      expect(inner.meta?.name).toBe("only");
     });
 
     it("recursive subparsers", () => {

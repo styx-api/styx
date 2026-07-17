@@ -378,6 +378,19 @@ export function buildEmitModel(
 }
 
 export function generatePython(ctx: CodegenContext, packageScope?: Scope): string {
+  return generatePythonModule(ctx, packageScope).code;
+}
+
+/**
+ * Emit the module and, alongside it, the dispatch entrypoint carrying the
+ * *scope-registered* execute-function name. Computing the entrypoint here (not
+ * via the scope-blind `appEntrypoint`) keeps the suite dispatcher in sync with
+ * the actual emitted symbol when a shared package scope suffix-bumps a collision.
+ */
+function generatePythonModule(
+  ctx: CodegenContext,
+  packageScope?: Scope,
+): { code: string; entrypoint: AppEntrypoint | undefined } {
   const cb = new CodeBuilder("    ");
   // A package-shared scope keeps top-level names unique across every tool in the
   // suite's `from .x import *` re-exports; without one a per-tool scope suffices.
@@ -512,7 +525,14 @@ export function generatePython(ctx: CodegenContext, packageScope?: Scope): strin
   });
   cb.line("]");
 
-  return cb.toString();
+  // `executeName` is the scope-registered symbol actually emitted above, so the
+  // dispatcher references the real name even after a collision suffix-bump.
+  const appId = ctx.app?.id;
+  const pkg = ctx.package?.name;
+  const entrypoint: AppEntrypoint | undefined =
+    appId && pkg ? { type: `${pkg}/${appId}`, executeFn: executeName } : undefined;
+
+  return { code: cb.toString(), entrypoint };
 }
 
 /**
@@ -529,6 +549,10 @@ export function appModuleName(meta: AppMeta | undefined): string {
  * The dispatch entrypoint for one app: its root `@type` (`<package>/<app>`) and
  * the dict-style execute function name. Returns undefined when the id or package
  * is unknown (no stable `@type`), so the app is left out of the suite dispatcher.
+ *
+ * Note: this recomputes the execute name without a package scope, so it reflects
+ * the un-bumped name. The emitter (`emitApp`) instead takes the entrypoint from
+ * the scope-aware emit pass; use that path when a shared package scope is in play.
  */
 export function appEntrypoint(ctx: CodegenContext): AppEntrypoint | undefined {
   const appId = ctx.app?.id;
@@ -599,10 +623,14 @@ function emitPackageDispatch(cb: CodeBuilder, dispatch: AppEntrypoint[]): void {
       }
     });
     cb.line("}");
-    cb.line('_fn = _dispatch.get(params["@type"])');
+    // `.get` (not `params["@type"]`) so a missing discriminant surfaces the
+    // clean ValueError below instead of a bare KeyError. The `is not None` guard
+    // also narrows `_type` away from None for the typed `_dispatch.get`.
+    cb.line('_type = params.get("@type")');
+    cb.line("_fn = _dispatch.get(_type) if _type is not None else None");
     cb.line("if _fn is None:");
     cb.indent(() => {
-      cb.line(`raise ValueError(f"No tool registered for @type {params['@type']!r}")`);
+      cb.line(`raise ValueError(f"No tool registered for @type {_type!r}")`);
     });
     cb.line("return _fn(params, runner)");
   });
@@ -613,11 +641,13 @@ export class PythonBackend implements Backend {
   readonly target = "python";
 
   emitApp(ctx: CodegenContext, scope?: Scope): EmittedApp {
-    const code = generatePython(ctx, scope);
+    // Take the entrypoint from the same pass that emitted the module, so its
+    // execute-function name reflects any shared-scope suffix-bump.
+    const { code, entrypoint } = generatePythonModule(ctx, scope);
     const fileName = `${appModuleName(ctx.app)}.py`;
     return {
       meta: ctx.app,
-      entrypoint: appEntrypoint(ctx),
+      entrypoint,
       files: new Map([[fileName, code]]),
       errors: [],
       warnings: [],

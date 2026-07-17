@@ -372,12 +372,21 @@ export class BoutiquesParser implements Frontend {
       case InputTypePrimitive.Integer: {
         const node: Int = { kind: "int", attrs: {} };
         if (isNumber(btInput.minimum)) {
-          node.attrs.minValue = Math.floor(btInput.minimum);
-          if (btInput["exclusive-minimum"] === true) node.attrs.minValue += 1;
+          // Smallest valid integer: for a fractional bound, `>= 5.7` allows 6
+          // (ceil) and `> 5.7` allows 6 (floor + 1); both differ from a plain
+          // floor.
+          node.attrs.minValue =
+            btInput["exclusive-minimum"] === true
+              ? Math.floor(btInput.minimum) + 1
+              : Math.ceil(btInput.minimum);
         }
         if (isNumber(btInput.maximum)) {
-          node.attrs.maxValue = Math.floor(btInput.maximum);
-          if (btInput["exclusive-maximum"] === true) node.attrs.maxValue -= 1;
+          // Largest valid integer: `<= 5.7` allows 5 (floor) and `< 5.7` allows
+          // 5 (ceil - 1).
+          node.attrs.maxValue =
+            btInput["exclusive-maximum"] === true
+              ? Math.ceil(btInput.maximum) - 1
+              : Math.floor(btInput.maximum);
         }
         if (meta) node.meta = meta;
         return node;

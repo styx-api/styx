@@ -256,6 +256,19 @@ export function buildEmitModel(
 }
 
 export function generateTypeScript(ctx: CodegenContext, packageScope?: Scope): string {
+  return generateTypeScriptModule(ctx, packageScope).code;
+}
+
+/**
+ * Emit the module and, alongside it, the dispatch entrypoint carrying the
+ * *scope-registered* execute-function name. Computing the entrypoint here (not
+ * via the scope-blind `appEntrypoint`) keeps the suite dispatcher in sync with
+ * the actual emitted symbol when a shared package scope suffix-bumps a collision.
+ */
+function generateTypeScriptModule(
+  ctx: CodegenContext,
+  packageScope?: Scope,
+): { code: string; entrypoint: AppEntrypoint | undefined } {
   const cb = new CodeBuilder("  ");
   // A package-shared scope keeps top-level names unique across every tool in the
   // suite barrel; without one (standalone emit) a per-tool scope is enough.
@@ -363,7 +376,18 @@ export function generateTypeScript(ctx: CodegenContext, packageScope?: Scope): s
     cb.blank();
   }
 
-  return cb.toString();
+  // `executeName` is the scope-registered symbol actually emitted above, so the
+  // dispatcher references the real name even after a collision suffix-bump. Guard
+  // on `ctx.package?.name` (not the destructured `pkg`, which falls back to
+  // "unknown") so a package-less app yields no entrypoint, as before.
+  const entryAppId = ctx.app?.id;
+  const entryPkg = ctx.package?.name;
+  const entrypoint: AppEntrypoint | undefined =
+    entryAppId && entryPkg
+      ? { type: `${entryPkg}/${entryAppId}`, executeFn: executeName }
+      : undefined;
+
+  return { code: cb.toString(), entrypoint };
 }
 
 /**
@@ -381,6 +405,9 @@ export function appModuleName(meta: AppMeta | undefined): string {
  * the dict-style execute function name. Returns undefined when the id or package
  * is unknown (no stable `@type`), so the app is left out of the suite dispatcher.
  */
+// Note: this recomputes the execute name without a package scope, so it reflects
+// the un-bumped name. The emitter (`emitApp`) instead takes the entrypoint from
+// the scope-aware emit pass; use that path when a shared package scope is in play.
 export function appEntrypoint(ctx: CodegenContext): AppEntrypoint | undefined {
   const appId = ctx.app?.id;
   const pkg = ctx.package?.name;
@@ -469,11 +496,13 @@ export class TypeScriptBackend implements Backend {
   readonly target = "typescript";
 
   emitApp(ctx: CodegenContext, scope?: Scope): EmittedApp {
-    const code = generateTypeScript(ctx, scope);
+    // Take the entrypoint from the same pass that emitted the module, so its
+    // execute-function name reflects any shared-scope suffix-bump.
+    const { code, entrypoint } = generateTypeScriptModule(ctx, scope);
     const fileName = `${appModuleName(ctx.app)}.ts`;
     return {
       meta: ctx.app,
-      entrypoint: appEntrypoint(ctx),
+      entrypoint,
       files: new Map([[fileName, code]]),
       errors: [],
       warnings: [],

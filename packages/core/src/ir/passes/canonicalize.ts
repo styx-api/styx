@@ -38,6 +38,19 @@ export const canonicalize: Pass = {
       }
     }
 
+    // Identity for dedup: structure plus the meta that makes two structurally
+    // identical union arms semantically distinct - the variant tag (@type
+    // discriminant), name, and attached outputs. Deduping on structure alone
+    // would silently drop a distinct arm (e.g. two sub-commands with the same
+    // inner shape but different @type), making its variant unreachable.
+    function identityKey(node: Expr): string {
+      const m = node.meta;
+      const metaKey = m
+        ? [m.name ?? "", m.variantTag ?? "", m.outputs ? JSON.stringify(m.outputs) : ""].join("|")
+        : "";
+      return `${structuralHash(node)}#${metaKey}`;
+    }
+
     function sortKey(node: Expr): string {
       const name = node.meta?.name ?? "";
       return `${node.kind}:${name}:${structuralHash(node)}`;
@@ -51,13 +64,13 @@ export const canonicalize: Pass = {
           // Sort alternatives
           const sorted = [...children].sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
 
-          // Deduplicate by structural hash
+          // Deduplicate identical arms (structure + discriminating meta).
           const seen = new Set<string>();
           const alts: Expr[] = [];
           for (const child of sorted) {
-            const hash = structuralHash(child);
-            if (!seen.has(hash)) {
-              seen.add(hash);
+            const key = identityKey(child);
+            if (!seen.has(key)) {
+              seen.add(key);
               alts.push(child);
             } else {
               changed = true;
@@ -67,7 +80,7 @@ export const canonicalize: Pass = {
           // Check if order changed
           if (
             alts.length !== children.length ||
-            alts.some((alt, i) => structuralHash(alt) !== structuralHash(children[i]!))
+            alts.some((alt, i) => identityKey(alt) !== identityKey(children[i]!))
           ) {
             changed = true;
           }

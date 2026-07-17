@@ -60,6 +60,15 @@ describe("simplify", () => {
     if (result.expr.kind === "literal") expect(result.expr.attrs.str).toBe("abc");
   });
 
+  it("does not mutate the input literals when merging", () => {
+    const first = lit("a");
+    const input = seqJoin("", first, lit("b"));
+    simplify.apply(input);
+    // The original literal node must be untouched (no in-place `str +=`), so a
+    // retained tree or a re-run stays correct.
+    expect(first.attrs.str).toBe("a");
+  });
+
   it("does NOT merge literals in a no-join sequence (they are separate args)", () => {
     // A top-level no-join sequence emits its children as separate argv tokens,
     // so fusing them would turn N arguments into one (e.g. an executable plus

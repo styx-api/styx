@@ -270,10 +270,12 @@ export class ArgdumpParser implements Frontend {
 
     if (isArgparseMarker(nargs)) {
       if (nargs.__argparse__ === "REMAINDER") {
-        // REMAINDER -> rep(str())
+        // REMAINDER -> rep(node), preserving the terminal's meta (name/doc/
+        // default) so the positional's `dest` name survives instead of being
+        // dropped for a solver-derived placeholder.
         const rep: Repeat = {
           kind: "repeat",
-          attrs: { node: { kind: "str", attrs: {} }, countMin: 0 },
+          attrs: { node, countMin: 0 },
         };
         return rep;
       }
@@ -700,26 +702,28 @@ export class ArgdumpParser implements Frontend {
       return null;
     }
 
-    if (alts.length === 1) {
-      return alts[0]!;
-    }
-
-    const alt: Alternative = { kind: "alternative", attrs: { alts } };
+    // A single choice needs no `alternative` wrapper, but must still honor the
+    // subparsers' required-ness (a lone-choice non-required subparser is still
+    // optional) rather than being returned bare as a mandatory node.
+    const node: Expr =
+      alts.length === 1
+        ? alts[0]!
+        : ({ kind: "alternative", attrs: { alts } } satisfies Alternative);
 
     const isRequired = action.subparsers_required === true || action.required === true;
+    const meta = this.buildNodeMeta(action);
+
     if (!isRequired) {
-      const opt: Optional = { kind: "optional", attrs: { node: alt } };
-
-      const meta = this.buildNodeMeta(action);
+      const opt: Optional = { kind: "optional", attrs: { node } };
       if (meta) opt.meta = meta;
-
       return opt;
     }
 
-    const meta = this.buildNodeMeta(action);
-    if (meta) alt.meta = meta;
-
-    return alt;
+    // Required: hang the subparsers meta on the alternative wrapper when there is
+    // one; a single bare arm keeps its own sub-command meta instead of having it
+    // clobbered by the action's dest name.
+    if (node.kind === "alternative" && meta) node.meta = meta;
+    return node;
   }
 
   // Mutual exclusion
