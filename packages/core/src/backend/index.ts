@@ -22,15 +22,7 @@ export { generateNipype, NipypeBackend, nipypeNames } from "./nipype/index.js";
 export type { PydraNames } from "./pydra/index.js";
 export { generatePydra, PydraBackend, pydraNames } from "./pydra/index.js";
 export { resolveFieldBinding } from "./resolve-field-binding.js";
-export type { OutputEmitPlan } from "./resolve-output-tokens.js";
-export {
-  compactTokens,
-  isGated,
-  isIterated,
-  outputGate,
-  planOutput,
-  planScope,
-} from "./resolve-output-tokens.js";
+export { outputGate } from "./resolve-output-tokens.js";
 export { buildEmitModel, generatePython, PythonBackend, renderPythonCall } from "./python/index.js";
 export { Scope } from "./scope.js";
 export type { JsonSchema } from "./schema/index.js";

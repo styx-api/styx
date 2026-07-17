@@ -22,9 +22,9 @@ export function emitJsDoc(cb: CodeBuilder, description?: string): void {
   }
 }
 
-export function emitImports(cb: CodeBuilder, emitOutputs: boolean): void {
-  const inputs = ["Runner", "Execution", "Metadata", "InputPathType"];
-  if (emitOutputs) inputs.push("OutputPathType");
+export function emitImports(cb: CodeBuilder): void {
+  // Every tool emits an Outputs object, so OutputPathType is always needed.
+  const inputs = ["Runner", "Execution", "Metadata", "InputPathType", "OutputPathType"];
   cb.line(`import type { ${inputs.join(", ")} } from "styxdefs";`);
   cb.line('import { getGlobalRunner, StyxValidationError } from "styxdefs";');
 }

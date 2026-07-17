@@ -729,7 +729,6 @@ export class ArgdumpParser implements Frontend {
   // Mutual exclusion
 
   private applyMutualExclusion(
-    actionsByDest: Map<string, AdAction>,
     groups: unknown[],
     nodes: Expr[],
     nodesByDest: Map<string, Expr>,
@@ -829,7 +828,6 @@ export class ArgdumpParser implements Frontend {
 
     const positionals: Expr[] = [];
     const optionals: Expr[] = [];
-    const actionsByDest = new Map<string, AdAction>();
     const nodesByDest = new Map<string, Expr>();
 
     for (const rawAction of actions) {
@@ -840,7 +838,6 @@ export class ArgdumpParser implements Frontend {
 
       const dest = rawAction.dest;
       if (isString(dest)) {
-        actionsByDest.set(dest, rawAction);
         nodesByDest.set(dest, node);
       }
 
@@ -857,7 +854,7 @@ export class ArgdumpParser implements Frontend {
     // Apply mutual exclusion groups
     const mutexGroups = descriptor.mutually_exclusive_groups;
     if (isArray(mutexGroups) && mutexGroups.length > 0) {
-      allNodes = this.applyMutualExclusion(actionsByDest, mutexGroups, allNodes, nodesByDest);
+      allNodes = this.applyMutualExclusion(mutexGroups, allNodes, nodesByDest);
     }
 
     return { kind: "sequence", attrs: { nodes: allNodes } };
