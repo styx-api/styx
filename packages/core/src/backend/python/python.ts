@@ -416,9 +416,7 @@ function generatePythonModule(
   // Every tool emits an Outputs object: at minimum the synthetic `root` output
   // directory (output_file(".")), plus any declared file/mutable outputs and
   // stdout/stderr stream fields. OutputPathType is therefore always imported.
-  const emitOutputs = true;
-
-  emitImports(cb, true);
+  emitImports(cb);
   cb.blank();
 
   emitMetadata(ctx, names.metadata, cb);
@@ -426,12 +424,10 @@ function generatePythonModule(
 
   emitTypeDeclarations(typeDecls, namedTypes, ctx, cb, names.params, rootTypeTag);
 
-  if (emitOutputs) {
-    emitOutputsClass(ctx, names.outputs, cb);
-    cb.blank();
-  }
+  emitOutputsClass(ctx, names.outputs, cb);
+  cb.blank();
 
-  if (emitOutputs && needsStripExtensionsHelper(ctx)) {
+  if (needsStripExtensionsHelper(ctx)) {
     emitStripExtensionsHelper(cb);
     cb.blank();
   }
@@ -470,10 +466,8 @@ function generatePythonModule(
   emitBuildCargs(ctx, rootType, paramsType, names.cargs, cb);
   cb.blank();
 
-  if (emitOutputs) {
-    emitBuildOutputs(ctx, paramsType, names.outputs, names.outputsFn, cb);
-    cb.blank();
-  }
+  emitBuildOutputs(ctx, paramsType, names.outputs, names.outputsFn, cb);
+  cb.blank();
 
   // Dict-style execute function. For struct roots it's the internal
   // `<tool>_execute`; for other roots it doubles as the user-facing wrapper.
@@ -484,8 +478,8 @@ function generatePythonModule(
     executeName,
     names.metadata,
     names.cargs,
-    emitOutputs ? names.outputsFn : undefined,
-    emitOutputs ? names.outputs : undefined,
+    names.outputsFn,
+    names.outputs,
     names.validate,
     streamFieldIds(ctx),
     cb,
@@ -500,7 +494,7 @@ function generatePythonModule(
       names.wrapper,
       names.paramsFn,
       names.execute,
-      emitOutputs ? names.outputs : undefined,
+      names.outputs,
       cb,
     );
     cb.blank();
@@ -510,10 +504,10 @@ function generatePythonModule(
   // module's stdlib/styxdefs imports.
   const publicSymbols = [
     names.params,
-    ...(emitOutputs ? [names.outputs] : []),
+    names.outputs,
     names.metadata,
     names.cargs,
-    ...(emitOutputs ? [names.outputsFn] : []),
+    names.outputsFn,
     ...(rootIsStruct ? [names.paramsFn, names.execute] : []),
     ...nestedFactories.map((nf) => nf.funcName),
     names.validate,
