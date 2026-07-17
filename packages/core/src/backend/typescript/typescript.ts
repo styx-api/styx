@@ -295,9 +295,7 @@ function generateTypeScriptModule(
   // Every tool emits an Outputs object: at minimum the synthetic `root` output
   // directory (outputFile(".")), plus any declared file/mutable outputs and
   // stdout/stderr stream fields. OutputPathType is therefore always imported.
-  const emitOutputs = true;
-
-  emitImports(cb, true);
+  emitImports(cb);
   cb.blank();
 
   emitMetadata(ctx, names.metadata, cb);
@@ -305,12 +303,10 @@ function generateTypeScriptModule(
 
   emitTypeDeclarations(typeDecls, namedTypes, ctx, names.params, appId, pkg, cb);
 
-  if (emitOutputs) {
-    emitOutputsInterface(ctx, names.outputs, cb);
-    cb.blank();
-  }
+  emitOutputsInterface(ctx, names.outputs, cb);
+  cb.blank();
 
-  if (emitOutputs && needsStripExtensionsHelper(ctx)) {
+  if (needsStripExtensionsHelper(ctx)) {
     emitStripExtensionsHelper(cb);
     cb.blank();
   }
@@ -340,10 +336,8 @@ function generateTypeScriptModule(
   emitBuildCargs(ctx, rootType, paramsType, names.cargs, cb);
   cb.blank();
 
-  if (emitOutputs) {
-    emitBuildOutputs(ctx, paramsType, names.outputs, names.outputsFn, cb);
-    cb.blank();
-  }
+  emitBuildOutputs(ctx, paramsType, names.outputs, names.outputsFn, cb);
+  cb.blank();
 
   // Dict-style execute function. For struct roots it's the internal
   // `<tool>Execute`; for other roots it doubles as the user-facing wrapper.
@@ -354,8 +348,8 @@ function generateTypeScriptModule(
     executeName,
     names.metadata,
     names.cargs,
-    emitOutputs ? names.outputsFn : undefined,
-    emitOutputs ? names.outputs : undefined,
+    names.outputsFn,
+    names.outputs,
     names.validate,
     streamFieldIds(ctx),
     cb,
@@ -370,7 +364,7 @@ function generateTypeScriptModule(
       names.wrapper,
       names.paramsFn,
       names.execute,
-      emitOutputs ? names.outputs : undefined,
+      names.outputs,
       cb,
     );
     cb.blank();

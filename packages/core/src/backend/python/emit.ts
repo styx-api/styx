@@ -27,13 +27,21 @@ export function emitDocstring(cb: CodeBuilder, text?: string): void {
   cb.line(`"""`);
 }
 
-export function emitImports(cb: CodeBuilder, emitOutputs: boolean): void {
+export function emitImports(cb: CodeBuilder): void {
   cb.line("import dataclasses");
   cb.line("import pathlib");
   cb.line("import typing");
   cb.blank();
-  const fromStyxdefs = ["Execution", "InputPathType", "Metadata", "Runner", "StyxValidationError"];
-  if (emitOutputs) fromStyxdefs.push("OutputPathType");
+  // Every tool emits an Outputs object, so OutputPathType is always needed.
+  // (Kept last to preserve the previously emitted import order.)
+  const fromStyxdefs = [
+    "Execution",
+    "InputPathType",
+    "Metadata",
+    "Runner",
+    "StyxValidationError",
+    "OutputPathType",
+  ];
   cb.line(`from styxdefs import ${fromStyxdefs.join(", ")}, get_global_runner`);
 }
 
