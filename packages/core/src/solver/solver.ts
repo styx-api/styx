@@ -45,11 +45,11 @@ function isBooleanLiteralPair(variants: Array<{ type: BoundType }>): boolean {
     return false;
   }
   const [a, b] = variants.map((v) => (v.type.kind === "literal" ? v.type.value : null));
+  // `literalFromNode` canonicalizes clean-int literals, so "0"/"1" arrive as the
+  // numbers 0/1 (never strings); only "false"/"true" survive as strings.
   return (
     (a === 0 && b === 1) ||
     (a === 1 && b === 0) ||
-    (a === "0" && b === "1") ||
-    (a === "1" && b === "0") ||
     (a === "false" && b === "true") ||
     (a === "true" && b === "false")
   );
