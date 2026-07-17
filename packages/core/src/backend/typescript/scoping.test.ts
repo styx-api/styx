@@ -40,4 +40,26 @@ describe("TypeScript shared package scope", () => {
     expect(a).toBe(b);
     expect(b).not.toContain("Report2");
   });
+
+  it("keeps the dispatch entrypoint in sync with a suffix-bumped execute name", () => {
+    const backend = new TypeScriptBackend();
+    const scope = backend.newPackageScope();
+    const expr = seq(lit("report"), str("input"));
+    const a = backend.emitApp(
+      generateCtx(expr, { app: { id: "report" }, package: { name: "pkg" } }),
+      scope,
+    );
+    const b = backend.emitApp(
+      generateCtx(expr, { app: { id: "report" }, package: { name: "pkg" } }),
+      scope,
+    );
+    // The second tool's execute name is bumped in the shared scope. The entrypoint
+    // must carry that bumped name, not the recomputed un-bumped one, or the suite
+    // dispatcher would import a symbol the module never defines.
+    const aFn = a.entrypoint!.executeFn;
+    const bFn = b.entrypoint!.executeFn;
+    expect(bFn).not.toBe(aFn);
+    const bCode = [...b.files.values()][0]!;
+    expect(bCode).toContain(`function ${bFn}(`);
+  });
 });
