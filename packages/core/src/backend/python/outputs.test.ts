@@ -3,7 +3,7 @@ import { nodeRef } from "../../ir/index.js";
 import { generate, lit, namedAlt, opt, path, rep, seq, str } from "./test-helpers.js";
 
 describe("python outputs - codegen", () => {
-  it("emits an Outputs dataclass and returns it from the wrapper", () => {
+  it("emits an Outputs NamedTuple and returns it from the wrapper", () => {
     const root = seq(lit("tool"), path("input"));
     root.meta = {
       outputs: [
@@ -17,8 +17,7 @@ describe("python outputs - codegen", () => {
       ],
     };
     const code = generate(root, { app: { id: "tool" } });
-    expect(code).toContain("@dataclasses.dataclass");
-    expect(code).toContain("class ToolOutputs:");
+    expect(code).toContain("class ToolOutputs(typing.NamedTuple):");
     expect(code).toContain("out_file: OutputPathType");
     expect(code).toContain("-> ToolOutputs:");
     expect(code).toContain("return out");
@@ -56,7 +55,7 @@ describe("python outputs - codegen", () => {
   it("still emits Outputs with only the root field when no outputs are attached", () => {
     const root = seq(lit("tool"), path("input"));
     const code = generate(root, { app: { id: "tool" } });
-    expect(code).toContain("class ToolOutputs:");
+    expect(code).toContain("class ToolOutputs(typing.NamedTuple):");
     expect(code).toContain("root: OutputPathType");
     expect(code).toContain("-> ToolOutputs:");
     expect(code).toContain('root_v: OutputPathType = execution.output_file(".")');
@@ -244,10 +243,10 @@ describe("python outputs - codegen", () => {
 
   // Regression: when multiple union arms declare the same output name (e.g.
   // ants `antsApplyTransforms` -> `output_image_outfile` across 3 variants),
-  // the dataclass must collapse to one field and the constructor to one
+  // the NamedTuple must collapse to one field and the constructor to one
   // keyword argument; otherwise Python raises SyntaxError on the duplicate
   // kwargs. The shared local var is initialized exactly once.
-  it("dedupes same-named outputs across union arms into one dataclass field", () => {
+  it("dedupes same-named outputs across union arms into one NamedTuple field", () => {
     const armA = seq(lit("a"), path("aSrc"));
     armA.meta = {
       name: "a",
@@ -260,7 +259,7 @@ describe("python outputs - codegen", () => {
     };
     const root = seq(lit("tool"), namedAlt("mode", armA, armB));
     const code = generate(root, { app: { id: "tool" } });
-    // One dataclass field declaration.
+    // One NamedTuple field declaration.
     const fieldDecls = code.match(/^ {4}result: OutputPathType \| None$/gm) ?? [];
     expect(fieldDecls.length).toBe(1);
     // Exactly one init for the shared local var (not re-initialized between arms).

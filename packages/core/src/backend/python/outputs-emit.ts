@@ -34,10 +34,11 @@ export function streamFieldIds(ctx: CodegenContext): { stdout?: string; stderr?:
   return res;
 }
 
-/** Emit `@dataclasses.dataclass\nclass <outputsType>:` declaration. */
+/** Emit `class <outputsType>(typing.NamedTuple):` declaration. */
 export function emitOutputsClass(ctx: CodegenContext, outputsType: string, cb: CodeBuilder): void {
-  cb.line("@dataclasses.dataclass");
-  cb.line(`class ${outputsType}:`);
+  // A NamedTuple (not a dataclass) matches the styx1 / NiWrap convention: outputs
+  // are an immutable, tuple-shaped result built once from keyword args.
+  cb.line(`class ${outputsType}(typing.NamedTuple):`);
   cb.indent(() => {
     emitDocstring(cb, "Output paths produced by the tool.");
     const fields = collectOutputFields(ctx, pyId);

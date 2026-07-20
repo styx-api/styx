@@ -67,9 +67,9 @@ describe("Python name dodging - host vs wire", () => {
     expect(appModuleName({ id: "normal_tool" })).toBe("normal_tool");
   });
 
-  it("scrubs Python keyword field names in the outputs dataclass", () => {
+  it("scrubs Python keyword field names in the outputs NamedTuple", () => {
     // An output named `lambda` would shadow the keyword and break the
-    // dataclass constructor. pyId appends a trailing underscore.
+    // NamedTuple constructor. pyId appends a trailing underscore.
     const code = generate(
       seq(lit("tool"), {
         kind: "str",

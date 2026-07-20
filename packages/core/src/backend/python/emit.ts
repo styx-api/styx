@@ -33,7 +33,6 @@ export function emitDocstring(cb: CodeBuilder, text?: string): void {
 }
 
 export function emitImports(cb: CodeBuilder): void {
-  cb.line("import dataclasses");
   cb.line("import pathlib");
   cb.line("import typing");
   cb.blank();
