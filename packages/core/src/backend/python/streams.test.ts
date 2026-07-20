@@ -15,7 +15,7 @@ const streamApp = (stdout?: boolean, stderr?: boolean): AppMeta => ({
 });
 
 describe("Python stream outputs (stdout/stderr)", () => {
-  it("declares list[str] fields on the Outputs dataclass", () => {
+  it("declares list[str] fields on the Outputs NamedTuple", () => {
     const code = generate(seq(lit("mytool"), str("input")), { app: streamApp(true, true) });
     expect(code).toContain("stdout: list[str]");
     expect(code).toContain("stderr: list[str]");

@@ -67,9 +67,9 @@ describe("Python name dodging - host vs wire", () => {
     expect(appModuleName({ id: "normal_tool" })).toBe("normal_tool");
   });
 
-  it("scrubs Python keyword field names in the outputs dataclass", () => {
+  it("scrubs Python keyword field names in the outputs NamedTuple", () => {
     // An output named `lambda` would shadow the keyword and break the
-    // dataclass constructor. pyId appends a trailing underscore.
+    // NamedTuple constructor. pyId appends a trailing underscore.
     const code = generate(
       seq(lit("tool"), {
         kind: "str",
@@ -88,5 +88,26 @@ describe("Python name dodging - host vs wire", () => {
     );
     expect(code).toMatch(/lambda_:\s*OutputPathType/);
     expect(code).toMatch(/lambda_=lambda__v/);
+  });
+
+  it("prefixes a digit-leading output field with v_, never a leading underscore", () => {
+    // The Outputs type is a typing.NamedTuple, which raises ValueError at import
+    // time for a field name starting with `_`. Real afni tools (3dclust_output,
+    // 1D_dsets_directory) have digit-leading output ids, so this must use the
+    // letter-leading `v_` prefix (like styx1 / pyScrubIdent), not `_`.
+    const code = generate(
+      seq(lit("tool"), {
+        kind: "str",
+        attrs: {},
+        meta: {
+          name: "x",
+          outputs: [{ name: "3dclust_output", tokens: [{ kind: "literal", value: "out.nii" }] }],
+        },
+      }),
+      { app: { id: "tool" } },
+    );
+    expect(code).toContain("v_3dclust_output: OutputPathType");
+    // No output field name may start with an underscore.
+    expect(code).not.toMatch(/^ {4}_\w+: OutputPathType/m);
   });
 });

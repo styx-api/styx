@@ -139,9 +139,18 @@ export const simplify: Pass = {
             }
           }
 
-          // seq(T) -> T, carrying the seq's meta down onto the child.
+          // seq(T) -> T, carrying the seq's meta down onto the child. Skip the
+          // collapse when the sequence declares outputs and the sole child is a
+          // literal: outputs need a scope binding, which the solver only forces
+          // on sequences (not on literals, which are never bound). Collapsing a
+          // parameterless output-bearing command (e.g. `seq(lit("run"))` with an
+          // output-file) onto its literal would orphan the output. A field child
+          // (str/path) does get bound, so those still collapse.
           if (nodes.length === 1) {
             const child = nodes[0]!;
+            if (node.meta?.outputs?.length && child.kind === "literal") {
+              return { ...node, attrs: { ...node.attrs, nodes } };
+            }
             changed = true;
             const mergedMeta = mergeMeta(node.meta, child.meta);
             return mergedMeta ? { ...child, meta: mergedMeta } : child;

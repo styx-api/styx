@@ -34,10 +34,11 @@ export function streamFieldIds(ctx: CodegenContext): { stdout?: string; stderr?:
   return res;
 }
 
-/** Emit `@dataclasses.dataclass\nclass <outputsType>:` declaration. */
+/** Emit `class <outputsType>(typing.NamedTuple):` declaration. */
 export function emitOutputsClass(ctx: CodegenContext, outputsType: string, cb: CodeBuilder): void {
-  cb.line("@dataclasses.dataclass");
-  cb.line(`class ${outputsType}:`);
+  // A NamedTuple (not a dataclass) matches the styx1 / NiWrap convention: outputs
+  // are an immutable, tuple-shaped result built once from keyword args.
+  cb.line(`class ${outputsType}(typing.NamedTuple):`);
   cb.indent(() => {
     emitDocstring(cb, "Output paths produced by the tool.");
     const fields = collectOutputFields(ctx, pyId);
@@ -361,11 +362,16 @@ export function emitBuildOutputs(
   });
 }
 
-/** Sanitize an output name to a valid Python identifier. */
+/**
+ * Sanitize an output name to a valid Python identifier. Uses a *letter*-leading
+ * prefix (`v_`) for digit-leading / empty names, never a leading underscore:
+ * the Outputs type is a `typing.NamedTuple`, which raises `ValueError` at import
+ * time for a field whose name starts with `_`. Matches styx1 and `pyScrubIdent`.
+ * (A trailing underscore for keywords is fine - only leading underscores fail.)
+ */
 export function pyId(name: string): string {
   let s = name.replace(/[^a-zA-Z0-9_]/g, "_");
-  if (/^\d/.test(s)) s = "_" + s;
-  if (s === "") s = "_";
+  if (/^\d/.test(s) || s === "") s = "v_" + s;
   if (PY_KEYWORDS.has(s)) s = s + "_";
   return s;
 }
