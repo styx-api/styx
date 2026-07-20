@@ -362,11 +362,16 @@ export function emitBuildOutputs(
   });
 }
 
-/** Sanitize an output name to a valid Python identifier. */
+/**
+ * Sanitize an output name to a valid Python identifier. Uses a *letter*-leading
+ * prefix (`v_`) for digit-leading / empty names, never a leading underscore:
+ * the Outputs type is a `typing.NamedTuple`, which raises `ValueError` at import
+ * time for a field whose name starts with `_`. Matches styx1 and `pyScrubIdent`.
+ * (A trailing underscore for keywords is fine - only leading underscores fail.)
+ */
 export function pyId(name: string): string {
   let s = name.replace(/[^a-zA-Z0-9_]/g, "_");
-  if (/^\d/.test(s)) s = "_" + s;
-  if (s === "") s = "_";
+  if (/^\d/.test(s) || s === "") s = "v_" + s;
   if (PY_KEYWORDS.has(s)) s = s + "_";
   return s;
 }

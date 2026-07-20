@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lit, opt, rep, seq, str } from "../builders.js";
+import { lit, opt, seq, str } from "../builders.js";
 import type { Expr } from "../node.js";
 import type { Output } from "../meta.js";
 import { defaultPipeline } from "./pipeline.js";
@@ -60,24 +60,8 @@ describe("output survival across IR passes", () => {
     expect(outputNames(result.expr)).toEqual(["o"]);
   });
 
-  it("defaultPipeline preserves an output on a struct inside a repeat (list-subcommand shape)", () => {
-    // rep(seq{outputs}(lit, field, field)) - the subcommand-list IR shape. The
-    // output must remain attached to the struct, not vanish or migrate onto the
-    // repeat.
-    const body = seq(lit("item"), str("a"), str("b"));
-    body.meta = { name: "items", outputs: [out("item_out")] };
-    const result = defaultPipeline.apply(seq(lit("t"), rep(body)));
-    expect(outputNames(result.expr)).toEqual(["item_out"]);
-    // And it stays on a struct-shaped (sequence) node, not the repeat wrapper.
-    const findBearer = (n: Expr): Expr | undefined => {
-      if (n.meta?.outputs?.length) return n;
-      const a = n.attrs as { nodes?: Expr[]; node?: Expr; alts?: Expr[] };
-      for (const c of [...(a.nodes ?? []), ...(a.node ? [a.node] : []), ...(a.alts ?? [])]) {
-        const hit = findBearer(c);
-        if (hit) return hit;
-      }
-      return undefined;
-    };
-    expect(findBearer(result.expr)?.kind).toBe("sequence");
-  });
+  // (The list-subcommand IR shape `rep(seq{outputs}(...))` is a pipeline identity
+  // - no pass transforms it - so a pass-level test here would have no teeth. That
+  // invariant is exercised end-to-end, with teeth, by the "subcommand-LIST" case
+  // in backend/boutiques/subcommand-outputs.test.ts.)
 });

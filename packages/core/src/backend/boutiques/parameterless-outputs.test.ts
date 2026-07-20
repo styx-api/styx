@@ -74,8 +74,11 @@ describe("parameterless output scopes", () => {
     expect(r.python).toContain("sub_res: OutputPathType");
     expect(r.typescript).toContain("sub_res: OutputPathType");
     expect(r.schemaProps).toContain("sub_res");
-    // Note: the Boutiques round-trip backend does not yet re-emit a
-    // parameterless *subcommand's* output-files (a deeper collapse interaction);
-    // the shipping codegen backends above all retain it.
+    // Note: for a *required* parameterless subcommand the Boutiques round-trip
+    // drops the whole subcommand (command word, input entry, and output-files) -
+    // single-field-sequence collapse makes the parent's type become the child's
+    // empty struct, so the backend resolves the wrong scope. This is a round-trip
+    // fidelity gap in the non-shipping backend, not a regression (main dropped
+    // the output in every backend); all shipping codegen backends above retain it.
   });
 });

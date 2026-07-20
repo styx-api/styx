@@ -25,6 +25,12 @@
       "name": "Out file (fixed)",
       "path-template": "out_file",
       "description": "Same id, a fixed name (second ungated contributor)."
+    },
+    {
+      "id": "3d_result",
+      "name": "Digit-leading output id",
+      "path-template": "[INFILE]_3d",
+      "description": "A digit-leading output id: its Python field must be v_-prefixed, not _-prefixed, or the Outputs NamedTuple raises ValueError at import."
     }
   ]
 }
