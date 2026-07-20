@@ -41,9 +41,12 @@ describe("output survival across IR passes", () => {
     expect(outputNames(result.expr)).toEqual(["o"]);
   });
 
-  it("remove-empty keeps an output-bearing node", () => {
-    // A node carrying outputs must never be pruned, even if otherwise empty-ish.
-    const bearer = seq(str("x"));
+  it("remove-empty keeps an EMPTY output-bearing node (only the meta-guard saves it)", () => {
+    // The node must be genuinely empty (no children) so that only remove-empty's
+    // `if (node.meta) return false` guard prevents its removal - a non-empty node
+    // is kept regardless, which would make this a tautology. This is the shape a
+    // parameterless output scope reduces to.
+    const bearer = seq();
     bearer.meta = { outputs: [out("o")] };
     const result = removeEmpty.apply(seq(lit("cmd"), bearer));
     expect(outputNames(result.expr)).toEqual(["o"]);
