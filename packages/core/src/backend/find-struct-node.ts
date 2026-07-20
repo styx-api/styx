@@ -24,6 +24,13 @@ export function findStructNode(
   ctx: CodegenContext,
   structType: Extract<BoundType, { kind: "struct" }>,
 ): Extract<Expr, { kind: "sequence" }> | undefined {
+  // An empty struct (no fields) has no field bindings to match, but it is still a
+  // real scope: a parameterless output-bearing command like `seq(lit("run"))`
+  // with an output-file. Its scope node is simply the sequence carrying it, so a
+  // backend can emit the (field-less) command line and its outputs.
+  if (node.kind === "sequence" && Object.keys(structType.fields).length === 0) {
+    return node;
+  }
   switch (node.kind) {
     case "sequence": {
       // Phase 1: Check if any direct child has a binding matching a struct field
