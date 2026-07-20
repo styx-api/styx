@@ -433,7 +433,10 @@ export class BoutiquesParser implements Frontend {
           return null;
         }
         const node = this.parseDescriptor(nested);
-        if (node && meta) node.meta = meta;
+        // Merge (not overwrite) so the subcommand's own meta - notably its
+        // `output-files`, attached by `parseDescriptor` - survives; the input's
+        // meta (name/doc) layers on top.
+        if (node && meta) node.meta = { ...node.meta, ...meta };
         return node;
       }
 
@@ -562,12 +565,19 @@ export class BoutiquesParser implements Frontend {
     }
 
     // Hoist metadata (doc, default) to outermost wrapper so backends find it
-    // on the binding node. Keep name on inner for solver's findDeepName.
+    // on the binding node. Keep `name` on inner for the solver's findDeepName,
+    // and keep `outputs` there too: outputs are a scope concept declared on the
+    // subcommand struct, not a property of the list/flag wrapper - hoisting them
+    // onto a repeat would move the output scope off the struct and make backends
+    // (which resolve outputs against the struct) silently drop them.
     if (node !== inner && inner.meta) {
-      const { name, ...rest } = inner.meta;
+      const { name, outputs, ...rest } = inner.meta;
       if (Object.keys(rest).length > 0) {
         node.meta = { ...node.meta, ...rest };
-        inner.meta = name ? { name } : undefined;
+        const kept: NodeMeta = {};
+        if (name) kept.name = name;
+        if (outputs) kept.outputs = outputs;
+        inner.meta = Object.keys(kept).length > 0 ? kept : undefined;
       }
     }
 

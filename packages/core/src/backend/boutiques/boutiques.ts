@@ -413,7 +413,11 @@ class BoutiquesEmitter {
 
     bt["command-line"] = commandParts.join(" ");
     bt.inputs = inputs;
-    this.emitOutputFiles(bt, expr, valueKeyByBinding, idScope);
+    // Resolve the output scope from `structNode` (which carries `meta.outputs`
+    // and is what the solver keyed the outputs under), not `expr`: for a plain
+    // or list subcommand `findStructNode` descends past `expr`, so resolving from
+    // `expr` would miss the bucket and silently drop the subcommand's outputs.
+    this.emitOutputFiles(bt, structNode, valueKeyByBinding, idScope);
   }
 
   // Emit `output-files` entries declared on this struct binding. `optional`
