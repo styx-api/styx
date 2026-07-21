@@ -11,7 +11,8 @@
 // flags) and the frontend's outputs-collected-to-root behavior mean the emitted
 // argtype is not byte-identical to a from-scratch authoring for every tool, so
 // only re-parse validity is checked here (same rationale as the in-repo
-// `corpus-roundtrip.test.ts` smoke, which this generalizes to all ~1900 tools).
+// `corpus-roundtrip.test.ts` smoke, which this generalizes to the full corpus
+// (~1878 wrapped tools at the pinned niwrap ref).
 //
 // The in-repo vitest `corpus-roundtrip.test.ts` is the fast 10-case smoke; this
 // script is the full sweep, wired into CI against a pinned niwrap checkout.
@@ -22,17 +23,20 @@
 //
 // Options:
 //   --catalog <dir>  Catalog root (a niwrap project/package/version/app dir).
-//   --min <n>        Minimum descriptor count expected (default 1900). Guards
-//                    against a wrong --catalog path silently passing with zero
-//                    tools - the corpus has ~1900+ descriptors (1919 at the
-//                    pinned ref). Raise the floor if bumping the ref grows it.
+//   --min <n>        Minimum descriptor count expected (default 1800). Guards
+//                    against a wrong --catalog path silently passing with near
+//                    zero tools. A clean checkout of the pinned niwrap ref has
+//                    ~1878 wrapped descriptors (hundreds more tools are listed
+//                    but not yet wrapped, so they are skipped); the 1800 floor
+//                    sits comfortably below that yet far above any wrong-path
+//                    result. Adjust if a ref bump moves the count materially.
 
 import { readFileSync } from "node:fs";
 import { compile, generateArgtype } from "@styx-api/core";
 import { loadCatalog } from "@styx-api/cli";
 
 function parseArgs(argv) {
-  const args = { catalog: undefined, min: 1900 };
+  const args = { catalog: undefined, min: 1800 };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--catalog") args.catalog = argv[++i];
