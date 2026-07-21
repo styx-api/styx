@@ -14,6 +14,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck:codegen": "npm run build -w @styx-api/core -w @styx-api/cli && node scripts/typecheck-codegen.mjs",
+    "corpus:roundtrip": "node scripts/corpus-roundtrip.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
