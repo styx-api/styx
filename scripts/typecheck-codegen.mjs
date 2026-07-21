@@ -44,6 +44,7 @@ const expectedTools = [
   "dup_variant",
   "various_types",
   "mrtrix_demo",
+  "mixed_output",
 ];
 const expectedFiles = expectedTools.flatMap((t) => [
   `python/suite/${t}.py`,

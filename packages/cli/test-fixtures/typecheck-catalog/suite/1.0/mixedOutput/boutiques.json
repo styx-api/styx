@@ -1,0 +1,48 @@
+{
+  "name": "mixedOutput",
+  "description": "A mixed (bare-literal + struct) union whose struct arm owns an output-file, for codegen typecheck.",
+  "tool-version": "1.0",
+  "schema-version": "0.5",
+  "command-line": "mixedOutput [INFILE] [QUALITY_CHECK]",
+  "inputs": [
+    {
+      "id": "infile",
+      "name": "In file",
+      "type": "File",
+      "value-key": "[INFILE]",
+      "description": "Required input file."
+    },
+    {
+      "id": "quality_check",
+      "name": "Quality check",
+      "value-key": "[QUALITY_CHECK]",
+      "command-line-flag": "-q",
+      "optional": true,
+      "description": "0 = off (default, a bare literal arm); the on arm is a struct that owns an output.",
+      "type": [
+        {
+          "id": "qc_off",
+          "name": "Quality check off",
+          "command-line": "0",
+          "description": "Off: a parameterless arm that collapses to the bare literal 0.",
+          "inputs": []
+        },
+        {
+          "id": "qc_on",
+          "name": "Quality check on",
+          "command-line": "1",
+          "description": "On: a struct arm carrying a gated output-file.",
+          "inputs": [],
+          "output-files": [
+            {
+              "id": "qc_report",
+              "name": "Quality-check report",
+              "path-template": "[INFILE]_qc.txt",
+              "description": "Only produced when quality_check is the qc_on struct arm - the output is gated on the struct variant of a mixed Literal | Struct union."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

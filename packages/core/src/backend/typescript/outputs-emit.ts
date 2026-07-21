@@ -12,6 +12,7 @@ import {
   rootOutput,
   streamFields,
 } from "../collect-output-fields.js";
+import { unionIsMixed, variantAtomUnion } from "../union-variants.js";
 import { emitJsDoc, renderAccess, tsPropAccess } from "./emit.js";
 import { renderTsLiteral } from "./typemap.js";
 
@@ -169,10 +170,17 @@ function renderWrapperOpen(atom: GateAtom, ec: OutputEmitCtx): WrapperRender {
   }
   if (atom.kind === "variant") {
     const access = bindingAccess(atom.binding, ec);
-    return {
-      open: `if (${access}["@type"] === ${JSON.stringify(atom.variant)}) {`,
-      close: `}`,
-    };
+    const check = `${access}["@type"] === ${JSON.stringify(atom.variant)}`;
+    // A mixed union (`0 | Struct`) only carries `@type` on its struct arms; guard
+    // on the object shape first so TS narrows off the bare-literal arm before the
+    // subscript (which would otherwise be a "property does not exist" error).
+    // Mirrors the cargs builder and validator. Pure-struct unions need no guard.
+    const union = variantAtomUnion(atom, ec.ctx.bindings);
+    const cond =
+      union && unionIsMixed(union)
+        ? `typeof ${access} === "object" && ${access} !== null && ${check}`
+        : check;
+    return { open: `if (${cond}) {`, close: `}` };
   }
   // present
   const binding = ec.ctx.bindings.get(atom.binding);

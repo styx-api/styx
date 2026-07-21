@@ -224,6 +224,26 @@ describe("python outputs - codegen", () => {
     expect(code).toContain("converted_v = execution.output_file(");
   });
 
+  it("shape-guards a mixed-union (literal + struct) variant gate before @type", () => {
+    // Mixed union (bare-literal off arm + struct on arm owning an output), the
+    // ants antsIntroduction.sh `n4_correction` shape. The union value is
+    // `Literal | Struct`; the literal arm has no `@type`, so a bare
+    // `value["@type"]` is a mypy non-indexable error (and a runtime KeyError on
+    // the literal). The gate must narrow to a dict first. A pure-struct union
+    // (the test above) needs no such guard.
+    const on = seq(lit("1"));
+    on.meta = {
+      name: "on",
+      outputs: [{ name: "report", tokens: [{ kind: "literal", value: "report.txt" }] }],
+    };
+    const root = seq(lit("tool"), namedAlt("mode", lit("0"), on));
+
+    const code = generate(root, { app: { id: "tool" } });
+    expect(code).toContain(
+      'if isinstance(params["mode"], dict) and params["mode"]["@type"] == "on":',
+    );
+  });
+
   it("uses f-string interpolation for multi-token paths", () => {
     const root = seq(lit("tool"), path("input"));
     root.meta = {

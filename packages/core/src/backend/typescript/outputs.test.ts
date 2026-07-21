@@ -352,6 +352,40 @@ describe("typescript outputs - execution", () => {
     expect(inspectOuts).toEqual({ root: ".", converted: null });
   });
 
+  it("shape-guards a mixed-union variant gate before indexing @type", () => {
+    // Mixed union (bare-literal off arm + struct on arm owning an output), the
+    // ants antsIntroduction.sh `n4_correction` shape. Indexing `["@type"]` on the
+    // `number | Struct` union value is a tsc "property does not exist" error
+    // (the compile-time regression this guards; the fixture catalog's tsc gate is
+    // where that is actually enforced). The emitted guard is the load-bearing
+    // assertion here; the runtime round-trip below just confirms the emitted code
+    // is valid JS and both arms behave (JS would not throw on `(0)["@type"]`, so
+    // it can't catch the bug on its own).
+    const on = seq(lit("1"));
+    on.meta = {
+      name: "on",
+      outputs: [{ name: "report", tokens: [{ kind: "literal", value: "report.txt" }] }],
+    };
+    const root = seq(lit("tool"), namedAlt("mode", lit("0"), on));
+
+    const code = generate(root, { app: { id: "tool" } });
+    expect(code).toContain(
+      'if (typeof params.mode === "object" && params.mode !== null && params.mode["@type"] === "on") {',
+    );
+
+    // Literal arm selected: guard excludes it, output stays null.
+    const { outputs: offOuts } = executeWithOutputs(root, { mode: 0 }, { app: { id: "tool" } });
+    expect(offOuts).toEqual({ root: ".", report: null });
+
+    // Struct arm selected: the gated output is produced.
+    const { outputs: onOuts } = executeWithOutputs(
+      root,
+      { mode: { "@type": "on" } },
+      { app: { id: "tool" } },
+    );
+    expect(onOuts).toEqual({ root: ".", report: "report.txt" });
+  });
+
   // Regression: when multiple union arms declare the same output name (e.g.
   // ants `antsApplyTransforms` -> `output_image_outfile` across 3 variants),
   // the Outputs interface must collapse to one field; otherwise TS2300
