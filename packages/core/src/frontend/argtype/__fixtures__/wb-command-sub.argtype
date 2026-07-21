@@ -1,0 +1,39 @@
+---
+exe: "wb_command"
+version: "1.5.0"
+authors:
+  - "Washington University School of Medicine"
+urls:
+  - "https://www.humanconnectome.org/software/connectome-workbench"
+---
+
+/// Reduce a volume file along the map axis to a single output map.
+///
+/// The executable is `wb_command` and the subcommand is `-volume-reduce`, so
+/// the tool id (`volume_reduce`) deliberately differs from the exe.
+volume_reduce: seq(
+  "-volume-reduce",
+
+  /// The input volume.
+  volume_in: path,
+
+  /// The reduction operation applied across the maps.
+  operation: alt(
+    "MAX",
+    "MIN",
+    "MEAN",
+    "SUM",
+    "STDEV",
+    "VARIANCE",
+    "TSNR",
+  ),
+
+  /// The output volume.
+  volume_out: str,
+
+  /// Exclude outliers by standard deviation before reducing.
+  opt("-exclude-outliers", sigma_below: float.min(0), sigma_above: float.min(0)),
+).output(
+  /// The reduced output volume.
+  reduced: `{volume_out}`,
+)

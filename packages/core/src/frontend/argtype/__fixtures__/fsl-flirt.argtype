@@ -1,0 +1,50 @@
+---
+exe: "flirt"
+version: "6.0.4"
+authors:
+  - "FMRIB Analysis Group, University of Oxford"
+urls:
+  - "https://fsl.fmrib.ox.ac.uk/fsl/fslwiki/FLIRT"
+---
+
+/// FMRIB's Linear Image Registration Tool (affine intra-modal registration).
+flirt: seq(
+  /// Input volume to register.
+  opt("-in", infile: path),
+
+  /// Reference volume that defines the target space.
+  opt("-ref", reference: path),
+
+  set(
+    /// Registered output volume.
+    opt("-out", outbase: str).output(outvol: `{outbase}.nii.gz`),
+
+    /// Text file the estimated affine transform is written to.
+    opt("-omat", outmatrix: str),
+
+    /// Number of histogram bins used for the cost function.
+    opt("-bins", bins: int.min(1) = 256),
+
+    /// Degrees of freedom for the transform (6 rigid, 12 full affine).
+    opt("-dof", dof: int.min(3).max(12) = 12),
+
+    /// Cost function to optimize.
+    opt("-cost", cost: alt(
+      "mutualinfo",
+      "corratio",
+      "normcorr",
+      "normmi",
+      "leastsq",
+    ) = "corratio"),
+
+    /// Final interpolation applied when writing `-out`. The union carries a
+    /// default variant (`trilinear`), which the frontend keeps as the node
+    /// default.
+    opt("-interp", interp: alt(
+      "trilinear",
+      "nearestneighbour",
+      "sinc",
+      "spline",
+    ) = "trilinear"),
+  ),
+)
