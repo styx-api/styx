@@ -191,34 +191,6 @@ function syntheticWrap(root: Expr): { child: Expr; outputs?: Output[] } | undefi
   return { child, ...(meta?.outputs && { outputs: meta.outputs }) };
 }
 
-function hasOutputs(expr: Expr): boolean {
-  return walkSome(expr, (n) => (n.meta?.outputs?.length ?? 0) > 0);
-}
-
-function hasMediaTypes(expr: Expr): boolean {
-  return walkSome(expr, (n) => n.kind === "path" && (n.attrs.mediaTypes?.length ?? 0) > 0);
-}
-
-function hasPaths(expr: Expr): boolean {
-  return walkSome(expr, (n) => n.kind === "path" && (!!n.attrs.mutable || !!n.attrs.resolveParent));
-}
-
-function walkSome(node: Expr, pred: (n: Expr) => boolean): boolean {
-  if (pred(node)) return true;
-  switch (node.kind) {
-    case "sequence":
-      return node.attrs.nodes.some((n) => walkSome(n, pred));
-    case "alternative":
-      return node.attrs.alts.some((n) => walkSome(n, pred));
-    case "optional":
-      return walkSome(node.attrs.node, pred);
-    case "repeat":
-      return walkSome(node.attrs.node, pred);
-    default:
-      return false;
-  }
-}
-
 const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** A name rendered where an identifier is expected: bare when it is a valid
@@ -342,13 +314,7 @@ class ArgtypeEmitter {
       if (raw.meta) root.meta = raw.meta;
     }
 
-    const frontmatter = this.emitFrontmatter(
-      app,
-      exe,
-      hasOutputs(root),
-      hasMediaTypes(root),
-      hasPaths(root),
-    );
+    const frontmatter = this.emitFrontmatter(app, exe);
     if (frontmatter) {
       lines.push(frontmatter, "");
     }
@@ -641,13 +607,7 @@ class ArgtypeEmitter {
     return quote(value);
   }
 
-  private emitFrontmatter(
-    app: AppMeta | undefined,
-    exe: string | undefined,
-    outputs: boolean,
-    mediaTypes: boolean,
-    paths: boolean,
-  ): string | undefined {
+  private emitFrontmatter(app: AppMeta | undefined, exe: string | undefined): string | undefined {
     const lines: string[] = [];
 
     // `exe` is the executable stripped from the command (argv[0]); emit it only
@@ -688,15 +648,6 @@ class ArgtypeEmitter {
       if (app.doc?.comment) {
         this.warn("AppMeta.doc.comment has no argtype surface; ignored");
       }
-    }
-
-    const extensions: string[] = [];
-    if (outputs) extensions.push("outputs");
-    if (mediaTypes) extensions.push("mediatypes");
-    if (paths) extensions.push("paths");
-    if (extensions.length > 0) {
-      lines.push("extensions:");
-      for (const e of extensions) lines.push(`  - ${e}`);
     }
 
     if (lines.length === 0) return undefined;

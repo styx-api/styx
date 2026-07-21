@@ -1,8 +1,6 @@
 ---
 exe: "cut"
 version: "9.0"
-extensions:
-  - mediatypes
 ---
 
 /// Cut fields from each line, exercising join micro-syntax and media types

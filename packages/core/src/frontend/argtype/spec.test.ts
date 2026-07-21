@@ -409,9 +409,12 @@ describe("argtype spec: defaults", () => {
     expect(find(r.expr, "x")?.meta?.defaultValue).toBe(-5);
   });
 
-  it("rejects `= value` after a method chain (use `.default()`)", () => {
+  it("accepts `= value` after a method chain (sugar for `.default()`)", () => {
     const r = parse(`tool: seq(x: int.min(1) = 80)`);
-    expect(r.errors.some((e) => /only allowed on a bare terminal/.test(e.message))).toBe(true);
+    expect(r.errors).toEqual([]);
+    const x = find(r.expr, "x");
+    expect(x?.kind === "int" && x.attrs.minValue).toBe(1);
+    expect(find(r.expr, "x")?.meta?.defaultValue).toBe(80);
   });
 });
 
@@ -470,9 +473,9 @@ describe("argtype spec: join and micro-syntax", () => {
     expect(inner?.kind === "sequence" && inner.attrs.join).toBe("");
   });
 
-  it("warns when `.join()` lands on an unsupported node (a terminal)", () => {
+  it("errors when `.join()` lands on an unsupported node (a terminal)", () => {
     const r = parse(`tool: seq(x: path.join(","))`);
-    expect(r.warnings.some((w) => /only supported on seq\/set\/rep/.test(w.message))).toBe(true);
+    expect(r.errors.some((e) => /only supported on seq\/set\/rep/.test(e.message))).toBe(true);
   });
 
   it("models a nested micro-syntax (ffmpeg -vf) with layered joins", () => {
@@ -816,16 +819,13 @@ tool: seq(image: path.mediaType("image/png"))`);
     expect(image?.kind === "path" && image.attrs.mediaTypes).toEqual(["image/png"]);
   });
 
-  it("warns that `.mediaType()` is path-only when used on a str", () => {
+  it("errors that `.mediaType()` is path-only when used on a str", () => {
     const r = parse(`tool: seq(x: str.mediaType("text/plain"))`);
-    expect(r.warnings.some((w) => /mediaType.*only supported on path/.test(w.message))).toBe(true);
-    // The str carries no media type, but a sibling path in the same doc still does.
-    const r2 = parse(`---
-extensions:
-  - mediatypes
----
-tool: seq(x: str.mediaType("text/plain"), img: path.mediaType("image/png"))`);
-    expect(find(r2.expr, "img")?.kind === "path" && find(r2.expr, "img")).toBeTruthy();
+    expect(r.errors.some((e) => /mediaType.*only supported on path/.test(e.message))).toBe(true);
+    // The str carries no media type; the error does not stop a sibling path in
+    // the same doc from still receiving its own media type.
+    const r2 = parse(`tool: seq(img: path.mediaType("image/png"))`);
+    expect(r2.errors).toEqual([]);
     const img = find(r2.expr, "img");
     expect(img?.kind === "path" && img.attrs.mediaTypes).toEqual(["image/png"]);
   });
@@ -848,31 +848,28 @@ describe("argtype spec: paths extension", () => {
 });
 
 // ===========================================================================
-// Misapplied type-specific modifiers warn (don't silently drop)
+// Misapplied type-specific modifiers are hard errors (don't silently drop)
 // ===========================================================================
 
-describe("argtype spec: misapplied modifiers warn", () => {
-  it("warns when `.min()`/`.max()` land on a non-numeric node", () => {
+describe("argtype spec: misapplied modifiers error", () => {
+  it("errors when `.min()`/`.max()` land on a non-numeric node", () => {
     const r = parse(`tool: seq(x: str.min(1), y: rep(int).max(9))`);
-    expect(r.errors).toEqual([]);
     expect(
-      r.warnings.some((w) => /min\(\).*max\(\).*only supported on int\/float/.test(w.message)),
+      r.errors.some((e) => /min\(\).*max\(\).*only supported on int\/float/.test(e.message)),
     ).toBe(true);
   });
 
-  it("warns when a count bound lands on a non-rep node", () => {
+  it("errors when a count bound lands on a non-rep node", () => {
     const r = parse(`tool: seq(x: str.count(3))`);
-    expect(r.errors).toEqual([]);
-    expect(r.warnings.some((w) => /count.*only supported on rep/.test(w.message))).toBe(true);
+    expect(r.errors.some((e) => /count.*only supported on rep/.test(e.message))).toBe(true);
   });
 
-  it("warns when `.mutable()`/`.resolveParent()` land on a non-path node", () => {
+  it("errors when `.mutable()`/`.resolveParent()` land on a non-path node", () => {
     const r = parse(`tool: seq(x: str.mutable())`);
-    expect(r.errors).toEqual([]);
-    expect(r.warnings.some((w) => /mutable.*only supported on path/.test(w.message))).toBe(true);
+    expect(r.errors.some((e) => /mutable.*only supported on path/.test(e.message))).toBe(true);
   });
 
-  it("does not warn when the modifier matches the node type", () => {
+  it("does not error when the modifier matches the node type", () => {
     const r = parse(`tool: seq(
       a: int.min(1).max(10),
       b: rep(path).count(2),
@@ -882,7 +879,7 @@ describe("argtype spec: misapplied modifiers warn", () => {
     expect(r.warnings).toEqual([]);
   });
 
-  it("does not warn when a modifier reaches a compatible node through an alias", () => {
+  it("does not error when a modifier reaches a compatible node through an alias", () => {
     const r = parse(`Count = int
 tool: seq(n: Count.min(0).max(5))`);
     expect(r.errors).toEqual([]);
@@ -891,33 +888,31 @@ tool: seq(n: Count.min(0).max(5))`);
     expect(n?.kind === "int" && n.attrs.minValue).toBe(0);
   });
 
-  it("warns when a modifier reaches an incompatible target through an alias", () => {
+  it("errors when a modifier reaches an incompatible target through an alias", () => {
     const r = parse(`Word = str
 tool: seq(x: Word.min(1))`);
-    expect(r.errors).toEqual([]);
-    expect(r.warnings.some((w) => /min\(\).*only supported on int\/float/.test(w.message))).toBe(
+    expect(r.errors.some((e) => /min\(\).*only supported on int\/float/.test(e.message))).toBe(
       true,
     );
   });
 });
 
 // ===========================================================================
-// Declare-before-use: extension usage vs frontmatter `extensions:`
+// `extensions:` frontmatter is an ignored (no-op) key: using an extension needs
+// no declaration, and declaring one has no effect.
 // ===========================================================================
 
-describe("argtype spec: extension declaration discipline", () => {
-  it("warns when frontmatter is present but an extension is used undeclared", () => {
+describe("argtype spec: extensions frontmatter is a no-op", () => {
+  it("does not warn when an extension is used without any declaration", () => {
     const r = parse(`---
 exe: "tool"
 ---
 tool: seq(x: path.mutable())`);
     expect(r.errors).toEqual([]);
-    expect(
-      r.warnings.some((w) => /'paths' extension but does not declare it/.test(w.message)),
-    ).toBe(true);
+    expect(r.warnings).toEqual([]);
   });
 
-  it("does not warn when the extension is declared", () => {
+  it("ignores a present `extensions:` key without complaint", () => {
     const r = parse(`---
 exe: "tool"
 extensions:
@@ -925,28 +920,41 @@ extensions:
 ---
 tool: seq(x: path.mutable())`);
     expect(r.errors).toEqual([]);
-    expect(r.warnings.some((w) => /does not declare it/.test(w.message))).toBe(false);
+    expect(r.warnings).toEqual([]);
   });
 
-  it("does not warn on undeclared usage when there is no frontmatter at all", () => {
+  it("does not warn on extension usage when there is no frontmatter at all", () => {
     const r = parse(`tool: seq(x: path.mutable(), out: path.resolveParent())`);
     expect(r.errors).toEqual([]);
     expect(r.warnings).toEqual([]);
   });
 
-  it("does not flag declare-before-use for a modifier that was misapplied and dropped", () => {
-    // A `str.mediaType(...)` is warned about and ignored; it must not ALSO be
-    // reported as undeclared-extension usage (that would contradict "ignored").
+  it("parses an inline flow-sequence value (asserted via a consumed key)", () => {
+    // `authors` is consumed into meta, so it proves `splitFlow` actually built a
+    // list. `extensions: [...]` in the same doc is the no-op case (ignored key).
     const r = parse(`---
 exe: "tool"
+authors: ["Ada Lovelace", "Bob, Jr.", "Carol"]
+extensions: [paths, outputs]
 ---
-tool: seq(x: str.mediaType("text/plain"))`);
+tool: seq(x: path.mutable()).output(o: \`{x}.out\`)`);
     expect(r.errors).toEqual([]);
-    expect(r.warnings.some((w) => /mediaType.*only supported on path/.test(w.message))).toBe(true);
-    expect(r.warnings.some((w) => /does not declare it/.test(w.message))).toBe(false);
+    expect(r.warnings).toEqual([]);
+    // The quoted "Bob, Jr." keeps its embedded comma; three elements, no phantom.
+    expect(r.meta?.doc?.authors).toEqual(["Ada Lovelace", "Bob, Jr.", "Carol"]);
   });
 
-  it("flags each distinct undeclared extension exactly once", () => {
+  it("drops phantom empty elements from a trailing comma in a flow sequence", () => {
+    const r = parse(`---
+exe: "tool"
+authors: [Ada, Bob,]
+---
+tool: seq(x: path)`);
+    expect(r.errors).toEqual([]);
+    expect(r.meta?.doc?.authors).toEqual(["Ada", "Bob"]);
+  });
+
+  it("has no lingering declare-before-use behavior", () => {
     const r = parse(`---
 exe: "tool"
 extensions:
@@ -954,12 +962,9 @@ extensions:
 ---
 tool: seq(img: path.mediaType("image/png").mutable(), img2: path.mutable()).output(o: \`{img}.out\`)`);
     expect(r.errors).toEqual([]);
-    const count = (re: RegExp) => r.warnings.filter((w) => re.test(w.message)).length;
-    // outputs is declared (no warning); mediatypes and paths each flagged once,
-    // even though `paths` is used on two different nodes.
-    expect(count(/'mediatypes' extension but does not declare/)).toBe(1);
-    expect(count(/'paths' extension but does not declare/)).toBe(1);
-    expect(count(/'outputs' extension but does not declare/)).toBe(0);
+    // No declaration discipline remains: extension usage never produces a
+    // "does not declare it" warning regardless of what `extensions:` lists.
+    expect(r.warnings.some((w) => /does not declare it/.test(w.message))).toBe(false);
   });
 });
 
@@ -1142,6 +1147,25 @@ describe("argtype spec: error handling", () => {
     expect(r.errors.some((e) => /Unexpected character/.test(e.message))).toBe(true);
   });
 
+  it("names the fix for a digit-led identifier (quote it) instead of a generic error", () => {
+    // All of AFNI is `3d*`/`1d*`/`2d*`; the diagnostic must name the quoting fix.
+    const r = parse(`3dTstat: seq("-prefix", path)`);
+    expect(
+      r.errors.some((e) => /cannot start with a digit; quote it as "3dTstat"/.test(e.message)),
+    ).toBe(true);
+    // It must not fall through to the baffling "expected a definition" message.
+    expect(r.errors.some((e) => /Expected a definition/.test(e.message))).toBe(false);
+  });
+
+  it("does not misread a broken number as a digit-led identifier", () => {
+    // Only a pure integer run recovers as a quoted identifier. A malformed
+    // exponent (`1eq`) must report the exponent error alone, not also a
+    // contradictory "quote it as \"1eq\"" - one token, one diagnostic.
+    const r = parse(`tool: seq(x: int.min(1eq))`);
+    expect(r.errors.some((e) => /exponent has no digits/.test(e.message))).toBe(true);
+    expect(r.errors.some((e) => /quote it as/.test(e.message))).toBe(false);
+  });
+
   it("reports a clear error on a stray leading top-level token (not a duplicate root)", () => {
     // A `,` cannot start a definition/alias/root expression. The real root that
     // follows must not be mis-reported as a duplicate.
@@ -1277,11 +1301,11 @@ describe("argtype spec: more join/count coverage", () => {
     expect(kv?.kind === "sequence" && kv.attrs.join).toBe(":");
   });
 
-  it("warns when `.join()` lands on an `alt` combinator (not a joinable node)", () => {
+  it("errors when `.join()` lands on an `alt` combinator (not a joinable node)", () => {
     // The explicit `alt(...)` form puts the join on the alternative itself; the
     // `(a | b)` paren form would instead land it on the joinable seq wrapper.
     const r = parse(`tool: seq(x: alt("a", "b").join(","))`);
-    expect(r.warnings.some((w) => /only supported on seq\/set\/rep/.test(w.message))).toBe(true);
+    expect(r.errors.some((e) => /only supported on seq\/set\/rep/.test(e.message))).toBe(true);
   });
 
   it("warns on inverted repetition-count bounds", () => {

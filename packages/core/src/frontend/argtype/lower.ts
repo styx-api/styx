@@ -37,9 +37,6 @@ function docFrom(node: { title?: string; description?: string }): Documentation 
 class Lowerer {
   readonly errors: string[] = [];
   readonly warnings: string[] = [];
-  /** Extensions whose annotations the document actually uses, collected during
-   * lowering so `lowerDocument` can flag any used-but-undeclared in frontmatter. */
-  readonly usedExtensions = new Set<string>();
   private aliases = new Map<string, AstNode>();
 
   constructor(aliases: AstAlias[]) {
@@ -90,47 +87,37 @@ class Lowerer {
 
     // `.join` collapses a node's subtree into one argv element. It is carried on
     // sequence/repeat in the IR directly, and on `opt` by pushing it onto the
-    // wrapped content (`lowerComb`). On other nodes it has no meaning, so warn.
+    // wrapped content (`lowerComb`). On any other node it would be silently
+    // dropped, changing command-line correctness with no failure signal (a tool
+    // gets `["A","B"]` instead of `"AB"`), so a misplaced modifier is a hard
+    // error, not a warning. Refs are already resolved above, so by here the
+    // node's concrete kind is known and these checks are accurate.
     const joinable =
       node.kind === "comb" &&
       (node.op === "seq" || node.op === "set" || node.op === "rep" || node.op === "opt");
     if (node.join !== undefined && !joinable) {
-      this.warnings.push("`.join()` is only supported on seq/set/rep/opt; ignored here");
+      this.errors.push("`.join()` is only supported on seq/set/rep/opt");
     }
 
     // A type-specific modifier that lands on an incompatible node is silently
-    // dropped downstream (only the matching lower* case reads it), so warn -
-    // same contract as the `.join()` check. Refs are already resolved above, so
-    // by here the node's concrete kind is known and these checks are accurate.
+    // dropped downstream (only the matching lower* case reads it), which quietly
+    // discards a value/arity constraint - so, like `.join()`, it is a hard error.
     const isNumericTerminal =
       node.kind === "terminal" && (node.terminal === "int" || node.terminal === "float");
     const isRep = node.kind === "comb" && node.op === "rep";
     const isPath = node.kind === "terminal" && node.terminal === "path";
     if ((node.min !== undefined || node.max !== undefined) && !isNumericTerminal) {
-      this.warnings.push(
-        "`.min()`/`.max()` is only supported on int/float terminals; ignored here",
-      );
+      this.errors.push("`.min()`/`.max()` is only supported on int/float terminals");
     }
     if ((node.countMin !== undefined || node.countMax !== undefined) && !isRep) {
-      this.warnings.push(
-        "`.count()`/`.countMin()`/`.countMax()` is only supported on rep; ignored here",
-      );
+      this.errors.push("`.count()`/`.countMin()`/`.countMax()` is only supported on rep");
     }
     if ((node.mutable || node.resolveParent) && !isPath) {
-      this.warnings.push("`.mutable()`/`.resolveParent()` is only supported on path; ignored here");
+      this.errors.push("`.mutable()`/`.resolveParent()` is only supported on path");
     }
     if (node.mediaTypes?.length && !isPath) {
-      this.warnings.push("`.mediaType()` is only supported on path; ignored here");
+      this.errors.push("`.mediaType()` is only supported on path");
     }
-
-    // Record which extensions' annotations the author reached for, so a document
-    // that uses one without declaring it in frontmatter can be flagged. Only count
-    // an annotation that actually applies here: a misapplied `path`-only modifier
-    // is already warned about and dropped just above, so recording it would make
-    // declare-before-use contradict that ("ignored" yet "declare it").
-    if (node.outputs?.length) this.usedExtensions.add("outputs");
-    if (node.mediaTypes?.length && isPath) this.usedExtensions.add("mediatypes");
-    if ((node.mutable || node.resolveParent) && isPath) this.usedExtensions.add("paths");
 
     // A `.output()` on a non-sequence node attaches to the enclosing sequence
     // scope (`sink`); seq/set own their outputs (handled in `lowerComb`).
@@ -215,8 +202,8 @@ class Lowerer {
         return e;
       }
       case "str": {
-        // A `str.mediaType(...)` is warned about generically in `lowerNode`
-        // (media types are a `path`-only annotation), so nothing to do here.
+        // A `str.mediaType(...)` is rejected generically in `lowerNode` (media
+        // types are a `path`-only annotation), so nothing to do here.
         const e = str();
         this.applyMeta(e, node);
         return e;
@@ -531,31 +518,10 @@ export function lowerDocument(doc: AstDocument): LowerResult {
     doc.rootName,
   );
 
-  // Declare-before-use: when a document has frontmatter, an extension whose
-  // annotations it uses should be listed in `extensions:`. We only check this
-  // when frontmatter is present - a frontmatter-less snippet hasn't opted into
-  // the declaration discipline, so flagging every quick `.output()` would be
-  // noise. The warning is advisory (extensions are ignorable by contract).
-  const extWarnings: string[] = [];
-  if (doc.frontmatter) {
-    const declared = new Set(
-      Array.isArray(doc.frontmatter.extensions)
-        ? doc.frontmatter.extensions.filter((e): e is string => typeof e === "string")
-        : [],
-    );
-    for (const used of lowerer.usedExtensions) {
-      if (!declared.has(used)) {
-        extWarnings.push(
-          `Uses the '${used}' extension but does not declare it in frontmatter (add it to 'extensions:')`,
-        );
-      }
-    }
-  }
-
   return {
     ...(meta && { meta }),
     expr: result.expr,
     errors: result.errors,
-    warnings: [...result.warnings, ...warnings, ...extWarnings],
+    warnings: [...result.warnings, ...warnings],
   };
 }

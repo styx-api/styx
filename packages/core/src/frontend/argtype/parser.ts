@@ -221,25 +221,16 @@ class Parser {
   private parseChain(): AstNode {
     const node = this.parsePrimary();
     // Method chain.
-    let chained = false;
     while (this.at("dot")) {
       this.next();
       this.applyMethod(node);
-      chained = true;
     }
-    // `= value` default sugar. The spec restricts it to a bare terminal: once a
-    // chain has started, `.default(...)` must be used instead.
+    // `= value` is pure sugar for `.default(value)`, with no positional
+    // restriction: it binds after a method chain too (`float.min(0) = 0.5`),
+    // since the meaning is unambiguous and the terminal-only rule was a footgun.
     if (this.at("eq")) {
-      const eqTok = this.next();
-      const value = this.parseValue();
-      if (node.kind === "terminal" && !chained) {
-        node.default = value;
-      } else {
-        this.error(
-          "`= value` default is only allowed on a bare terminal; use `.default(...)` after a method chain",
-          eqTok,
-        );
-      }
+      this.next(); // '='
+      node.default = this.parseValue();
     }
     return node;
   }

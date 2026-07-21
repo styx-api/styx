@@ -5,8 +5,6 @@ authors:
   - "FMRIB Analysis Group, University of Oxford"
 urls:
   - "https://fsl.fmrib.ox.ac.uk/fsl/fslwiki"
-extensions:
-  - outputs
 ---
 
 /// Automated brain extraction tool for FSL
