@@ -16,13 +16,28 @@ import { nodeRef } from "../../ir/meta.js";
 import type { AppMeta, NodeMeta, Output, OutputToken, StreamOutput } from "../../ir/meta.js";
 import type { Documentation } from "../../ir/types.js";
 import type { Expr, Sequence } from "../../ir/node.js";
-import type { AstAlias, AstDocument, AstNode, AstOutput } from "./ast.js";
+import type { AstAlias, AstDocument, AstNode, AstOutput, SourceSpan } from "./ast.js";
+
+/** A lowering diagnostic, optionally located at a source position. The location
+ * comes from the offending AST node's span, so an error like a misplaced
+ * `.join()` points at the node it was chained onto (parser/lexer diagnostics
+ * already carry positions; this extends the same to the lowering stage). */
+export interface LowerDiagnostic {
+  message: string;
+  line?: number;
+  column?: number;
+}
 
 export interface LowerResult {
   meta?: AppMeta;
   expr: Sequence;
-  errors: string[];
-  warnings: string[];
+  errors: LowerDiagnostic[];
+  warnings: LowerDiagnostic[];
+}
+
+/** Spread a node's span into a diagnostic (no-op when the node has no span). */
+function at(span: SourceSpan | undefined): { line?: number; column?: number } {
+  return span ? { line: span.line, column: span.column } : {};
 }
 
 /** Build IR `Documentation` from an AST node's already-split title/description. */
@@ -35,16 +50,26 @@ function docFrom(node: { title?: string; description?: string }): Documentation 
 }
 
 class Lowerer {
-  readonly errors: string[] = [];
-  readonly warnings: string[] = [];
+  readonly errors: LowerDiagnostic[] = [];
+  readonly warnings: LowerDiagnostic[] = [];
   private aliases = new Map<string, AstNode>();
 
   constructor(aliases: AstAlias[]) {
     for (const a of aliases) {
       if (this.aliases.has(a.name))
-        this.warnings.push(`Duplicate alias '${a.name}'; last definition wins`);
+        this.warn(`Duplicate alias '${a.name}'; last definition wins`, a.expr);
       this.aliases.set(a.name, a.expr);
     }
+  }
+
+  /** Record an error, located at `node`'s span when one is available. */
+  private err(message: string, node?: AstNode): void {
+    this.errors.push({ message, ...at(node?.span) });
+  }
+
+  /** Record a warning, located at `node`'s span when one is available. */
+  private warn(message: string, node?: AstNode): void {
+    this.warnings.push({ message, ...at(node?.span) });
   }
 
   lower(doc: AstDocument): LowerResult {
@@ -96,7 +121,7 @@ class Lowerer {
       node.kind === "comb" &&
       (node.op === "seq" || node.op === "set" || node.op === "rep" || node.op === "opt");
     if (node.join !== undefined && !joinable) {
-      this.errors.push("`.join()` is only supported on seq/set/rep/opt");
+      this.err("`.join()` is only supported on seq/set/rep/opt", node);
     }
 
     // A type-specific modifier that lands on an incompatible node is silently
@@ -107,16 +132,29 @@ class Lowerer {
     const isRep = node.kind === "comb" && node.op === "rep";
     const isPath = node.kind === "terminal" && node.terminal === "path";
     if ((node.min !== undefined || node.max !== undefined) && !isNumericTerminal) {
-      this.errors.push("`.min()`/`.max()` is only supported on int/float terminals");
+      this.err("`.min()`/`.max()` is only supported on int/float terminals", node);
     }
     if ((node.countMin !== undefined || node.countMax !== undefined) && !isRep) {
-      this.errors.push("`.count()`/`.countMin()`/`.countMax()` is only supported on rep");
+      this.err("`.count()`/`.countMin()`/`.countMax()` is only supported on rep", node);
     }
     if ((node.mutable || node.resolveParent) && !isPath) {
-      this.errors.push("`.mutable()`/`.resolveParent()` is only supported on path");
+      this.err("`.mutable()`/`.resolveParent()` is only supported on path", node);
     }
     if (node.mediaTypes?.length && !isPath) {
-      this.errors.push("`.mediaType()` is only supported on path");
+      this.err("`.mediaType()` is only supported on path", node);
+    }
+
+    // `.default()` / `= value` is meaningful on a terminal, and also on the
+    // combinators that model a defaultable value: `opt` (its default when
+    // omitted), `alt` (a union's default variant), `rep` (a default list). Only a
+    // `seq`/`set` struct has no scalar to default - a default there is nonsensical
+    // and, left in place, would flow to the node's `defaultValue` (which backends
+    // read) as a bogus value, so drop it and warn. It never changes which argv is
+    // valid, so this is a warning, not an error.
+    const isStruct = node.kind === "comb" && (node.op === "seq" || node.op === "set");
+    if (node.default !== undefined && isStruct) {
+      this.warn("`= value` / `.default()` is not supported on a seq/set struct; ignored", node);
+      node.default = undefined;
     }
 
     // A `.output()` on a non-sequence node attaches to the enclosing sequence
@@ -137,7 +175,7 @@ class Lowerer {
       case "comb":
         return this.lowerComb(node, expanding, name, sink);
       default: {
-        this.errors.push(`Unknown AST node kind '${(node as AstNode).kind}'`);
+        this.err(`Unknown AST node kind '${(node as AstNode).kind}'`, node);
         return seq();
       }
     }
@@ -152,17 +190,20 @@ class Lowerer {
     const target = node.refName!;
     const aliasExpr = this.aliases.get(target);
     if (!aliasExpr) {
-      this.errors.push(`Unknown alias '${target}'`);
+      this.err(`Unknown alias '${target}'`, node);
       return seq();
     }
     if (expanding.has(target)) {
-      this.errors.push(`Recursive alias '${target}' is not allowed`);
+      this.err(`Recursive alias '${target}' is not allowed`, node);
       return seq();
     }
     const clone = structuredClone(aliasExpr);
     // Overlay use-site decorations onto the inlined alias. The use site wins for
     // each scalar decoration it specifies; outputs and media types accumulate.
     // Without this, `size: Dimension.join(",")` would silently drop the join.
+    // Point any diagnostic about the resolved node at the use site (a misplaced
+    // modifier there, not in the alias definition, is what the author must fix).
+    clone.span = node.span ?? clone.span;
     clone.name = node.name ?? clone.name;
     clone.title = node.title ?? clone.title;
     clone.description = node.description ?? clone.description;
@@ -187,7 +228,7 @@ class Lowerer {
     switch (node.terminal) {
       case "int": {
         const e = int();
-        this.checkBounds(node.min, node.max, "value", "min", "max");
+        this.checkBounds(node.min, node.max, "value", "min", "max", node);
         if (node.min !== undefined) e.attrs.minValue = node.min;
         if (node.max !== undefined) e.attrs.maxValue = node.max;
         this.applyMeta(e, node);
@@ -195,7 +236,7 @@ class Lowerer {
       }
       case "float": {
         const e = float();
-        this.checkBounds(node.min, node.max, "value", "min", "max");
+        this.checkBounds(node.min, node.max, "value", "min", "max", node);
         if (node.min !== undefined) e.attrs.minValue = node.min;
         if (node.max !== undefined) e.attrs.maxValue = node.max;
         this.applyMeta(e, node);
@@ -217,7 +258,7 @@ class Lowerer {
         return e;
       }
       default: {
-        this.errors.push(`Unknown terminal '${String(node.terminal)}'`);
+        this.err(`Unknown terminal '${String(node.terminal)}'`, node);
         return str();
       }
     }
@@ -242,7 +283,7 @@ class Lowerer {
         const selfOutputs: Output[] = [];
         for (const o of node.outputs ?? []) selfOutputs.push(this.toOutput(o, name));
         const lowered = lowerChildren(selfOutputs);
-        this.dedupeSiblingNames(lowered);
+        this.dedupeSiblingNames(lowered, node);
         const e = seq(...lowered);
         if (node.join !== undefined) e.attrs.join = node.join;
         this.applyMeta(e, node);
@@ -258,7 +299,7 @@ class Lowerer {
         // same way. `any` is exempt: it emits branch 0 and its branches are
         // deliberately binding-compatible (same names by design).
         const arms = lowerChildren(sink);
-        this.dedupeSiblingNames(arms);
+        this.dedupeSiblingNames(arms, node);
         const e = alt(...arms);
         this.applyMeta(e, node);
         return e;
@@ -270,7 +311,7 @@ class Lowerer {
         // is lossless and expected, not a degradation worth warning about.
         // (Only a parser/validator would need to accept the other spellings.)
         if (children.length === 0) {
-          this.errors.push("`any(...)` requires at least one branch");
+          this.err("`any(...)` requires at least one branch", node);
           return seq();
         }
         const e = this.lowerNode(children[0]!, expanding, name, sink);
@@ -301,14 +342,21 @@ class Lowerer {
         const inner = this.wrapChildren(children, expanding, name, sink);
         const e = rep(inner);
         if (node.join !== undefined) e.attrs.join = node.join;
-        this.checkBounds(node.countMin, node.countMax, "repetition count", "countMin", "countMax");
+        this.checkBounds(
+          node.countMin,
+          node.countMax,
+          "repetition count",
+          "countMin",
+          "countMax",
+          node,
+        );
         if (node.countMin !== undefined) e.attrs.countMin = node.countMin;
         if (node.countMax !== undefined) e.attrs.countMax = node.countMax;
         this.applyMeta(e, node);
         return e;
       }
       default: {
-        this.errors.push(`Unknown combinator '${String(node.op)}'`);
+        this.err(`Unknown combinator '${String(node.op)}'`, node);
         return seq();
       }
     }
@@ -322,9 +370,10 @@ class Lowerer {
     what: string,
     minLabel: string,
     maxLabel: string,
+    node?: AstNode,
   ): void {
     if (min !== undefined && max !== undefined && min > max) {
-      this.warnings.push(`Inverted ${what} bounds: ${minLabel} (${min}) > ${maxLabel} (${max})`);
+      this.warn(`Inverted ${what} bounds: ${minLabel} (${min}) > ${maxLabel} (${max})`, node);
     }
   }
 
@@ -340,7 +389,7 @@ class Lowerer {
    * explicit labels; it does not detect collisions between solver-derived names
    * of otherwise-unnamed children, which the solver also does not guard.)
    */
-  private dedupeSiblingNames(children: Expr[]): void {
+  private dedupeSiblingNames(children: Expr[], parent?: AstNode): void {
     const used = new Set<string>();
     for (const child of children) {
       const nm = child.meta?.name;
@@ -354,7 +403,9 @@ class Lowerer {
       const renamed = `${nm}_${n}`;
       used.add(renamed);
       child.meta = { ...child.meta, name: renamed };
-      this.warnings.push(`Duplicate sibling name '${nm}'; renamed one occurrence to '${renamed}'`);
+      // Locate at the enclosing seq/set/alt node (the collision is between its
+      // direct children, which are lowered IR nodes without their own AST span).
+      this.warn(`Duplicate sibling name '${nm}'; renamed one occurrence to '${renamed}'`, parent);
     }
   }
 
@@ -392,16 +443,13 @@ class Lowerer {
       }
       const targetName = t.name ?? selfName;
       if (!targetName) {
-        this.warnings.push(
-          "Output self-reference '{}' has no named node to resolve to; emitting empty",
-        );
+        this.warn("Output self-reference '{}' has no named node to resolve to; emitting empty");
         tokens.push({ kind: "literal", value: "" });
         continue;
       }
       if (t.stripPrefix?.length)
-        this.warnings.push("Output ref op 'strip_prefix' is not supported by the IR; ignored");
-      if (t.basename)
-        this.warnings.push("Output ref op 'basename' is not supported by the IR; ignored");
+        this.warn("Output ref op 'strip_prefix' is not supported by the IR; ignored");
+      if (t.basename) this.warn("Output ref op 'basename' is not supported by the IR; ignored");
       tokens.push({
         kind: "ref",
         target: nodeRef(targetName),
@@ -410,7 +458,7 @@ class Lowerer {
       });
     }
     if (o.fallback !== undefined) {
-      this.warnings.push("Output-level '.or(...)' fallback is not supported by the IR; ignored");
+      this.warn("Output-level '.or(...)' fallback is not supported by the IR; ignored");
     }
     const doc = docFrom(o);
     return { ...(o.name && { name: o.name }), ...(doc && { doc }), tokens };
@@ -448,6 +496,30 @@ export function buildAppMeta(
   const authors = strList(fm.authors);
   const urls = strList(fm.urls);
   const references = strList(fm.references);
+
+  // Validate the shape of known keys. A present-but-wrong-shape value is almost
+  // always an authoring mistake, and silently coercing it (dropping a scalar
+  // author, ignoring a malformed container) hides that - so warn rather than
+  // drop in silence. An empty key (`authors:` with no value, parsed as null) is
+  // left alone; only a non-null non-list scalar is flagged.
+  const checkList = (key: string, v: unknown): void => {
+    if (v !== undefined && v !== null && !Array.isArray(v)) {
+      warnings.push(`Frontmatter '${key}' should be a list; got a scalar - ignored`);
+    }
+  };
+  checkList("authors", fm.authors);
+  checkList("urls", fm.urls);
+  checkList("references", fm.references);
+  if (fm.version !== undefined && fm.version !== null && version === undefined) {
+    warnings.push(`Frontmatter 'version' should be a string or number; ignored`);
+  }
+  if (fm.container !== undefined && fm.container !== null) {
+    if (!isRecord(fm.container)) {
+      warnings.push(`Frontmatter 'container' should be a mapping with an 'image'; ignored`);
+    } else if (!asStr(fm.container.image)) {
+      warnings.push(`Frontmatter 'container' is missing an 'image'; ignored`);
+    }
+  }
 
   const doc: Documentation = {
     ...rootTitleDesc,
@@ -522,6 +594,8 @@ export function lowerDocument(doc: AstDocument): LowerResult {
     ...(meta && { meta }),
     expr: result.expr,
     errors: result.errors,
-    warnings: [...result.warnings, ...warnings],
+    // Frontmatter warnings are location-less (the reader blanks those lines and
+    // does not track per-key positions), so they carry no line/column.
+    warnings: [...result.warnings, ...warnings.map((message) => ({ message }))],
   };
 }

@@ -57,6 +57,45 @@ const KNOWN_METHODS = new Set([
   "resolveParent",
 ]);
 
+/** Levenshtein edit distance between two strings. */
+function editDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(
+        prev[j]! + 1,
+        cur[j - 1]! + 1,
+        prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+    prev = cur;
+  }
+  return prev[n]!;
+}
+
+/** The closest candidate to `name` within a small edit distance, for a "did you
+ * mean?" hint on an unknown method. Returns undefined when nothing is close
+ * enough, so a deliberate unknown-extension method gets no spurious suggestion.
+ * A typo (`reqires`, `mediaTpe`) lands within distance 2 of a real method; an
+ * unrelated extension method (`conflicts`) does not. The `bestDist < name.length`
+ * clause additionally stops a very short unknown name from matching a longer
+ * method by pure insertion (a 1-char `.n()` is not "did you mean `.min()`"). */
+function suggestMethod(name: string, candidates: Iterable<string>): string | undefined {
+  let best: string | undefined;
+  let bestDist = Infinity;
+  for (const c of candidates) {
+    const d = editDistance(name, c);
+    if (d < bestDist) {
+      bestDist = d;
+      best = c;
+    }
+  }
+  return best !== undefined && bestDist <= 2 && bestDist < name.length ? best : undefined;
+}
+
 class Parser {
   private tokens: Token[];
   private pos = 0;
@@ -215,7 +254,9 @@ class Parser {
       this.next();
       alts.push(this.parseChain());
     }
-    return { kind: "comb", op: "alt", children: alts };
+    // The synthesized alt has no token of its own; point diagnostics at its first
+    // arm (e.g. a misplaced `.join()` on `(a | b).join()`).
+    return { kind: "comb", op: "alt", children: alts, ...(first.span && { span: first.span }) };
   }
 
   private parseChain(): AstNode {
@@ -237,36 +278,37 @@ class Parser {
 
   private parsePrimary(): AstNode {
     const tok = this.peek();
+    const span = { line: tok.line, column: tok.column };
 
     if (tok.kind === "string") {
       this.next();
-      return { kind: "literal", value: tok.value };
+      return { kind: "literal", value: tok.value, span };
     }
 
     if (tok.kind === "lparen") {
       // Anonymous sequence group.
       const children = this.parseParenList();
-      return { kind: "comb", op: "seq", children };
+      return { kind: "comb", op: "seq", children, span };
     }
 
     if (tok.kind === "ident") {
       if (COMBINATORS.has(tok.value as Combinator) && this.peek(1).kind === "lparen") {
         this.next();
         const children = this.parseParenList();
-        return { kind: "comb", op: tok.value as Combinator, children };
+        return { kind: "comb", op: tok.value as Combinator, children, span };
       }
       if (TERMINALS.has(tok.value as Terminal)) {
         this.next();
-        return { kind: "terminal", terminal: tok.value as Terminal };
+        return { kind: "terminal", terminal: tok.value as Terminal, span };
       }
       // Otherwise an alias reference.
       this.next();
-      return { kind: "ref", refName: tok.value };
+      return { kind: "ref", refName: tok.value, span };
     }
 
     this.error(`Unexpected token '${tok.value || tok.kind}' in expression`, tok);
     this.next();
-    return { kind: "literal", value: "" };
+    return { kind: "literal", value: "", span };
   }
 
   /** Parse `( elem, elem, ... )` with optional leading docs and trailing comma. */
@@ -299,9 +341,17 @@ class Parser {
       // An extension method we don't implement (e.g. the draft `constraints`
       // extension's `.requires()`/`.conflicts()`). The spec requires unknown
       // extension annotations to be ignorable, so skip the argument list
-      // (whatever its shape) and continue rather than failing the parse.
+      // (whatever its shape) and continue rather than failing the parse. A
+      // near-miss to a known method is almost certainly a typo, though, so add a
+      // "did you mean?" hint (the warning still just ignores it, preserving the
+      // ignorable contract for genuine extension methods).
       this.skipBalancedArgs();
-      this.warn(`Ignoring unsupported method '.${method}()'`, nameTok);
+      const hint = suggestMethod(method, [...KNOWN_METHODS, "output"]);
+      this.warn(
+        `Ignoring unsupported method '.${method}()'` +
+          (hint ? ` (did you mean '.${hint}()'?)` : ""),
+        nameTok,
+      );
       return;
     }
 
@@ -438,7 +488,12 @@ class Parser {
         }
       } else {
         this.skipBalancedArgs();
-        this.warn(`Ignoring unsupported output-template method '.${m.value}()'`, m);
+        const hint = suggestMethod(m.value, CHAIN);
+        this.warn(
+          `Ignoring unsupported output-template method '.${m.value}()'` +
+            (hint ? ` (did you mean '.${hint}()'?)` : ""),
+          m,
+        );
       }
     }
 

@@ -898,6 +898,139 @@ tool: seq(x: Word.min(1))`);
 });
 
 // ===========================================================================
+// Diagnostic quality: source locations, did-you-mean hints, inert defaults
+// ===========================================================================
+
+describe("argtype spec: diagnostic quality", () => {
+  it("locates a lowering error at the offending node's line/column", () => {
+    // The misplaced `.join()` is on line 3; the error must point there, not be
+    // location-less (parser/lexer errors already carry positions - this extends
+    // the same to the lowering stage, which matters most in an LLM retry loop).
+    const r = parse(`tool: seq(
+  ok: path,
+  bad: path.join(",")
+)`);
+    const e = r.errors.find((x) => /only supported on seq\/set\/rep/.test(x.message));
+    expect(e).toBeDefined();
+    expect(e?.location?.line).toBe(3);
+    expect(typeof e?.location?.column).toBe("number");
+  });
+
+  it("locates a misplaced modifier at the use site when it comes through an alias", () => {
+    const r = parse(`Word = str
+tool: seq(x: Word.min(1))`);
+    const e = r.errors.find((x) => /only supported on int\/float/.test(x.message));
+    // Line 2 is the use site (`Word.min(1)`), not line 1 (the alias definition).
+    expect(e?.location?.line).toBe(2);
+  });
+
+  it("suggests a near-miss method name (did you mean?)", () => {
+    const r = parse(`tool: seq(x: int.mim(1))`);
+    expect(
+      r.warnings.some((w) =>
+        /Ignoring unsupported method '\.mim\(\)'.*did you mean '\.min\(\)'/.test(w.message),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not suggest anything for a genuine unknown-extension method", () => {
+    // `.conflicts()` (a draft `constraints` method) is not a typo of any known
+    // method, so it stays a plain ignorable warning with no misleading hint.
+    const r = parse(`tool: seq(a: opt("-a"), b: opt("-b").conflicts("a"))`);
+    expect(r.errors).toEqual([]);
+    const w = r.warnings.find((x) => /\.conflicts\(\)/.test(x.message));
+    expect(w).toBeDefined();
+    expect(/did you mean/.test(w!.message)).toBe(false);
+  });
+
+  it("suggests a near-miss output-template method name", () => {
+    const r = parse(`tool: seq(x: path).output(o: \`{x}.nii\`.tilte("T"))`);
+    expect(
+      r.warnings.some((w) =>
+        /output-template method '\.tilte\(\)'.*did you mean '\.title\(\)'/.test(w.message),
+      ),
+    ).toBe(true);
+  });
+
+  it("warns (does not error) and drops a `= value` / `.default()` on a seq/set struct", () => {
+    // A default on a `seq` would otherwise flow to the node's `defaultValue`
+    // (which backends read); it must be dropped, not silently propagated. A
+    // default on `opt`/`alt`/`rep` is legitimate (optional/union/list default)
+    // and is left untouched - see the round-trip tests.
+    const r = parse(`tool: seq(grp: seq(a: int, b: int) = 9)`);
+    expect(r.errors).toEqual([]);
+    expect(
+      r.warnings.some((w) => /not supported on a seq\/set struct; ignored/.test(w.message)),
+    ).toBe(true);
+    expect(find(r.expr, "grp")?.meta?.defaultValue).toBeUndefined();
+  });
+
+  it("keeps a `= value` default on an `alt` (a union's default variant)", () => {
+    const r = parse(`tool: seq(mode: alt("linear", "cubic") = "linear")`);
+    expect(r.errors).toEqual([]);
+    expect(r.warnings).toEqual([]);
+    expect(find(r.expr, "mode")?.meta?.defaultValue).toBe("linear");
+  });
+});
+
+// ===========================================================================
+// Frontmatter shape validation: a present-but-wrong-shape known key warns
+// instead of being silently coerced/dropped.
+// ===========================================================================
+
+describe("argtype spec: frontmatter shape validation", () => {
+  it("warns when a list key is given a scalar", () => {
+    const r = parse(`---
+exe: "tool"
+authors: Solo Author
+---
+tool: seq(x: path)`);
+    expect(r.errors).toEqual([]);
+    expect(r.warnings.some((w) => /'authors' should be a list/.test(w.message))).toBe(true);
+    // The malformed value is dropped, not coerced into a bogus author.
+    expect(r.meta?.doc?.authors).toBeUndefined();
+  });
+
+  it("warns when `container` is missing an image", () => {
+    const r = parse(`---
+exe: "tool"
+container:
+  type: docker
+---
+tool: seq(x: path)`);
+    expect(r.errors).toEqual([]);
+    expect(r.warnings.some((w) => /'container' is missing an 'image'/.test(w.message))).toBe(true);
+    expect(r.meta?.container).toBeUndefined();
+  });
+
+  it("warns when `version` is neither string nor number", () => {
+    const r = parse(`---
+exe: "tool"
+version: [1, 2]
+---
+tool: seq(x: path)`);
+    expect(r.errors).toEqual([]);
+    expect(r.warnings.some((w) => /'version' should be a string or number/.test(w.message))).toBe(
+      true,
+    );
+  });
+
+  it("does not warn on well-formed frontmatter", () => {
+    const r = parse(`---
+exe: "tool"
+version: "1.0"
+authors: [Ada, Bob]
+container:
+  image: "docker://tool:1.0"
+---
+tool: seq(x: path)`);
+    expect(r.errors).toEqual([]);
+    expect(r.warnings).toEqual([]);
+    expect(r.meta?.doc?.authors).toEqual(["Ada", "Bob"]);
+  });
+});
+
+// ===========================================================================
 // `extensions:` frontmatter is an ignored (no-op) key: using an extension needs
 // no declaration, and declaring one has no effect.
 // ===========================================================================
