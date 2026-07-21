@@ -1,0 +1,10 @@
+{
+  "name": "mixedOutput",
+  "source": {
+    "type": "boutiques",
+    "path": "boutiques.json"
+  },
+  "docs": {
+    "description": "Hand-written tool with a mixed (bare-literal + struct) union (`quality_check = Literal[0] | QcOn`) whose struct arm owns an output-file (the ants antsIntroduction.sh `n4_correction` / `quality_check` shape). The output is gated on the struct variant, so the emitter renders a `@type` check on the union value - which is a non-indexable type error (and a runtime KeyError on the literal arm) unless a shape guard (`isinstance` dict / `typeof === object`) narrows off the bare-literal arm first."
+  }
+}

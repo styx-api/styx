@@ -11,6 +11,7 @@ import {
   rootOutput,
   streamFields,
 } from "../collect-output-fields.js";
+import { unionIsMixed, variantAtomUnion } from "../union-variants.js";
 import { PY_KEYWORDS, emitDocstring } from "./emit.js";
 import { pyStr, renderAccess, renderPyLiteral } from "./typemap.js";
 
@@ -103,7 +104,17 @@ function renderWrapperOpen(atom: GateAtom, ec: OutputEmitCtx): WrapperRender {
   }
   if (atom.kind === "variant") {
     const access = bindingAccess(atom.binding, ec);
-    return { open: `if ${access}["@type"] == ${pyStr(atom.variant)}:` };
+    const check = `${access}["@type"] == ${pyStr(atom.variant)}`;
+    // A mixed union (`Literal[0] | Struct`) only carries `@type` on its struct
+    // arms; guard on the dict shape first so mypy narrows off the bare-literal
+    // arm before the subscript (which would otherwise be a non-indexable type
+    // error, and a runtime KeyError on the literal). Mirrors the cargs builder
+    // and validator. Pure-struct unions are always indexable - no guard needed.
+    const union = variantAtomUnion(atom, ec.ctx.bindings);
+    if (union && unionIsMixed(union)) {
+      return { open: `if isinstance(${access}, dict) and ${check}:` };
+    }
+    return { open: `if ${check}:` };
   }
   // present
   const binding = ec.ctx.bindings.get(atom.binding);
