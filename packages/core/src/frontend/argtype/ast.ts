@@ -15,8 +15,20 @@ export type Combinator = "seq" | "set" | "opt" | "rep" | "alt" | "any";
 /** A terminal keyword. */
 export type Terminal = "int" | "float" | "str" | "path";
 
+/** 1-based source position of a construct, for diagnostics. Points at the node's
+ * primary token (a terminal/combinator keyword, a literal token, or the opening
+ * paren of a group), which is where a misplaced modifier or bad decoration is
+ * most usefully reported. */
+export interface SourceSpan {
+  line: number;
+  column: number;
+}
+
 export interface AstNode {
   kind: "literal" | "terminal" | "comb" | "ref";
+
+  /** Source position of the node's primary token, if known. */
+  span?: SourceSpan;
 
   /** kind === "literal": the fixed token string. */
   value?: string;
@@ -36,7 +48,8 @@ export interface AstNode {
   title?: string;
   /** Description: a `///` block (minus the title), or `.description("...")`. */
   description?: string;
-  /** `= value` sugar / `.default(...)` (terminal only). */
+  /** `= value` sugar / `.default(...)`. Meaningful on a terminal and on
+   * `opt`/`alt`/`rep`; dropped with a warning on a `seq`/`set` struct. */
   default?: string | number;
   /** `.min(n)` (int/float only). */
   min?: number;

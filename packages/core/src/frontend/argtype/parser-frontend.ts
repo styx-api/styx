@@ -38,8 +38,8 @@ export class ArgtypeParser implements Frontend {
     }
 
     const lowered = lowerDocument(doc);
-    warnings.push(...lowered.warnings.map((message) => ({ message })));
-    errors.push(...lowered.errors.map((message) => ({ message })));
+    warnings.push(...lowered.warnings.map((d) => ({ message: d.message, ...toLocation(d) })));
+    errors.push(...lowered.errors.map((d) => ({ message: d.message, ...toLocation(d) })));
 
     return {
       ...(lowered.meta && { meta: lowered.meta }),
