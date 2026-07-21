@@ -195,6 +195,26 @@ export function lex(source: string): LexResult {
           });
         }
       }
+      // A plain integer run abutting a letter/underscore (`3dTstat`, all of
+      // AFNI's `3d*` tools) is a digit-led identifier: not a valid number and
+      // not a valid bare identifier. Consume the whole run and emit the fix
+      // directly rather than splitting into `number` + `ident` (which surfaces
+      // as a baffling "expected a definition"); recover as an `ident` so the
+      // rest still parses. Only a pure integer run qualifies: a decimal,
+      // signed, or malformed-exponent `num` is a broken number, not a name, so
+      // it keeps its own number/error path instead of being quoted as an ident.
+      if (/^\d+$/.test(num) && isIdentStart(peek())) {
+        let rest = "";
+        while (i < source.length && isIdentPart(peek())) rest += advance();
+        const full = num + rest;
+        errors.push({
+          message: `Identifier cannot start with a digit; quote it as "${full}"`,
+          line: startLine,
+          column: startCol,
+        });
+        push("ident", full, startLine, startCol);
+        continue;
+      }
       push("number", num, startLine, startCol);
       continue;
     }

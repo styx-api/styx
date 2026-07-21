@@ -2,11 +2,11 @@
  * Frontmatter handling for argtype documents.
  *
  * A document may begin with a `---` fenced block of YAML-ish metadata (`exe`,
- * `version`, `extensions`, `container`, `authors`, `stdout`, ...). Rather than
- * pull in a full YAML dependency, this parses the small subset the format uses:
- * scalar `key: value`, block sequences (`- item`), and one level of nested
- * mappings. That covers every key the lowering step consumes; anything more
- * exotic is read as a raw string and ignored downstream.
+ * `version`, `container`, `authors`, `stdout`, ...). Rather than pull in a full
+ * YAML dependency, this parses the small subset the format uses: scalar
+ * `key: value`, block sequences (`- item`), inline flow sequences (`[a, b]`),
+ * and one level of nested mappings. That covers every key the lowering step
+ * consumes; anything more exotic is read as a raw string and ignored downstream.
  */
 
 export interface SplitResult {
@@ -174,7 +174,51 @@ function unescapeScalar(s: string): string {
   );
 }
 
+/** Split a flow-sequence body (`a, "b, c", [d, e]`) on top-level commas, keeping
+ * commas inside quotes or a nested `[...]` intact. Empty segments (from a leading,
+ * trailing, or doubled comma, or an empty `[]` body) are dropped, matching YAML;
+ * a quoted empty string keeps its quotes and so survives. */
+function splitFlow(body: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let inQuote: string | null = null;
+  let cur = "";
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i]!;
+    if (inQuote === '"' && ch === "\\") {
+      cur += ch + (body[i + 1] ?? "");
+      i++;
+      continue;
+    }
+    if (inQuote) {
+      if (ch === inQuote) inQuote = null;
+      cur += ch;
+    } else if (ch === '"' || ch === "'") {
+      inQuote = ch;
+      cur += ch;
+    } else if (ch === "[") {
+      depth++;
+      cur += ch;
+    } else if (ch === "]") {
+      depth--;
+      cur += ch;
+    } else if (ch === "," && depth === 0) {
+      parts.push(cur);
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  parts.push(cur);
+  return parts.map((p) => p.trim()).filter((p) => p !== "");
+}
+
 function parseScalar(text: string): unknown {
+  // Inline flow sequence: `[a, b, c]` (valid YAML the block-list parser would
+  // otherwise read as a bare string). `[]` is the empty list.
+  if (text.startsWith("[") && text.endsWith("]") && text.length >= 2) {
+    return splitFlow(text.slice(1, -1)).map(parseScalar);
+  }
   if (text.startsWith('"') && text.endsWith('"') && text.length >= 2) {
     return unescapeScalar(text.slice(1, -1));
   }

@@ -8,7 +8,7 @@ import { ArgtypeBackend } from "./argtype.js";
 import { generateArgtype } from "./emit.js";
 
 describe("argtype emitter: frontmatter", () => {
-  it("emits container, stream outputs, and both extensions", () => {
+  it("emits container and stream outputs (no extensions declaration)", () => {
     const app: AppMeta = {
       id: "tool",
       version: "1.0",
@@ -33,9 +33,8 @@ describe("argtype emitter: frontmatter", () => {
     expect(source).toContain("stdout:");
     expect(source).toContain(`  name: "log"`);
     expect(source).toContain(`  description: "stdout log"`);
-    expect(source).toContain("extensions:");
-    expect(source).toContain("  - outputs");
-    expect(source).toContain("  - mediatypes");
+    // `extensions:` is no longer emitted: the declaration was removed.
+    expect(source).not.toContain("extensions:");
     expect(source).toContain(`.mediaType("image/png")`);
   });
 
@@ -80,7 +79,6 @@ describe("argtype emitter: IR features with no surface", () => {
     const { source, warnings } = generateArgtype(expr, { id: "tool" });
     expect(warnings).toEqual([]);
     expect(source).toContain("workdir: path.mutable().resolveParent()");
-    expect(source).toContain("  - paths"); // extension declared in frontmatter
     // Round-trips: re-parsing recovers the same path attrs.
     const reparsed = new ArgtypeParser().parse(source);
     expect(reparsed.errors).toEqual([]);

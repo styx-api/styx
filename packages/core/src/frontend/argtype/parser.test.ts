@@ -219,14 +219,14 @@ tool: seq(
     ).toBe(true);
   });
 
-  it("rejects `= default` after a method chain", () => {
+  it("accepts `= default` after a method chain (sugar for `.default()`)", () => {
     const r = parse(`tool: seq(x: int.min(1) = 80)`);
-    expect(r.errors.some((e) => /only allowed on a bare terminal/.test(e.message))).toBe(true);
+    expect(r.errors).toEqual([]);
   });
 
-  it("warns when `.join()` is used on an unsupported node", () => {
+  it("errors when `.join()` is used on an unsupported node", () => {
     const r = parse(`tool: seq(x: path.join(","))`);
-    expect(r.warnings.some((w) => /only supported on seq\/set\/rep/.test(w.message))).toBe(true);
+    expect(r.errors.some((e) => /only supported on seq\/set\/rep/.test(e.message))).toBe(true);
   });
 
   it("lowers `any` to its first branch (lossless for codegen, no warning)", () => {
