@@ -102,7 +102,7 @@ Long-term, Boutiques shifts from being the primary frontend to primarily a **bac
 - **Boutiques** - remains as both a frontend and a backend
 - **Serialized Python argparse** (`argdump`) - implemented
 - **Connectome Workbench** (`workbench`) - implemented; covers NiWrap's `wb_command` suite
-- **argtype** (`argtype`) - implemented as both a frontend and a backend; the hand-authored, TypeScript-types-like DSL (see the [argtype spec](https://nx10.dev/argtype/)) intended as the primary way to define CLI specs. Covers the core grammar plus the `outputs`, `mediatypes`, and `paths` (`.mutable()` / `.resolveParent()`) extensions; `set` lowers to a sequence, `any` to its first branch, and the draft `constraints` extension is parsed-and-ignored. Frontend lives in `frontend/argtype/`, backend (IR -> argtype source, the round-trip/dogfooding path) in `backend/argtype/`
+- **argtype** (`argtype`) - implemented as both a frontend and a backend; the hand-authored, TypeScript-types-like DSL (see the [argtype spec](https://nx10.dev/argtype/)) intended as the primary way to define CLI specs. Covers the core grammar plus the `outputs`, `mediatypes`, and `paths` (`.mutable()` / `.resolveParent()`) extensions; `set` lowers to a sequence, `any` to its first branch, and the draft `constraints` extension is parsed-and-ignored. Frontend lives in `frontend/argtype/`, backend (IR -> argtype source, the round-trip/dogfooding path) in `backend/argtype/`. The emitter is dogfood-validated by round-tripping the whole niwrap corpus (every descriptor's emitted argtype must re-parse cleanly) plus property-based fuzzing over generated IR
 
 ## Ecosystem Context
 
