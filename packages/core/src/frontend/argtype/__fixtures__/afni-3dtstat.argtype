@@ -1,0 +1,41 @@
+---
+exe: "3dTstat"
+version: "24.2.06"
+authors:
+  - "RW Cox"
+urls:
+  - "https://afni.nimh.nih.gov/"
+---
+
+/// Compute voxelwise statistics across the time axis of a 3D+time dataset.
+///
+/// All of AFNI is named with a leading digit (3d*, 1d*, 2d*), so the tool
+/// label has to be quoted - a bare identifier cannot start with a digit.
+"3dTstat": seq(
+  set(
+    /// Output dataset prefix (the view and extension are added automatically).
+    opt("-prefix", prefix: str = "stat"),
+
+    /// Compute the mean across time (the default when no statistic is given).
+    mean: opt("-mean"),
+
+    /// Compute the standard deviation across time.
+    stdev: opt("-stdev"),
+
+    /// Compute the median across time.
+    median: opt("-median"),
+
+    /// Percentiles to compute, emitted as a single colon-joined argument
+    /// (for example `25:50:75`).
+    opt("-percentile", percentiles: rep(int.min(0).max(100)).join(":")),
+
+    /// Number of leading time points to ignore.
+    opt("-ignore", ignore_count: int.min(0)),
+  ),
+
+  /// Input 3D+time dataset.
+  input: path,
+).output(
+  /// The statistics dataset header written by `-prefix`.
+  statfile: `{prefix}+orig.HEAD`,
+)
