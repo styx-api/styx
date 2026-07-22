@@ -68,3 +68,34 @@ jobs:
 
       - name: Type-check generated code (mypy + tsc)
         run: node scripts/typecheck-codegen.mjs
+
+  corpus-roundtrip:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # The full descriptor corpus lives in a separate repo. Pin a specific
+      # niwrap commit so an unrelated niwrap change cannot break styx-ts PRs;
+      # bump this ref (and only this line) to re-sync against a newer corpus.
+      - name: Checkout niwrap corpus
+        uses: actions/checkout@v6
+        with:
+          repository: styx-api/niwrap
+          ref: f83a55543952cc7edf96c2870feed08b940c7fe5
+          path: niwrap
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (core + cli)
+        run: npm run build -w @styx-api/core -w @styx-api/cli
+
+      - name: Full-corpus argtype round-trip
+        run: node scripts/corpus-roundtrip.mjs --catalog niwrap/src/niwrap
