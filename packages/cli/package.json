@@ -13,11 +13,11 @@
   "homepage": "https://niwrap.dev/",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/styx-api/styx-ts.git",
+    "url": "git+https://github.com/styx-api/styx.git",
     "directory": "packages/cli"
   },
   "bugs": {
-    "url": "https://github.com/styx-api/styx-ts/issues"
+    "url": "https://github.com/styx-api/styx/issues"
   },
   "type": "module",
   "bin": {

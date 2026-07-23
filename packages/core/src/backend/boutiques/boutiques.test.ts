@@ -545,7 +545,7 @@ describe("BoutiquesBackend", () => {
   });
 });
 
-// Regression tests for issues styx-api/styx-ts#1-#5: argdump -> Boutiques
+// Regression tests for issues styx-api/styx#1-#5: argdump -> Boutiques
 // must produce a descriptor that passes `bosh validate`, even when the source
 // argparse parser uses dynamic types (functools.partial, custom action classes).
 describe("argdump -> Boutiques validity", () => {

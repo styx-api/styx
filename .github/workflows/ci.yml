@@ -76,7 +76,7 @@ jobs:
         uses: actions/checkout@v6
 
       # The full descriptor corpus lives in a separate repo. Pin a specific
-      # niwrap commit so an unrelated niwrap change cannot break styx-ts PRs;
+      # niwrap commit so an unrelated niwrap change cannot break styx PRs;
       # bump this ref (and only this line) to re-sync against a newer corpus.
       - name: Checkout niwrap corpus
         uses: actions/checkout@v6

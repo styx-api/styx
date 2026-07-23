@@ -3,5 +3,5 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [svelte()],
-  base: process.env.NODE_ENV === "production" ? "/styx-ts/" : "/",
+  base: process.env.NODE_ENV === "production" ? "/styx/" : "/",
 });

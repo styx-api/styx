@@ -1,6 +1,6 @@
-# Styx2
+# Styx
 
-Next-generation [Styx](https://github.com/childmindresearch/styx) compiler - parses CLI tool specifications (e.g. Boutiques descriptors), optimizes an intermediate representation, and generates type-safe wrappers for multiple target languages. Part of the [Styx/NiWrap ecosystem](https://niwrap.dev/).
+The Styx compiler (v2) - parses CLI tool specifications (e.g. Boutiques descriptors), optimizes an intermediate representation, and generates type-safe wrappers for multiple target languages. Part of the [Styx/NiWrap ecosystem](https://niwrap.dev/). The legacy v1 Python compiler lives at [styx-legacy](https://github.com/styx-api/styx-legacy).
 
 Early development. See [ARCHITECTURE.md](ARCHITECTURE.md) for design details.
 
@@ -25,7 +25,7 @@ npm run dev
 ## Project Structure
 
 ```
-styx2/
+styx/
 ├── packages/core/    # @styx-api/core - compiler library
 ├── playground/       # Svelte interactive compiler explorer
 └── ...
