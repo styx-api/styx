@@ -20,9 +20,15 @@
   let copied = $state(false);
 
   async function copyToClipboard() {
-    await navigator.clipboard.writeText(code);
-    copied = true;
-    setTimeout(() => (copied = false), 1500);
+    // writeText rejects in insecure contexts or on denied permission; don't flip
+    // to the "copied" state (or throw an unhandled rejection) when it fails.
+    try {
+      await navigator.clipboard.writeText(code);
+      copied = true;
+      setTimeout(() => (copied = false), 1500);
+    } catch {
+      copied = false;
+    }
   }
 
   onMount(async () => {
@@ -44,7 +50,11 @@
   });
 
   $effect(() => {
-    if (highlighter && grammarsLoaded && code) {
+    // Clear on empty so switching to an empty file (e.g. py.typed) doesn't keep
+    // showing the previously-rendered file's contents.
+    if (!code) {
+      html = "";
+    } else if (highlighter && grammarsLoaded) {
       try {
         html = highlighter.codeToHtml(code, {
           lang: lang as string,
@@ -53,7 +63,7 @@
       } catch (_e) {
         html = `<pre><code>${escapeHtml(code)}</code></pre>`;
       }
-    } else if (code) {
+    } else {
       html = `<pre><code>${escapeHtml(code)}</code></pre>`;
     }
   });
@@ -135,6 +145,11 @@
   .copy:hover {
     color: var(--text);
     border-color: var(--text-muted);
+  }
+
+  .copy:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   .code-block {

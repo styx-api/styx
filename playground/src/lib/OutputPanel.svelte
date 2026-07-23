@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tabs } from "./tabs.js";
+  import { tabs, tabGroups, defaultTabId } from "./tabs.js";
   import type { CompileOutcome } from "./compiler.js";
   import Messages from "./Messages.svelte";
   import CodeBlock from "./CodeBlock.svelte";
@@ -9,7 +9,7 @@
   }
 
   let { outcome }: Props = $props();
-  let activeTab = $state(tabs[0].id);
+  let activeTab = $state(defaultTabId);
   let subTabSelections = $state<Record<string, string>>({});
 
   const activeTabDef = $derived(tabs.find((t) => t.id === activeTab) ?? tabs[0]);
@@ -58,10 +58,20 @@
   {/if}
 
   <div class="tab-bar">
-    {#each tabs as tab (tab.id)}
-      <button class="tab" class:active={activeTab === tab.id} onclick={() => (activeTab = tab.id)}>
-        {tab.label}
-      </button>
+    {#each tabGroups as group (group.label)}
+      <div class="tab-group" style="--group-accent: {group.accent}">
+        <span class="group-label">{group.label}</span>
+        {#each group.tabs as tab (tab.id)}
+          <button
+            class="tab"
+            class:active={activeTab === tab.id}
+            aria-pressed={activeTab === tab.id}
+            onclick={() => (activeTab = tab.id)}
+          >
+            {tab.label}
+          </button>
+        {/each}
+      </div>
     {/each}
     {#if outcome.status !== "empty" && outcome.timeMs > 0}
       <span class="timing">{outcome.timeMs.toFixed(0)}ms</span>
@@ -74,6 +84,7 @@
         <button
           class="sub-tab"
           class:active={activeFileName === name}
+          aria-pressed={activeFileName === name}
           onclick={() => selectSubTab(name)}
         >
           {name}
@@ -116,31 +127,53 @@
     flex-wrap: wrap;
     flex-shrink: 0;
     border-bottom: 1px solid var(--border);
-    padding: 0 0.5rem;
-    gap: 0;
+    padding: 0.6rem 0.75rem;
+    gap: 0.5rem 1rem;
+  }
+
+  .tab-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .group-label {
+    font-size: 0.62rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--group-accent, var(--text-muted));
+    white-space: nowrap;
   }
 
   .tab {
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: var(--text-muted);
+    background: var(--bg-surface);
+    border: 1px solid color-mix(in srgb, var(--group-accent, var(--border)) 22%, var(--border));
+    border-radius: var(--radius-pill);
+    color: var(--text-secondary);
     cursor: pointer;
-    padding: 0.6rem 0.75rem;
-    font-size: 0.7rem;
+    padding: 0.3rem 0.75rem;
+    font-size: 0.75rem;
     font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    white-space: nowrap;
     transition: all var(--transition);
   }
 
   .tab:hover {
-    color: var(--text-secondary);
+    color: var(--text);
+    border-color: var(--group-accent, var(--text-muted));
+  }
+
+  .tab:focus-visible,
+  .sub-tab:focus-visible {
+    outline: 2px solid var(--group-accent, var(--accent));
+    outline-offset: 2px;
   }
 
   .tab.active {
     color: var(--text);
-    border-bottom-color: var(--accent);
+    border-color: var(--group-accent, var(--accent));
+    background: color-mix(in srgb, var(--group-accent, var(--accent)) 16%, var(--bg-surface));
   }
 
   .sub-tab-bar {

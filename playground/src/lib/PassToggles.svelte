@@ -20,31 +20,39 @@
 <style>
   .passes {
     display: flex;
-    gap: 0.25rem;
+    gap: 0.3rem;
     flex-wrap: wrap;
-    margin-left: auto;
   }
 
   label {
     display: flex;
     align-items: center;
-    gap: 0.375rem;
+    gap: 0.45rem;
     cursor: pointer;
-    padding: 0.25rem 0.5rem;
-    border-radius: var(--radius);
+    padding: 0.3rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    background: var(--bg-surface);
     font-size: 0.75rem;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     transition: all var(--transition);
     user-select: none;
   }
 
   label:hover {
-    color: var(--text-secondary);
-    background: var(--bg-elevated);
+    color: var(--text);
+    border-color: var(--text-muted);
+  }
+
+  label:focus-within {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   label.active {
-    color: var(--text-secondary);
+    color: var(--text);
+    border-color: var(--accent);
+    background: var(--accent-subtle);
   }
 
   input[type="checkbox"] {
@@ -52,5 +60,6 @@
     accent-color: var(--accent);
     width: 12px;
     height: 12px;
+    margin: 0;
   }
 </style>
