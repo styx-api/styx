@@ -83,11 +83,11 @@
   }
 
   .editor :global(.cm-selectionBackground) {
-    background: rgba(99, 102, 241, 0.15) !important;
+    background: rgba(165, 176, 255, 0.15) !important;
   }
 
   .editor :global(.cm-focused .cm-selectionBackground) {
-    background: rgba(99, 102, 241, 0.25) !important;
+    background: rgba(165, 176, 255, 0.25) !important;
   }
 
   .editor :global(.cm-cursor) {

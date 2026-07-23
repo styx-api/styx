@@ -13,9 +13,29 @@
   let loading = $state<string | null>(null);
   let passes = $state<PassConfig>({ ...defaultPassConfig });
 
+  // Parsing + solving runs on every input change, so debounce keystrokes to keep
+  // typing smooth on large descriptors (recon-all, antsRegistration). Pass toggles
+  // stay instant since `outcome` depends on `passes` directly.
+  const COMPILE_DEBOUNCE_MS = 150;
+  let debouncedInput = $state<string>("");
+
+  $effect(() => {
+    const next = input;
+    const id = setTimeout(() => (debouncedInput = next), COMPILE_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  });
+
+  // Build metadata injected by Vite (see vite.config.ts).
+  const version = __STYX_VERSION__;
+  const commit = __STYX_COMMIT__;
+  const buildDate = __BUILD_DATE__;
+  const commitUrl =
+    commit !== "unknown" ? `https://github.com/styx-api/styx/commit/${commit}` : null;
+  const versionTitle = `styx core ${version}${buildDate ? `, built ${buildDate}` : ""}`;
+
   const detectedFormat = $derived<FormatName | null>(input ? detectFormat(input) : null);
 
-  const outcome = $derived(runCompile(input, passes));
+  const outcome = $derived(runCompile(debouncedInput, passes));
 
   async function loadExample(url: string) {
     loading = url;
@@ -33,6 +53,8 @@
     } catch (e) {
       input = `// Failed to load: ${e instanceof Error ? e.message : e}`;
     } finally {
+      // Loading an example is deliberate: compile it immediately, no debounce wait.
+      debouncedInput = input;
       loading = null;
     }
   }
@@ -44,9 +66,19 @@
 
 <div class="app">
   <header>
-    <h1>styx<span class="version">2</span></h1>
+    <span class="wordmark">styx</span>
     <span class="subtitle">compiler explorer</span>
-    <PassToggles bind:passes />
+    {#if commitUrl}
+      <a class="version-tag" href={commitUrl} target="_blank" rel="noreferrer" title={versionTitle}>
+        v{version} <span class="commit">{commit}</span>
+      </a>
+    {:else}
+      <span class="version-tag" title={versionTitle}>v{version}</span>
+    {/if}
+    <div class="passes-group">
+      <span class="passes-label">Passes</span>
+      <PassToggles bind:passes />
+    </div>
   </header>
 
   <main>
@@ -104,23 +136,25 @@
   }
 
   :global(:root) {
-    --bg-base: #111113;
-    --bg-surface: #18181b;
+    --bg-base: #0e0e10;
+    --bg-surface: #161619;
     --bg-elevated: #1e1e22;
-    --bg-inset: #0c0c0e;
-    --border: #27272a;
-    --border-subtle: #1f1f23;
-    --text: #e4e4e7;
-    --text-secondary: #a1a1aa;
-    --text-muted: #71717a;
-    --accent: #6366f1;
-    --accent-subtle: rgba(99, 102, 241, 0.12);
-    --error: #ef4444;
-    --error-subtle: rgba(239, 68, 68, 0.12);
-    --warning: #f59e0b;
-    --warning-subtle: rgba(245, 158, 11, 0.12);
+    --bg-inset: #0a0a0c;
+    --border: #2a2a30;
+    --border-subtle: #1e1e23;
+    --text: #f4f4f7;
+    --text-secondary: #c2c2cc;
+    --text-muted: #9494a1;
+    --accent: #a5b0ff;
+    --accent-hover: #c2caff;
+    --accent-subtle: rgba(165, 176, 255, 0.18);
+    --error: #f87171;
+    --error-subtle: rgba(248, 113, 113, 0.12);
+    --warning: #fbbf24;
+    --warning-subtle: rgba(251, 191, 36, 0.12);
     --radius: 6px;
-    --radius-lg: 8px;
+    --radius-lg: 10px;
+    --radius-pill: 999px;
     --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
     --font-size-mono: 13px;
     --transition: 150ms ease;
@@ -155,34 +189,75 @@
     height: 100vh;
     max-width: 1800px;
     margin: 0 auto;
-    padding: 1rem 1.25rem;
-    gap: 0.75rem;
+    padding: 1.25rem 1.5rem;
+    gap: 1rem;
   }
 
   header {
     flex-shrink: 0;
     display: flex;
-    align-items: baseline;
-    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding-bottom: 0.15rem;
   }
 
-  h1 {
-    font-size: 1.25rem;
+  .wordmark {
+    font-size: 1.3rem;
     font-weight: 700;
     letter-spacing: -0.02em;
     color: var(--text);
-  }
-
-  .version {
-    color: var(--accent);
-    font-weight: 300;
   }
 
   .subtitle {
     font-size: 0.8rem;
     color: var(--text-muted);
     font-weight: 400;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.01em;
+    padding-left: 0.6rem;
+    border-left: 1px solid var(--border);
+  }
+
+  .version-tag {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color var(--transition);
+  }
+
+  .version-tag .commit {
+    color: var(--text-secondary);
+  }
+
+  .version-tag:hover {
+    color: var(--text-secondary);
+  }
+
+  a.version-tag:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  a.version-tag:hover .commit {
+    color: var(--accent);
+  }
+
+  .passes-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+  }
+
+  .passes-label {
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
   }
 
   .format-badge {
@@ -202,8 +277,28 @@
     flex: 1;
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 0.75rem;
+    gap: 1rem;
     min-height: 0;
+  }
+
+  /* Stack input over output on narrow viewports. */
+  @media (max-width: 768px) {
+    .app {
+      padding: 0.75rem;
+    }
+
+    main {
+      grid-template-columns: 1fr;
+      grid-template-rows: 1fr 1fr;
+    }
+
+    .subtitle {
+      display: none;
+    }
+
+    .passes-group {
+      margin-left: 0;
+    }
   }
 
   .panel {
@@ -220,8 +315,8 @@
     flex-shrink: 0;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0.75rem;
+    gap: 0.6rem;
+    padding: 0.65rem 0.9rem;
     border-bottom: 1px solid var(--border);
   }
 
@@ -230,7 +325,7 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: var(--text-muted);
+    color: var(--text-secondary);
   }
 
   .example-select {
@@ -247,6 +342,11 @@
 
   .example-select:hover:not(:disabled) {
     border-color: var(--text-muted);
+  }
+
+  .example-select:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   .example-select:disabled {
