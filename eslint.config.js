@@ -22,7 +22,13 @@ export default [
     // The playground runs in the browser (Vite + Svelte 5).
     files: ["playground/**/*.{ts,svelte}"],
     languageOptions: {
-      globals: { ...globals.browser },
+      globals: {
+        ...globals.browser,
+        // Build-time constants injected via Vite `define` (see playground/vite.config.ts).
+        __STYX_VERSION__: "readonly",
+        __STYX_COMMIT__: "readonly",
+        __BUILD_DATE__: "readonly",
+      },
     },
   },
   {
