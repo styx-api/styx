@@ -10,13 +10,7 @@ export interface SolveOptions {
 export interface NamingStrategy {
   getName: (node: Expr, path: string[]) => string;
   generateId: () => BindingId;
-  /**
-   * A synthetic name for a genuine (surviving) anonymous struct - one with no
-   * `meta.name` of its own. Unlike `getName`, which would steal the struct's
-   * first field name (via `findDeepName`) and collide with that field, this
-   * returns a `structN` guaranteed not to clash with any of the struct's own
-   * field keys.
-   */
+  /** A `structN` name for an anonymous struct, never clashing with its own fields. */
   freshStructName: (fields: Record<string, BoundType>) => string;
 }
 
@@ -181,12 +175,9 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
         // inspect its node kind (only meaningful when exactly one field exists).
         let soleFieldChild: Expr | undefined;
 
-        // A synthetic `structN` (see the genuine-struct branch below) is minted
-        // here, after the upstream id-dedup pass, so it is the only name that can
-        // still clash with a sibling field. When it does, re-mint the *struct*
-        // (never an author-named field) against the taken keys so no parameter is
-        // silently overwritten. Two synthetic structs never collide (the counter
-        // is monotonic), so at most one colliding party is ever an auto-struct.
+        // A synthetic `structN` name can clash with a sibling field literally
+        // named `structN`; re-mint the struct (never an author-named field) so
+        // neither is silently overwritten.
         const isAutoStruct = (b: Binding | undefined): b is Binding =>
           !!b && b.type.kind === "struct" && !b.node.meta?.name;
         const remint = (b: Binding, taken: Record<string, BoundType>): string => {
@@ -199,14 +190,10 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
           const childName = strategy.getName(child, path);
           const childType = solveNode(child, [...path, childName], gate);
           if (childType === null) continue;
-          // Key the field by the child's *registered* binding name, not the
-          // pre-computed `childName`. They are identical for every case except a
-          // surviving anonymous struct, whose binding the branch below renamed to
-          // a synthetic `structN` (see `freshStructName`). Backends look up
-          // `structType.fields[binding.name]` (collect-field-info,
-          // resolve-field-binding), so the key must track the binding name.
-          // Collapsed children register no binding on `child`, so fall back to
-          // `childName` - which already equals the buried binding's name.
+          // Key by the child's registered binding name so the field key tracks a
+          // renamed struct - backends look up `structType.fields[binding.name]`.
+          // Collapsed children have no binding on `child`; `childName` already
+          // equals the buried binding's name there.
           const childBinding = nodeToBinding.get(child);
           let fieldKey = childBinding?.name ?? childName;
 
@@ -222,8 +209,7 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
               delete fields[fieldKey];
               fieldBindings.delete(fieldKey);
             }
-            // Neither party is an auto-struct: a genuine duplicate author id,
-            // which the upstream dedup pass owns (pre-existing overwrite).
+            // Otherwise a duplicate author id, owned by the upstream dedup pass.
           }
 
           fields[fieldKey] = childType;
@@ -262,12 +248,8 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
         ) {
           return Object.values(fields)[0]!;
         }
-        // A genuine multi-field anonymous struct must not reuse `name`: for an
-        // unnamed aggregate, `getName` derives the name from the first field
-        // (via `findDeepName`), which then collides with that very field
-        // (`params.X.X`). A named set keeps its `meta.name`; only truly
-        // anonymous aggregates get a synthetic `structN` that cannot clash with
-        // any of their own field keys.
+        // Anonymous aggregates get a synthetic name instead of `getName`, which
+        // would steal the first field's name and collide with it (`params.X.X`).
         const structName = node.meta?.name ?? strategy.freshStructName(fields);
         const type: BoundType = { kind: "struct", fields };
         createBinding(node, structName, type, gate);
