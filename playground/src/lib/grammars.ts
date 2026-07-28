@@ -181,70 +181,170 @@ export const argtypeGrammar = {
 export const bindingsGrammar = {
   name: "bindings",
   scopeName: "source.bindings",
+  // Order matters: where two patterns match at the same offset the earlier one
+  // wins, so the line-anchored headings come before the generic name rules.
   patterns: [
-    {
-      // Section headers introduced by the resolved-outputs renderer.
+    { include: "#section" },
+    { include: "#scope" },
+    { include: "#diagnostic" },
+    { include: "#tag" },
+    { include: "#row" },
+    { include: "#iter" },
+    { include: "#call" },
+    { include: "#token-flags" },
+    { include: "#media" },
+    { include: "#gate-keyword" },
+    { include: "#type" },
+    { include: "#params" },
+    { include: "#qualifier" },
+    { include: "#variant" },
+    { include: "#label" },
+    { include: "#binding-ref" },
+    { include: "#string" },
+    { include: "#number" },
+    { include: "#punctuation" },
+  ],
+  repository: {
+    section: {
+      // `bindings:` / `outputs:` / `diagnostics:` at the left margin. A heading
+      // is always the whole line, and anchoring says so - otherwise a binding
+      // that happens to be named `outputs` would render as one.
       name: "keyword.control.section.bindings",
-      match: "\\b(outputs|diagnostics):",
+      match: "^(bindings|outputs|diagnostics):$",
     },
-    {
-      // Annotations like [optional], [error], [warning].
+    scope: {
+      // `on <binding>:` heads the outputs declared on one scope.
+      match: "^(\\s*)(on)\\s+([^:]+)(:)",
+      captures: {
+        "2": { name: "keyword.control.section.bindings" },
+        "3": {
+          name: "entity.name.function.bindings",
+          patterns: [{ include: "#qualifier" }],
+        },
+      },
+    },
+    diagnostic: {
+      // `[error] out: message`. Taken as a whole line so the free-prose message
+      // is not scanned for words that happen to look like types or keywords.
+      match: "^(\\s*)(\\[(?:error|warning)\\])\\s+([^:]*)(:)(.*)$",
+      captures: {
+        "2": { name: "invalid.illegal.bindings" },
+        "3": { name: "entity.name.function.bindings" },
+      },
+    },
+    tag: {
+      // `[optional]`, and the `[arm]` marking which union arm a row is in.
       name: "entity.name.tag.bindings",
-      match: "\\[(optional|error|warning)\\]",
+      match: "\\[[^\\]]+\\]",
     },
-    {
-      // Function-like gate atoms / output tokens.
-      name: "support.function.bindings",
-      match: "\\b(ref|present)(?=\\()",
+    row: {
+      // The binding each row is about. Its `#qualifier` is scoped separately,
+      // so this deliberately stops at the base name.
+      //
+      // Binding names take `entity.name` scopes rather than the more literal
+      // `variable.other`: themes reliably colour the former, and a row label
+      // and every reference to it then share one colour, which is what lets a
+      // `ref(...)` be matched back to its row by eye.
+      match: "^(\\s*)([A-Za-z_]\\w*)",
+      captures: { "2": { name: "entity.name.function.bindings" } },
     },
-    {
-      // Gate connectives in branch conditions.
-      name: "keyword.control.gate.bindings",
-      match: "\\b(when|for each|AND|OR)\\b",
+    iter: {
+      // `<iter:binding>` - the repeat a loop variable is drawn from.
+      begin: "(<)(iter)(:)",
+      beginCaptures: {
+        "1": { name: "punctuation.definition.bindings" },
+        "2": { name: "support.function.bindings" },
+        "3": { name: "punctuation.definition.bindings" },
+      },
+      end: "(>)",
+      endCaptures: { "1": { name: "punctuation.definition.bindings" } },
+      patterns: [{ include: "#qualifier" }, { include: "#binding-ref" }],
     },
-    {
-      // Token-flag block: { strip=[...], fallback="" }.
+    call: {
+      // `ref(binding)` output tokens and `present(...)` / `iter(...)` gates.
+      begin: "\\b(ref|present|iter)(\\()",
+      beginCaptures: {
+        "1": { name: "support.function.bindings" },
+        "2": { name: "punctuation.parenthesis.open.bindings" },
+      },
+      end: "(\\))",
+      endCaptures: { "1": { name: "punctuation.parenthesis.close.bindings" } },
+      patterns: [{ include: "#qualifier" }, { include: "#binding-ref" }],
+    },
+    "token-flags": {
+      // A ref's `{strip=[...], fallback="..."}` suffix. Pinned to those keys so
+      // it cannot swallow a `struct {` in the type tree.
       name: "meta.block.bindings",
-      begin: "\\{",
+      begin: "\\{(?=\\s*(?:strip|fallback)=)",
       end: "\\}",
       patterns: [
-        {
-          name: "variable.parameter.bindings",
-          match: "\\b[a-z_]+(?==)",
-        },
-        {
-          name: "keyword.operator.bindings",
-          match: "=",
-        },
-        {
-          name: "string.quoted.double.bindings",
-          match: '"[^"]*"',
-        },
+        { name: "variable.parameter.bindings", match: "\\b[a-z_]+(?==)" },
+        { name: "keyword.operator.bindings", match: "=" },
+        { include: "#string" },
       ],
     },
-    {
+    media: {
+      // An output's ` (image/nifti, image/dicom)` media-type list, kept whole so
+      // a `+` inside a subtype does not read as an operator.
+      name: "string.unquoted.media.bindings",
+      match: "\\([a-z][\\w.+-]*/[^)]*\\)",
+    },
+    "gate-keyword": {
+      name: "keyword.control.gate.bindings",
+      match: "(?<![.#])\\b(when|AND|OR)\\b",
+    },
+    type: {
+      // Guarded against a preceding `.` or `#` so an access segment or a
+      // qualifier spelled like a type - `params.path`, `x#list` - stays a name.
+      // Parameters really are named things like `path` and `count`.
       name: "storage.type.bindings",
-      match: "\\b(struct|union|optional|list|bool|count|literal|int|float|str|path)\\b",
+      match: "(?<![.#])\\b(struct|union|optional|list|bool|count|int|float|str|path)\\b",
     },
-    {
-      name: "variable.other.property.bindings",
-      match: "\\b[a-zA-Z_]\\w*(?=:)",
+    params: {
+      // The root every access path is written against.
+      name: "variable.language.bindings",
+      match: "(?<![.#])\\bparams\\b",
     },
-    {
+    qualifier: {
+      // The `#flag` / `#list` / `#arm` suffix that makes a name unique.
+      name: "entity.name.tag.qualifier.bindings",
+      match: "#[A-Za-z_]\\w*",
+    },
+    variant: {
+      // The `=arm` half of a variant gate atom.
+      match: "(=)([A-Za-z_]\\w*)",
+      captures: {
+        "1": { name: "keyword.operator.bindings" },
+        "2": { name: "entity.name.tag.bindings" },
+      },
+    },
+    label: {
+      name: "entity.name.function.bindings",
+      match: "\\b[A-Za-z_]\\w*(?=:)",
+    },
+    "binding-ref": {
+      // Any name left over once the rules above have had their say: the target
+      // of a `ref(...)`/`present(...)` call, the binding half of a `=arm` gate
+      // atom, and the field segments of an access path. Sharing the row-label
+      // colour is the point - it is what lets a reference be matched by eye to
+      // the row that declares it.
+      name: "entity.name.function.bindings",
+      match: "[A-Za-z_]\\w*",
+    },
+    string: {
       name: "string.quoted.double.bindings",
       match: '"[^"]*"',
     },
-    {
+    number: {
+      // Literal types can be negative or fractional, e.g. `-1.5`.
       name: "constant.numeric.bindings",
-      match: "\\b\\d+\\b",
+      match: "-?\\b\\d+(?:\\.\\d+)?\\b",
     },
-    {
-      name: "keyword.operator.bindings",
-      match: "\\|",
+    punctuation: {
+      patterns: [
+        { name: "keyword.operator.bindings", match: "[|+]" },
+        { name: "punctuation.definition.typeparameters.bindings", match: "[<>]" },
+      ],
     },
-    {
-      name: "punctuation.definition.typeparameters.bindings",
-      match: "[<>]",
-    },
-  ],
+  },
 };
