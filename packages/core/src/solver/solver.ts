@@ -10,6 +10,8 @@ export interface SolveOptions {
 export interface NamingStrategy {
   getName: (node: Expr, path: string[]) => string;
   generateId: () => BindingId;
+  /** A `structN` name for an anonymous struct, never clashing with its own fields. */
+  freshStructName: (fields: Record<string, BoundType>) => string;
 }
 
 // Shared helper for deep name search
@@ -32,10 +34,18 @@ function findDeepName(node: Expr): string | undefined {
 
 export function defaultNamingStrategy(): NamingStrategy {
   let counter = 0;
+  let structCounter = 0;
 
   return {
     getName: (node, path) => findDeepName(node) ?? path[path.length - 1] ?? `param_${counter++}`,
     generateId: () => `binding_${counter++}`,
+    freshStructName: (fields) => {
+      let candidate: string;
+      do {
+        candidate = `struct${++structCounter}`;
+      } while (Object.hasOwn(fields, candidate));
+      return candidate;
+    },
   };
 }
 
@@ -158,16 +168,53 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
 
       case "sequence": {
         const fields: Record<string, BoundType> = {};
+        // The binding behind each field key, so a rare synthetic-name clash can be
+        // repaired by renaming whichever colliding party is the auto-named struct.
+        const fieldBindings = new Map<string, Binding | undefined>();
         // Track the single binding-bearing child so the collapse check below can
         // inspect its node kind (only meaningful when exactly one field exists).
         let soleFieldChild: Expr | undefined;
+
+        // A synthetic `structN` name can clash with a sibling field literally
+        // named `structN`; re-mint the struct (never an author-named field) so
+        // neither is silently overwritten.
+        const isAutoStruct = (b: Binding | undefined): b is Binding =>
+          !!b && b.type.kind === "struct" && !b.node.meta?.name;
+        const remint = (b: Binding, taken: Record<string, BoundType>): string => {
+          const own = b.type.kind === "struct" ? b.type.fields : {};
+          b.name = strategy.freshStructName({ ...taken, ...own });
+          return b.name;
+        };
+
         for (const child of node.attrs.nodes) {
           const childName = strategy.getName(child, path);
           const childType = solveNode(child, [...path, childName], gate);
-          if (childType !== null) {
-            fields[childName] = childType;
-            soleFieldChild = child;
+          if (childType === null) continue;
+          // Key by the child's registered binding name so the field key tracks a
+          // renamed struct - backends look up `structType.fields[binding.name]`.
+          // Collapsed children have no binding on `child`; `childName` already
+          // equals the buried binding's name there.
+          const childBinding = nodeToBinding.get(child);
+          let fieldKey = childBinding?.name ?? childName;
+
+          if (Object.hasOwn(fields, fieldKey)) {
+            if (isAutoStruct(childBinding)) {
+              fieldKey = remint(childBinding, fields);
+            } else if (isAutoStruct(fieldBindings.get(fieldKey))) {
+              // The sibling already holding the key is the auto-struct: move it.
+              const existing = fieldBindings.get(fieldKey)!;
+              const moved = remint(existing, fields);
+              fields[moved] = fields[fieldKey]!;
+              fieldBindings.set(moved, existing);
+              delete fields[fieldKey];
+              fieldBindings.delete(fieldKey);
+            }
+            // Otherwise a duplicate author id, owned by the upstream dedup pass.
           }
+
+          fields[fieldKey] = childType;
+          fieldBindings.set(fieldKey, childBinding);
+          soleFieldChild = child;
         }
         // A sequence that carries `meta.outputs` must always produce a binding,
         // even when it would otherwise collapse - that binding is the scope key
@@ -177,7 +224,8 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
         if (Object.keys(fields).length === 0) {
           if (hasOutputs) {
             const type: BoundType = { kind: "struct", fields: {} };
-            createBinding(node, name, type, gate);
+            const structName = node.meta?.name ?? strategy.freshStructName(type.fields);
+            createBinding(node, structName, type, gate);
             return type;
           }
           return null;
@@ -200,8 +248,11 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
         ) {
           return Object.values(fields)[0]!;
         }
+        // Anonymous aggregates get a synthetic name instead of `getName`, which
+        // would steal the first field's name and collide with it (`params.X.X`).
+        const structName = node.meta?.name ?? strategy.freshStructName(fields);
         const type: BoundType = { kind: "struct", fields };
-        createBinding(node, name, type, gate);
+        createBinding(node, structName, type, gate);
         return type;
       }
 

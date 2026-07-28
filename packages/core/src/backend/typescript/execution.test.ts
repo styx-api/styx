@@ -782,7 +782,9 @@ describe("execution - struct nesting", () => {
   it("struct containing joined struct (struct-in-struct)", () => {
     const args = execute(
       seq(lit("cmd"), str("name"), seqJoin(":", str("host"), str("port"))),
-      { name: "db", host: { host: "localhost", port: "5432" } },
+      // The joined struct is anonymous, so it gets a synthetic `struct1` name
+      // that cannot collide with its own `host` field (no `params.host.host`).
+      { name: "db", struct1: { host: "localhost", port: "5432" } },
       { app: { id: "t" } },
     );
     expect(args).toEqual(["cmd", "db", "localhost:5432"]);
@@ -796,8 +798,8 @@ describe("execution - struct nesting", () => {
       ),
       {
         endpoints: [
-          { name: "a", host: { host: "h1", port: "1" } },
-          { name: "b", host: { host: "h2", port: "2" } },
+          { name: "a", struct1: { host: "h1", port: "1" } },
+          { name: "b", struct1: { host: "h2", port: "2" } },
         ],
       },
       { app: { id: "t" } },

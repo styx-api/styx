@@ -1,6 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { alt, lit, opt, path, seq, str } from "../ir/builders.js";
+import { alt, float, lit, opt, path, seq, str } from "../ir/builders.js";
+import type { SolveResult } from "../bindings/index.js";
 import { solve } from "./solver.js";
+
+/** Assert no binding's access path has two consecutive same-named fields (`params.X.X`). */
+function expectNoRepeatedFieldSegments(result: SolveResult): void {
+  for (const b of result.bindings.values()) {
+    for (let i = 1; i < b.access.length; i++) {
+      const prev = b.access[i - 1]!;
+      const cur = b.access[i]!;
+      const doubled = prev.kind === "field" && cur.kind === "field" && prev.name === cur.name;
+      expect(
+        doubled,
+        `binding ${b.name} has a doubled field segment ${cur.kind === "field" ? cur.name : ""}`,
+      ).toBe(false);
+    }
+  }
+}
 
 describe("solver union @type tags", () => {
   it("derives the variant tag from variantTag, surviving a single-field collapse", () => {
@@ -117,5 +133,101 @@ describe("solver root-binding fixup", () => {
     const root = resolve(expr);
     expect(root?.type.kind).toBe("struct");
     expect(root?.type.kind === "struct" && Object.keys(root.type.fields)).toEqual([]);
+  });
+});
+
+describe("solver anonymous struct naming", () => {
+  it("names a surviving anonymous struct structN, not its first field", () => {
+    // bet shape: an anonymous multi-field aggregate (`set(...)`) whose first
+    // field is `fractional_intensity`. Naming the struct after its first field
+    // (the old `findDeepName` behavior) collided with that field, producing a
+    // `params.fractional_intensity.fractional_intensity` access. The struct must
+    // instead get a synthetic name that cannot clash with its own fields.
+    const fInt = float({ name: "fractional_intensity" });
+    const setNode = seq(
+      opt(seq(lit("-f"), fInt)),
+      opt(seq(lit("-g"), float({ name: "vg_fractional_intensity" }))),
+    );
+    const expr = seq(lit("bet"), path({ name: "infile" }), setNode);
+    expr.meta = { name: "bet" };
+    const result = solve(expr);
+
+    const struct = result.resolve(setNode);
+    expect(struct?.type.kind).toBe("struct");
+    expect(struct?.name).toBe("struct1");
+    // Its own name must not be one of its field names.
+    expect(struct?.type.kind === "struct" && Object.keys(struct.type.fields)).not.toContain(
+      "struct1",
+    );
+
+    // The parent struct keys the child by its synthetic name, and the field
+    // keeps its own name: no doubled `params.X.X` path.
+    const fBinding = result.resolve(fInt);
+    expect(fBinding?.access).toEqual([
+      { kind: "field", name: "struct1" },
+      { kind: "field", name: "fractional_intensity" },
+    ]);
+    expectNoRepeatedFieldSegments(result);
+  });
+
+  it("skips a synthetic name that collides with an existing field (struct1 -> struct2)", () => {
+    // A field literally named `struct1` forces the namer past its first
+    // candidate so the struct's own name still cannot clash with a field.
+    const collide = float({ name: "struct1" });
+    const setNode = seq(
+      opt(seq(lit("-a"), collide)),
+      opt(seq(lit("-b"), float({ name: "other" }))),
+    );
+    const expr = seq(lit("tool"), path({ name: "infile" }), setNode);
+    expr.meta = { name: "tool" };
+    const result = solve(expr);
+
+    const struct = result.resolve(setNode);
+    expect(struct?.name).toBe("struct2");
+    expect(struct?.type.kind === "struct" && Object.keys(struct.type.fields)).toContain("struct1");
+    expectNoRepeatedFieldSegments(result);
+  });
+
+  it("does not overwrite a sibling literally named structN (sibling before struct)", () => {
+    // A sibling scalar named `struct1` already claims `params.struct1`. The
+    // anonymous struct's minted `struct1` would collide with it in the parent's
+    // field record; the solver must rename the struct (to `struct2`) so both
+    // parameters survive rather than one silently clobbering the other.
+    const sibling = float({ name: "struct1" });
+    const anon = seq(
+      opt(seq(lit("-a"), float({ name: "aa" }))),
+      opt(seq(lit("-b"), float({ name: "bb" }))),
+    );
+    const expr = seq(lit("tool"), opt(seq(lit("-x"), sibling)), anon);
+    expr.meta = { name: "tool" };
+    const result = solve(expr);
+
+    const root = result.resolve(expr);
+    const keys = root?.type.kind === "struct" ? Object.keys(root.type.fields).sort() : [];
+    expect(keys).toEqual(["struct1", "struct2"]);
+    expect(result.resolve(sibling)?.name).toBe("struct1");
+    expect(result.resolve(anon)?.name).toBe("struct2");
+    expectNoRepeatedFieldSegments(result);
+  });
+
+  it("does not overwrite a sibling literally named structN (struct before sibling)", () => {
+    // Reverse order: the anonymous struct is minted as `struct1` first, then a
+    // later sibling named `struct1` arrives. The solver must move the struct
+    // aside (to `struct2`) rather than let the sibling clobber it.
+    const sibling = float({ name: "struct1" });
+    const anon = seq(
+      opt(seq(lit("-a"), float({ name: "aa" }))),
+      opt(seq(lit("-b"), float({ name: "bb" }))),
+    );
+    const expr = seq(lit("tool"), anon, opt(seq(lit("-x"), sibling)));
+    expr.meta = { name: "tool" };
+    const result = solve(expr);
+
+    const root = result.resolve(expr);
+    const keys = root?.type.kind === "struct" ? Object.keys(root.type.fields).sort() : [];
+    expect(keys).toEqual(["struct1", "struct2"]);
+    expect(result.resolve(sibling)?.name).toBe("struct1");
+    expect(result.resolve(anon)?.name).toBe("struct2");
+    expectNoRepeatedFieldSegments(result);
   });
 });
