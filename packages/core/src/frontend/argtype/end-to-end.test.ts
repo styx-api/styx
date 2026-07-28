@@ -63,6 +63,21 @@ describe("argtype end-to-end: bet", () => {
       expect(ctx.bindings.get(binaryMask.tokens[0].binding)?.name).toBe("maskfile");
     }
 
+    // bet's option group is an anonymous `set(...)` whose only meta is the
+    // outputs its members declared, so `flatten` merges it into the root: the
+    // flags are plain `bet(...)` parameters, not a nested struct the caller has
+    // to build first, and the set's outputs join the root's on the one scope.
+    expect(py).not.toContain("BetStruct");
+    expect(py).not.toContain("struct1");
+    const signature = py.slice(
+      py.indexOf("def bet(\n"),
+      py.indexOf(") -> BetOutputs:", py.indexOf("def bet(\n")),
+    );
+    expect(signature).toContain("fractional_intensity");
+    expect(signature).toContain("additional_surfaces_t2");
+    expect(outputs.scopes).toHaveLength(1);
+    expect(allOutputs).toHaveLength(15);
+
     // Sanity: generated code is non-trivial and references the executable.
     expect(ts.length).toBeGreaterThan(200);
     expect(ts).toContain("bet");
