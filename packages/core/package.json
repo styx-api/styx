@@ -46,6 +46,9 @@
     "dev": "tsdown --watch",
     "prepublishOnly": "tsdown"
   },
+  "dependencies": {
+    "@argtype/core": "^0.1.0"
+  },
   "devDependencies": {
     "@types/node": "^25.0.3",
     "fast-check": "^4.9.0",

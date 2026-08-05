@@ -1,14 +1,19 @@
 /**
- * Lower an `AstDocument` to Styx IR (`Expr` + `AppMeta`).
+ * Lower a resolved argtype document to Styx IR (`Expr` + `AppMeta`).
  *
- * Mapping highlights:
+ * Parsing, alias inlining and decoration resolution all happen upstream in
+ * `@argtype/core`; what is left here is only what a *generator* decides, which
+ * is deliberately not what the language says:
  * - Combinators map 1:1 except `set` -> `sequence` (order-not-meaningful is not
  *   modeled in the IR) and `any` -> its first branch (the spec's "emit branch 0"
- *   rule; the interchangeable alternatives are dropped with a warning).
- * - Aliases are resolved by substitution with cycle detection.
+ *   rule). Both are lossless when emitting a single invocation and lossy for
+ *   anything that parses argv, which is exactly why they are not upstream.
  * - `.output(...)` declarations attach to the nearest enclosing sequence scope,
  *   so an output nested in a repeat / subcommand keeps its list / struct shape
  *   (per-output gating is recovered downstream from each ref binding's gate).
+ *
+ * Annotations the IR has no room for (`.requires()`, `strip_prefix`, output
+ * media types) are reported here rather than dropped silently.
  */
 
 import { alt, float, int, lit, opt, path as pathTerm, rep, seq, str } from "../../ir/builders.js";
@@ -16,12 +21,49 @@ import { nodeRef } from "../../ir/meta.js";
 import type { AppMeta, NodeMeta, Output, OutputToken, StreamOutput } from "../../ir/meta.js";
 import type { Documentation } from "../../ir/types.js";
 import type { Expr, Sequence } from "../../ir/node.js";
-import type { AstAlias, AstDocument, AstNode, AstOutput, SourceSpan } from "./ast.js";
+import {
+  CORE_METHODS,
+  MEDIA_TYPE_METHODS,
+  OUTPUT_METHODS,
+  PATH_METHODS,
+  visitResolved,
+} from "@argtype/core";
+import type {
+  PathContract,
+  ResolvedComb,
+  ResolvedDocument,
+  ResolvedNode,
+  ResolvedTerminal,
+  ResolvedOutput,
+  SourceSpan,
+} from "@argtype/core";
+
+/**
+ * The extension results Styx implements, keyed by the node that declared them.
+ *
+ * `@argtype/core` keeps every extension out of `ResolvedNode` - a node carries
+ * the language core and nothing else - so a consumer runs the extension modules
+ * it implements and passes their maps in here. Styx implements `outputs`,
+ * `mediatypes` and `paths`; `constraints` has no IR representation.
+ */
+export interface LoweringExtensions {
+  outputs: ReadonlyMap<ResolvedNode, ResolvedOutput[]>;
+  mediaTypes: ReadonlyMap<ResolvedNode, string[]>;
+  paths: ReadonlyMap<ResolvedNode, PathContract>;
+}
+
+/** Method names something in this pipeline gives meaning to. An annotation
+ * outside this set reached the IR with nowhere to go, and is reported. */
+const IMPLEMENTED_METHODS: ReadonlySet<string> = new Set([
+  ...CORE_METHODS,
+  ...OUTPUT_METHODS,
+  ...MEDIA_TYPE_METHODS,
+  ...PATH_METHODS,
+]);
 
 /** A lowering diagnostic, optionally located at a source position. The location
- * comes from the offending AST node's span, so an error like a misplaced
- * `.join()` points at the node it was chained onto (parser/lexer diagnostics
- * already carry positions; this extends the same to the lowering stage). */
+ * comes from the offending node's span, so an error about an IR limitation
+ * points at the construct that hit it. */
 export interface LowerDiagnostic {
   message: string;
   line?: number;
@@ -35,9 +77,9 @@ export interface LowerResult {
   warnings: LowerDiagnostic[];
 }
 
-/** Spread a node's span into a diagnostic (no-op when the node has no span). */
+/** Spread a span into a diagnostic (no-op when there is none). */
 function at(span: SourceSpan | undefined): { line?: number; column?: number } {
-  return span ? { line: span.line, column: span.column } : {};
+  return span ? { line: span.start.line, column: span.start.column } : {};
 }
 
 /** Build IR `Documentation` from an AST node's already-split title/description. */
@@ -52,33 +94,34 @@ function docFrom(node: { title?: string; description?: string }): Documentation 
 class Lowerer {
   readonly errors: LowerDiagnostic[] = [];
   readonly warnings: LowerDiagnostic[] = [];
-  private aliases = new Map<string, AstNode>();
+  /** Nodes that reached the IR. Everything else is a branch lowering dropped. */
+  private readonly visited = new Set<ResolvedNode>();
 
-  constructor(aliases: AstAlias[]) {
-    for (const a of aliases) {
-      if (this.aliases.has(a.name))
-        this.warn(`Duplicate alias '${a.name}'; last definition wins`, a.expr);
-      this.aliases.set(a.name, a.expr);
-    }
+  constructor(private readonly ext: LoweringExtensions) {}
+
+  /** Record an error, located at `node`'s head span when one is available. */
+  private err(message: string, node?: ResolvedNode): void {
+    this.errors.push({ message, ...at(node?.headSpan) });
   }
 
-  /** Record an error, located at `node`'s span when one is available. */
-  private err(message: string, node?: AstNode): void {
-    this.errors.push({ message, ...at(node?.span) });
+  /** Record a warning, located at `node`'s head span when one is available. */
+  private warn(message: string, node?: ResolvedNode): void {
+    this.warnings.push({ message, ...at(node?.headSpan) });
   }
 
-  /** Record a warning, located at `node`'s span when one is available. */
-  private warn(message: string, node?: AstNode): void {
-    this.warnings.push({ message, ...at(node?.span) });
+  /** Record a warning at an exact span - for a diagnostic about one annotation
+   * rather than about the node it sits on. */
+  private warnAt(message: string, span?: SourceSpan): void {
+    this.warnings.push({ message, ...at(span) });
   }
 
-  lower(doc: AstDocument): LowerResult {
+  lower(doc: ResolvedDocument): LowerResult {
     // Each output attaches to its nearest enclosing sequence scope (via the
     // `sink`), preserving nesting so a per-repeat / per-subcommand output keeps
     // its list/struct shape. `rootSink` catches outputs declared directly on a
     // non-sequence root (a sequence root manages its own outputs).
     const rootSink: Output[] = [];
-    const expr = this.lowerNode(doc.root, new Set(), undefined, rootSink);
+    const expr = this.lowerNode(doc.root, undefined, rootSink);
 
     const root: Sequence = expr.kind === "sequence" ? expr : seq(expr);
     if (root !== expr) {
@@ -88,147 +131,95 @@ class Lowerer {
       root.meta = { ...root.meta, outputs: [...(root.meta?.outputs ?? []), ...rootSink] };
     }
 
+    this.reportUnconsumed(doc);
     return { expr: root, errors: this.errors, warnings: this.warnings };
   }
 
   /**
-   * @param expanding - alias names currently being expanded (cycle guard).
+   * Report every annotation the generated wrapper does not carry.
+   *
+   * This walks the whole resolved document, not the subtree lowering visited.
+   * Living inside `lowerNode` meant it only ever saw nodes that reached the IR,
+   * so an annotation on an `any` branch past the first - the branches lowering
+   * discards by design - was dropped in the silence the check exists to break.
+   *
+   * Two distinct things go wrong, and they read differently to an author:
+   *
+   * - the method belongs to an extension Styx does not implement, so it would
+   *   be ignored wherever it appeared; or
+   * - Styx does implement it, but it sits on a node that is not part of the
+   *   wrapper, so it is ignored *here* and would work if moved.
+   *
+   * Iterating `node.ast.annotations` rather than the grouped `annotations` map
+   * keeps the report in source order: the map groups by method name, so its
+   * iteration order is first-occurrence-of-each-name, which reads as shuffled
+   * once a node carries more than one unimplemented method.
+   */
+  private reportUnconsumed(doc: ResolvedDocument): void {
+    visitResolved(doc, (node) => {
+      const lowered = this.visited.has(node);
+      for (const ann of node.ast.annotations) {
+        if (!IMPLEMENTED_METHODS.has(ann.name)) {
+          this.warnAt(
+            `argtype method '.${ann.name}()' has no Styx IR representation; ignored`,
+            ann.span,
+          );
+        } else if (!lowered) {
+          this.warnAt(
+            `argtype method '.${ann.name}()' is on a node the generated wrapper does not include ` +
+              `(only the first branch of an 'any' is emitted); ignored`,
+            ann.span,
+          );
+        }
+      }
+    });
+  }
+
+  /**
    * @param selfName - nearest enclosing named node, for `{}` self-references.
    * @param sink - outputs array of the nearest enclosing sequence; a `.output()`
    *   on this node attaches here (seq/set nodes instead own their outputs).
    */
-  private lowerNode(
-    node: AstNode,
-    expanding: Set<string>,
-    selfName: string | undefined,
-    sink: Output[],
-  ): Expr {
-    // Alias reference: substitute then lower.
-    if (node.kind === "ref") {
-      return this.lowerRef(node, expanding, selfName, sink);
-    }
-
+  private lowerNode(node: ResolvedNode, selfName: string | undefined, sink: Output[]): Expr {
     const name = node.name ?? selfName;
-
-    // `.join` collapses a node's subtree into one argv element. It is carried on
-    // sequence/repeat in the IR directly, and on `opt` by pushing it onto the
-    // wrapped content (`lowerComb`). On any other node it would be silently
-    // dropped, changing command-line correctness with no failure signal (a tool
-    // gets `["A","B"]` instead of `"AB"`), so a misplaced modifier is a hard
-    // error, not a warning. Refs are already resolved above, so by here the
-    // node's concrete kind is known and these checks are accurate.
-    const joinable =
-      node.kind === "comb" &&
-      (node.op === "seq" || node.op === "set" || node.op === "rep" || node.op === "opt");
-    if (node.join !== undefined && !joinable) {
-      this.err("`.join()` is only supported on seq/set/rep/opt", node);
-    }
-
-    // A type-specific modifier that lands on an incompatible node is silently
-    // dropped downstream (only the matching lower* case reads it), which quietly
-    // discards a value/arity constraint - so, like `.join()`, it is a hard error.
-    const isNumericTerminal =
-      node.kind === "terminal" && (node.terminal === "int" || node.terminal === "float");
-    const isRep = node.kind === "comb" && node.op === "rep";
-    const isPath = node.kind === "terminal" && node.terminal === "path";
-    if ((node.min !== undefined || node.max !== undefined) && !isNumericTerminal) {
-      this.err("`.min()`/`.max()` is only supported on int/float terminals", node);
-    }
-    if ((node.countMin !== undefined || node.countMax !== undefined) && !isRep) {
-      this.err("`.count()`/`.countMin()`/`.countMax()` is only supported on rep", node);
-    }
-    if ((node.mutable || node.resolveParent) && !isPath) {
-      this.err("`.mutable()`/`.resolveParent()` is only supported on path", node);
-    }
-    if (node.mediaTypes?.length && !isPath) {
-      this.err("`.mediaType()` is only supported on path", node);
-    }
-
-    // `.default()` / `= value` is meaningful on a terminal, and also on the
-    // combinators that model a defaultable value: `opt` (its default when
-    // omitted), `alt` (a union's default variant), `rep` (a default list). Only a
-    // `seq`/`set` struct has no scalar to default - a default there is nonsensical
-    // and, left in place, would flow to the node's `defaultValue` (which backends
-    // read) as a bogus value, so drop it and warn. It never changes which argv is
-    // valid, so this is a warning, not an error.
-    const isStruct = node.kind === "comb" && (node.op === "seq" || node.op === "set");
-    if (node.default !== undefined && isStruct) {
-      this.warn("`= value` / `.default()` is not supported on a seq/set struct; ignored", node);
-      node.default = undefined;
-    }
+    // Which nodes reached the IR, so `reportUnconsumed` can tell "Styx cannot
+    // represent this method" from "this node is not in the wrapper at all".
+    this.visited.add(node);
 
     // A `.output()` on a non-sequence node attaches to the enclosing sequence
     // scope (`sink`); seq/set own their outputs (handled in `lowerComb`).
     const isSeqSet = node.kind === "comb" && (node.op === "seq" || node.op === "set");
-    if (node.outputs?.length && !isSeqSet) {
-      for (const o of node.outputs) sink.push(this.toOutput(o, name));
+    const outputs = this.ext.outputs.get(node);
+    if (outputs?.length && !isSeqSet) {
+      for (const o of outputs) sink.push(this.toOutput(o, name, node));
     }
 
     switch (node.kind) {
       case "literal": {
-        const e = lit(node.value ?? "");
+        const e = lit(node.value);
         this.applyMeta(e, node);
         return e;
       }
       case "terminal":
         return this.lowerTerminal(node);
       case "comb":
-        return this.lowerComb(node, expanding, name, sink);
-      default: {
-        this.err(`Unknown AST node kind '${(node as AstNode).kind}'`, node);
+        return this.lowerComb(node, name, sink);
+      case "ref":
+        // `resolveAnnotations()` leaves a `ref` in place when aliases were not
+        // inlined. `ResolvedNode` is a discriminated union, so this is the last
+        // kind rather than a `default:` the compiler cannot prove unreachable.
+        this.err(
+          `Unresolved alias reference '${node.refName}' (inline aliases before lowering)`,
+          node,
+        );
         return seq();
-      }
     }
   }
 
-  private lowerRef(
-    node: AstNode,
-    expanding: Set<string>,
-    selfName: string | undefined,
-    sink: Output[],
-  ): Expr {
-    const target = node.refName!;
-    const aliasExpr = this.aliases.get(target);
-    if (!aliasExpr) {
-      this.err(`Unknown alias '${target}'`, node);
-      return seq();
-    }
-    if (expanding.has(target)) {
-      this.err(`Recursive alias '${target}' is not allowed`, node);
-      return seq();
-    }
-    const clone = structuredClone(aliasExpr);
-    // Overlay use-site decorations onto the inlined alias. The use site wins for
-    // each scalar decoration it specifies; outputs and media types accumulate.
-    // Without this, `size: Dimension.join(",")` would silently drop the join.
-    // Point any diagnostic about the resolved node at the use site (a misplaced
-    // modifier there, not in the alias definition, is what the author must fix).
-    clone.span = node.span ?? clone.span;
-    clone.name = node.name ?? clone.name;
-    clone.title = node.title ?? clone.title;
-    clone.description = node.description ?? clone.description;
-    if (node.default !== undefined) clone.default = node.default;
-    if (node.min !== undefined) clone.min = node.min;
-    if (node.max !== undefined) clone.max = node.max;
-    if (node.join !== undefined) clone.join = node.join;
-    if (node.countMin !== undefined) clone.countMin = node.countMin;
-    if (node.countMax !== undefined) clone.countMax = node.countMax;
-    if (node.mediaTypes?.length)
-      clone.mediaTypes = [...(clone.mediaTypes ?? []), ...node.mediaTypes];
-    if (node.mutable) clone.mutable = true;
-    if (node.resolveParent) clone.resolveParent = true;
-    if (node.outputs?.length) clone.outputs = [...(clone.outputs ?? []), ...node.outputs];
-
-    const next = new Set(expanding);
-    next.add(target);
-    return this.lowerNode(clone, next, selfName, sink);
-  }
-
-  private lowerTerminal(node: AstNode): Expr {
+  private lowerTerminal(node: ResolvedTerminal): Expr {
     switch (node.terminal) {
       case "int": {
         const e = int();
-        this.checkBounds(node.min, node.max, "value", "min", "max", node);
         if (node.min !== undefined) e.attrs.minValue = node.min;
         if (node.max !== undefined) e.attrs.maxValue = node.max;
         this.applyMeta(e, node);
@@ -236,14 +227,14 @@ class Lowerer {
       }
       case "float": {
         const e = float();
-        this.checkBounds(node.min, node.max, "value", "min", "max", node);
         if (node.min !== undefined) e.attrs.minValue = node.min;
         if (node.max !== undefined) e.attrs.maxValue = node.max;
         this.applyMeta(e, node);
         return e;
       }
       case "str": {
-        // A `str.mediaType(...)` is rejected generically in `lowerNode` (media
+        // A `str.mediaType(...)` is rejected upstream by `resolveMediaTypes()`
+        // (media
         // types are a `path`-only annotation), so nothing to do here.
         const e = str();
         this.applyMeta(e, node);
@@ -251,28 +242,20 @@ class Lowerer {
       }
       case "path": {
         const e = pathTerm();
-        if (node.mediaTypes?.length) e.attrs.mediaTypes = node.mediaTypes;
-        if (node.mutable) e.attrs.mutable = true;
-        if (node.resolveParent) e.attrs.resolveParent = true;
+        const mediaTypes = this.ext.mediaTypes.get(node);
+        const contract = this.ext.paths.get(node);
+        if (mediaTypes?.length) e.attrs.mediaTypes = mediaTypes;
+        if (contract?.mutable) e.attrs.mutable = true;
+        if (contract?.resolveParent) e.attrs.resolveParent = true;
         this.applyMeta(e, node);
         return e;
-      }
-      default: {
-        this.err(`Unknown terminal '${String(node.terminal)}'`, node);
-        return str();
       }
     }
   }
 
-  private lowerComb(
-    node: AstNode,
-    expanding: Set<string>,
-    name: string | undefined,
-    sink: Output[],
-  ): Expr {
-    const children = node.children ?? [];
-    const lowerChildren = (s: Output[]): Expr[] =>
-      children.map((c) => this.lowerNode(c, expanding, name, s));
+  private lowerComb(node: ResolvedComb, name: string | undefined, sink: Output[]): Expr {
+    const children = node.children;
+    const lowerChildren = (s: Output[]): Expr[] => children.map((c) => this.lowerNode(c, name, s));
 
     switch (node.op) {
       case "seq":
@@ -281,7 +264,9 @@ class Lowerer {
         // meaningful". A sequence is an output scope, so its own `.output()`s
         // and any outputs its children declare attach here (not the parent).
         const selfOutputs: Output[] = [];
-        for (const o of node.outputs ?? []) selfOutputs.push(this.toOutput(o, name));
+        for (const o of this.ext.outputs.get(node) ?? []) {
+          selfOutputs.push(this.toOutput(o, name, node));
+        }
         const lowered = lowerChildren(selfOutputs);
         this.dedupeSiblingNames(lowered, node);
         const e = seq(...lowered);
@@ -314,7 +299,12 @@ class Lowerer {
           this.err("`any(...)` requires at least one branch", node);
           return seq();
         }
-        const e = this.lowerNode(children[0]!, expanding, name, sink);
+        const e = this.lowerNode(children[0]!, name, sink);
+        // No check for a default on the `any` itself: `resolveAnnotations`
+        // rejects one upstream (the spec lists terminals plus `opt`/`alt`/`rep`)
+        // and clears it, so it never arrives here. The language rule belongs
+        // upstream - it holds for every consumer, not just this generator.
+        //
         // Overlay the any's own name/doc onto the emitted branch.
         if (node.name) e.meta = { ...e.meta, name: node.name };
         {
@@ -324,12 +314,28 @@ class Lowerer {
         return e;
       }
       case "opt": {
-        const inner = this.wrapChildren(children, expanding, name, sink);
+        const inner = this.wrapChildren(children, name);
         // `.join()` on the opt collapses its content into one argv element; push
         // it onto the inner sequence/repeat (a single terminal is already one
         // element, so a join there is a harmless no-op).
-        if (node.join !== undefined && (inner.kind === "sequence" || inner.kind === "repeat")) {
-          inner.attrs.join = node.join;
+        if (node.join !== undefined) {
+          if (inner.kind === "sequence" || inner.kind === "repeat") {
+            inner.attrs.join = node.join;
+          } else if (inner.kind === "alternative" || inner.kind === "optional") {
+            // Only `sequence` and `repeat` carry a join in the IR. An `alt` or a
+            // nested `opt` inner (`opt(alt(...)).join(",")`,
+            // `opt(opt(...)).join(",")`) has nowhere to hold it, so the wrapper
+            // emits separate argv elements - a real difference in the command
+            // line, and exactly the kind of drop that must not be silent. Every
+            // other inner kind is a single terminal or literal, already one argv
+            // element, where a join is a harmless no-op.
+            this.warn(
+              `\`.join()\` on an \`opt\` wrapping ${
+                inner.kind === "optional" ? "another optional" : "an alternative"
+              } is not carried into the IR; the contents emit separate argv elements`,
+              node,
+            );
+          }
         }
         const e = opt(inner);
         this.applyMeta(e, node);
@@ -339,41 +345,14 @@ class Lowerer {
         return e;
       }
       case "rep": {
-        const inner = this.wrapChildren(children, expanding, name, sink);
+        const inner = this.wrapChildren(children, name);
         const e = rep(inner);
         if (node.join !== undefined) e.attrs.join = node.join;
-        this.checkBounds(
-          node.countMin,
-          node.countMax,
-          "repetition count",
-          "countMin",
-          "countMax",
-          node,
-        );
         if (node.countMin !== undefined) e.attrs.countMin = node.countMin;
         if (node.countMax !== undefined) e.attrs.countMax = node.countMax;
         this.applyMeta(e, node);
         return e;
       }
-      default: {
-        this.err(`Unknown combinator '${String(node.op)}'`, node);
-        return seq();
-      }
-    }
-  }
-
-  /** Warn on an inverted `[min, max]` pair (a lower bound above its upper
-   * bound), which yields an unsatisfiable constraint downstream. */
-  private checkBounds(
-    min: number | undefined,
-    max: number | undefined,
-    what: string,
-    minLabel: string,
-    maxLabel: string,
-    node?: AstNode,
-  ): void {
-    if (min !== undefined && max !== undefined && min > max) {
-      this.warn(`Inverted ${what} bounds: ${minLabel} (${min}) > ${maxLabel} (${max})`, node);
     }
   }
 
@@ -389,7 +368,7 @@ class Lowerer {
    * explicit labels; it does not detect collisions between solver-derived names
    * of otherwise-unnamed children, which the solver also does not guard.)
    */
-  private dedupeSiblingNames(children: Expr[], parent?: AstNode): void {
+  private dedupeSiblingNames(children: Expr[], parent?: ResolvedNode): void {
     const used = new Set<string>();
     for (const child of children) {
       const nm = child.meta?.name;
@@ -409,23 +388,42 @@ class Lowerer {
     }
   }
 
-  /** `opt`/`rep` with multiple children implicitly wrap them in a sequence,
-   * which - like any sequence - is the output scope for those children. */
-  private wrapChildren(
-    children: AstNode[],
-    expanding: Set<string>,
-    name: string | undefined,
-    sink: Output[],
-  ): Expr {
-    if (children.length === 1) return this.lowerNode(children[0]!, expanding, name, sink);
+  /**
+   * The contents of an `opt`/`rep`, as one expression that owns their outputs.
+   *
+   * Multiple children implicitly wrap in a sequence, which - like any sequence -
+   * is the output scope for them. A lone child used to be returned as-is with
+   * the *enclosing* sink passed through, so it opened no scope at all and its
+   * outputs landed outside the wrapper that gates them: the generated wrapper
+   * promised them unconditionally and typed them non-nullable. Adding one
+   * unrelated literal to the same `opt` flipped the generated type, which is how
+   * this reads as a bug rather than a convention -
+   * `opt(m: "-m".output(mask: \`{in}_mask.nii\`))` gave `mask: OutputPathType`
+   * where `opt(m: "-m".output(...), "-x")` gave `mask: OutputPathType | null`.
+   * The gating that did survive came from templates that happened to reference a
+   * binding inside the wrapper, which is not gating.
+   *
+   * So a lone child that collected outputs gets the same sequence wrapper the
+   * multi-child path builds. It has to be a sequence and not just `meta.outputs`
+   * on the child: only a sequence is force-bound as an output scope
+   * (`solver.ts`), and `simplify` keeps a single-literal sequence alive
+   * precisely when it carries outputs - park them on a bare literal and they are
+   * dropped instead of merely misplaced.
+   */
+  private wrapChildren(children: ResolvedNode[], name: string | undefined): Expr {
     const selfOutputs: Output[] = [];
-    const e = seq(...children.map((c) => this.lowerNode(c, expanding, name, selfOutputs)));
+    const lowered = children.map((c) => this.lowerNode(c, name, selfOutputs));
+    // A lone child with nothing to scope needs no wrapper. Its own outputs, if
+    // it is a seq/set, are already its own (`lowerNode` never fills the sink for
+    // those), so this is the common path and the IR stays as flat as before.
+    if (lowered.length === 1 && selfOutputs.length === 0) return lowered[0]!;
+    const e = seq(...lowered);
     if (selfOutputs.length > 0) e.meta = { ...e.meta, outputs: selfOutputs };
     return e;
   }
 
-  /** Fold an AST node's name/doc/default decorations onto an IR node's meta. */
-  private applyMeta(e: Expr, node: AstNode): void {
+  /** Fold a resolved node's name/doc/default decorations onto an IR node's meta. */
+  private applyMeta(e: Expr, node: ResolvedNode): void {
     const meta: NodeMeta = {};
     if (node.name) meta.name = node.name;
     const doc = docFrom(node);
@@ -434,7 +432,7 @@ class Lowerer {
     if (Object.keys(meta).length > 0) e.meta = { ...e.meta, ...meta };
   }
 
-  private toOutput(o: AstOutput, selfName: string | undefined): Output {
+  private toOutput(o: ResolvedOutput, selfName: string | undefined, node?: ResolvedNode): Output {
     const tokens: OutputToken[] = [];
     for (const t of o.tokens) {
       if (t.kind === "literal") {
@@ -443,13 +441,17 @@ class Lowerer {
       }
       const targetName = t.name ?? selfName;
       if (!targetName) {
-        this.warn("Output self-reference '{}' has no named node to resolve to; emitting empty");
+        this.warn(
+          "Output self-reference '{}' has no named node to resolve to; emitting empty",
+          node,
+        );
         tokens.push({ kind: "literal", value: "" });
         continue;
       }
       if (t.stripPrefix?.length)
-        this.warn("Output ref op 'strip_prefix' is not supported by the IR; ignored");
-      if (t.basename) this.warn("Output ref op 'basename' is not supported by the IR; ignored");
+        this.warn("Output ref op 'strip_prefix' is not supported by the IR; ignored", node);
+      if (t.basename)
+        this.warn("Output ref op 'basename' is not supported by the IR; ignored", node);
       tokens.push({
         kind: "ref",
         target: nodeRef(targetName),
@@ -458,7 +460,7 @@ class Lowerer {
       });
     }
     if (o.fallback !== undefined) {
-      this.warn("Output-level '.or(...)' fallback is not supported by the IR; ignored");
+      this.warn("Output-level '.or(...)' fallback is not supported by the IR; ignored", node);
     }
     const doc = docFrom(o);
     return { ...(o.name && { name: o.name }), ...(doc && { doc }), tokens };
@@ -574,8 +576,8 @@ function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === "object" && x !== null && !Array.isArray(x);
 }
 
-export function lowerDocument(doc: AstDocument): LowerResult {
-  const lowerer = new Lowerer(doc.aliases);
+export function lowerDocument(doc: ResolvedDocument, ext: LoweringExtensions): LowerResult {
+  const lowerer = new Lowerer(ext);
   const result = lowerer.lower(doc);
 
   // argtype describes the arguments only (everything after argv[0]); the

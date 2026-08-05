@@ -104,6 +104,36 @@ Long-term, Boutiques shifts from being the primary frontend to primarily a **bac
 - **Connectome Workbench** (`workbench`) - implemented; covers NiWrap's `wb_command` suite
 - **argtype** (`argtype`) - implemented as both a frontend and a backend; the hand-authored, TypeScript-types-like DSL (see the [argtype spec](https://nx10.dev/argtype/)) intended as the primary way to define CLI specs. Covers the core grammar plus the `outputs`, `mediatypes`, and `paths` (`.mutable()` / `.resolveParent()`) extensions; `set` lowers to a sequence, `any` to its first branch, and the draft `constraints` extension is parsed-and-ignored. Frontend lives in `frontend/argtype/`, backend (IR -> argtype source, the round-trip/dogfooding path) in `backend/argtype/`. The emitter is dogfood-validated by round-tripping the whole niwrap corpus (every descriptor's emitted argtype must re-parse cleanly) plus property-based fuzzing over generated IR
 
+### argtype syntax is upstream, in both directions
+
+Styx neither parses nor prints argtype itself. Both ends go through [`@argtype/core`](https://github.com/nx10/argtype), the language's reference implementation, released independently of this compiler:
+
+- **Frontend**: `parseArgtype` -> `inlineAliases` -> `resolveAnnotations` upstream, then `frontend/argtype/lower.ts` turns the resolved document into IR.
+- **Backend**: `backend/argtype/emit.ts` builds an `AstDocument` from the IR and hands it to `printArgtype`.
+
+So this repo holds no knowledge of argtype _syntax_ - no quoting, no escaping, no template metacharacters, no layout. It holds only the IR correspondence, which is the part it is actually qualified to decide.
+
+The split follows what each side is allowed to decide. A parser must keep the document intact; a _generator_ may narrow it. Lowering is where the narrowing happens: `set` becomes a sequence and `any` becomes its first branch (lossless when emitting one invocation, lossy for anything that parses argv), and aliases are inlined by substitution. Those choices are correct here and wrong for a validator, a runner, or an editor - so they live in this repo, not upstream.
+
+Extensions are opt-in **by import**, not by a config flag. `resolveAnnotations` interprets the spec core only; each extension vocabulary is a separate upstream pass (`resolveOutputs`, `resolveMediaTypes`, `resolvePaths`) returning results keyed by node, which `parser-frontend.ts` runs and passes to `lowerDocument` as `LoweringExtensions`. Styx deliberately does not run `resolveConstraints`: the IR cannot express inter-argument rules. An annotation no imported module claims is reported by `lower.ts` (`IMPLEMENTED_METHODS`) rather than dropped - a `.requires()` must never vanish from a generated wrapper without a signal.
+
+**A diagnostic describes the document, not the subtree lowering keeps.** The two halves of that follow from one rule, and they pull in opposite directions if you take them one at a time:
+
+- Upstream **target errors fire everywhere**, including on nodes lowering discards. `any("-f", x: str.mutable())` is an error even though only branch 0 reaches the IR, because `.mutable()` on a `str` is invalid argtype wherever it is written - the document is wrong, and it was only ever accepted because the old check ran per-lowered-node and never saw the branch. Suppressing it would make the same file valid or invalid depending on the order of its `any` branches.
+- `lower.ts`'s **unclaimed-method scan walks the whole resolved document** (`reportUnconsumed`), not the nodes lowering visited, and distinguishes "Styx cannot represent this method" from "this node is not in the wrapper, so the method is ignored here". `IMPLEMENTED_METHODS` is a check on the method _name_, so it cannot see a method that is implemented but unread on this node - a `.default()` on an `any`, a `.join()` on an `opt` wrapping an alternative; those are reported at the point lowering decides not to read them.
+
+An alias nobody references is the one case this repo cannot report: `inlineAliases` deletes the definition before lowering sees the document. `@argtype/core` warns (`unused-alias`) at the only point that still knows the alias existed.
+
+**An output scope is a `sequence`, and how many children a wrapper happens to have is not part of that.** `opt`/`rep` with several children implicitly wrap them in a sequence, which owns their `.output()`s; a lone child used to be returned bare with the enclosing sink passed through, so its outputs escaped the wrapper that gates them and the generated wrapper promised them unconditionally. Adding one unrelated literal moved them back inside and flipped the generated type, which is what marked it a bug rather than a convention. `lower.ts`'s `wrapChildren` now adds the same sequence around a lone child whenever that child collected outputs. It has to be a `sequence` and not just `meta.outputs` parked on the child: only a sequence is force-bound as an output scope (`solver.ts`), and `simplify` keeps a single-literal sequence alive precisely when it carries outputs - so outputs on a bare literal are dropped rather than merely misplaced. Per-output gating is still recovered downstream from each ref binding's gate; that recovers gating only for templates that reference a binding inside the wrapper, which is why the scope has to be right too.
+
+There is no typo detection upstream. After the extension split no layer knows the whole universe of method names, so a misspelled `.min()` and a method from an extension Styx does not implement are the same thing, and both surface as the same lowering warning. `CORE_METHODS` / `OUTPUT_METHODS` / … are exported if that ever needs reviving here.
+
+One asymmetry worth knowing: `printArgtype` emits a `///` block line for line, because a printer has to reproduce the source it was given. `emit.ts` therefore word-wraps a description itself before handing it over - when generating from IR there is no original layout to preserve, so choosing one is the emitter's job.
+
+Practical consequence: publish `@argtype/core` before merging a PR that raises the pin in `packages/core/package.json`, or `npm ci` fails on an unpublished version. The `corpus-roundtrip` job doubles as the cross-repo canary - a regression on either side surfaces as descriptors that stop round-tripping.
+
+Running that canary locally has a trap: `scripts/corpus-roundtrip.mjs` imports `packages/core/dist`, not `src`, so a stale `dist` tests the previous _styx_ code and passes while the working tree is broken. Always `npm run build -w @styx-api/core -w @styx-api/cli` first. (`@argtype/core` itself is a declared dependency and stays external in the bundle, so a copy staged into `node_modules/@argtype/core` does take effect without a rebuild - it is styx's own `lower.ts`/`emit.ts` that go stale.)
+
 ## Ecosystem Context
 
 This compiler is part of the **Styx/NiWrap ecosystem** ([niwrap.dev](https://niwrap.dev/)):

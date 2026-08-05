@@ -146,6 +146,13 @@ function genExpr(depth: number): fc.Arbitrary<Expr> {
       join: fc.option(fc.constantFrom("", ",", ":"), { nil: undefined }),
     })
     .map(({ named, nodes, join }) => {
+      // A single-child `seq` with nothing of its own on it is not a fixed point
+      // of the IR pipeline: `simplify`'s documented `seq(T) -> T` unwrapping
+      // collapses it, so `rep(seq(path))` re-emits as `rep(path)` and
+      // idempotence fails on a shape the *generator* produced, not on anything
+      // the emitter got wrong. Rare enough (~1 sample in 10,000) that it read as
+      // an intermittent CI failure rather than an under-constrained generator.
+      if (nodes.length === 1 && !named && join === undefined) return nodes[0]!;
       const node = seq(...nodes);
       if (join !== undefined) node.attrs.join = join;
       return maybeName<Expr>(named)(node);

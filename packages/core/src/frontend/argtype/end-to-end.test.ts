@@ -93,3 +93,73 @@ describe("argtype end-to-end: bet", () => {
     expect(ts).toContain("center");
   });
 });
+
+/**
+ * An `opt`/`rep` is an output scope for whatever it wraps, and how many children
+ * it happens to wrap is not part of that.
+ *
+ * `wrapChildren` used to hand a lone child the *enclosing* sink, so an output
+ * declared inside a single-child wrapper escaped the wrapper that gates it: the
+ * generated `tool_outputs` assigned it unconditionally and the interface typed
+ * it non-nullable. Adding one unrelated literal to the same `opt` moved it into
+ * the implicit sequence and flipped the type back - which is what makes this a
+ * bug and not a convention.
+ *
+ * The gating that did survive came from output templates that happened to
+ * reference a binding inside the wrapper (the ref's own gate carries `present`),
+ * so the shape that exposes it is a template referencing an *outer* binding.
+ * Each case is asserted against its two-child twin rather than against a literal
+ * expectation, because agreeing is the property.
+ */
+describe("argtype: a single-child opt/rep still opens an output scope", () => {
+  /** The `ToolOutputs` field declaration plus the `tool_outputs` body. */
+  function outputSurface(source: string): { iface: string; body: string } {
+    const { ctx } = run(source);
+    const ts = generateTypeScript(ctx);
+    const ifaceStart = ts.indexOf("export interface ToolOutputs");
+    const bodyStart = ts.indexOf("export function tool_outputs");
+    return {
+      iface: ts.slice(ifaceStart, ts.indexOf("}", ifaceStart) + 1),
+      body: ts.slice(bodyStart, ts.indexOf("\n}", bodyStart)),
+    };
+  }
+
+  it("gates an output declared on the lone child of an opt", () => {
+    const one = outputSurface(
+      'tool: seq("mytool", in: path, opt(m: "-m".output(mask: `{in}_mask.nii`)))',
+    );
+    const two = outputSurface(
+      'tool: seq("mytool", in: path, opt(m: "-m".output(mask: `{in}_mask.nii`), "-x"))',
+    );
+
+    // Present in both - the naive fix (hanging the outputs on the lone child's
+    // own meta rather than on a sequence) dropped the output entirely, because
+    // only a sequence is force-bound as an output scope.
+    expect(one.iface).toContain("mask");
+    expect(two.iface).toContain("mask");
+
+    // Nullable in both, and assigned under a guard in both.
+    expect(one.iface).toContain("mask: OutputPathType | null");
+    expect(one.iface).toBe(two.iface);
+    expect(one.body).toContain("if (");
+    expect(one.body).toBe(two.body);
+  });
+
+  it("keeps an output declared on the lone child of a rep per-iteration", () => {
+    const one = outputSurface('tool: seq("mytool", in: path, rep(f: path.output(o: `{in}.txt`)))');
+    const two = outputSurface(
+      'tool: seq("mytool", in: path, rep("-f", f: path.output(o: `{in}.txt`)))',
+    );
+    expect(one.iface).toContain("o: OutputPathType[]");
+    expect(one.iface).toBe(two.iface);
+  });
+
+  it("leaves a lone child that declares no output unwrapped", () => {
+    // The wrapper is only added when there is a scope to open, so the common
+    // case keeps the flat IR it had before.
+    const { ctx } = run('tool: seq("mytool", opt(v: path))');
+    const opt = ctx.expr.kind === "sequence" ? ctx.expr.attrs.nodes[1] : undefined;
+    expect(opt?.kind).toBe("optional");
+    expect(opt?.kind === "optional" && opt.attrs.node.kind).toBe("path");
+  });
+});
