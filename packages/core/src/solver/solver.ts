@@ -147,7 +147,19 @@ export function solve(expr: Expr, options?: SolveOptions): SolveResult {
         const id = preallocate();
         const childGate = [...gate, { kind: "present" as const, binding: id }];
         const inner = solveNode(node.attrs.node, [...path, name], childGate);
-        const type: BoundType = inner === null ? { kind: "bool" } : { kind: "optional", inner };
+        // An empty struct carries no information beyond its own presence, so an
+        // optional wrapping one is a bool - the inner binding still exists and
+        // still scopes any outputs declared there. This is the `opt` flag that
+        // declares an output: its contents are force-bound as an output scope
+        // (see the sequence case), and reporting that scope as a parameter
+        // surfaced the flag as an empty `ToolParam2` rather than `m?: boolean`.
+        // A union *arm* that solves to an empty struct is a different matter -
+        // there the `@type` discriminant is the information - so this narrows to
+        // `optional`.
+        const vacuous =
+          inner !== null && inner.kind === "struct" && !Object.keys(inner.fields).length;
+        const type: BoundType =
+          inner === null || vacuous ? { kind: "bool" } : { kind: "optional", inner };
         registerBinding(id, node, name, type, gate);
         return type;
       }

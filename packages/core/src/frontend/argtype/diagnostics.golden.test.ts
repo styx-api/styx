@@ -95,24 +95,30 @@ describe("argtype golden diagnostics: misapplied modifiers", () => {
   });
 });
 
-describe("argtype golden diagnostics: method suggestions", () => {
-  it("near-miss method name suggests the intended one", () => {
+describe("argtype golden diagnostics: unclaimed methods", () => {
+  it("a misspelled method reads exactly like an unimplemented extension one", () => {
+    // No typo detection: after the extension split, no layer knows the whole
+    // universe of method names, so "did you mean" would have to guess against a
+    // list that is deliberately open. Both cases get the same honest report.
     expect(snap(`tool: seq(x: int.mim(1))`)).toMatchInlineSnapshot(`
       [
-        "[warning] 1:18 Ignoring unsupported method '.mim()' (did you mean '.min()'?)",
+        "[warning] 1:17 argtype method '.mim()' has no Styx IR representation; ignored",
       ]
     `);
   });
 
-  it("genuine unknown method gets no misleading hint", () => {
+  it("a draft-extension method is preserved and reported once", () => {
+    // `.conflicts()` is a draft `constraints` method. Styx does not implement
+    // that extension, so the parser preserves it and only `lower.ts` reports
+    // that the IR cannot carry it.
     expect(snap(`tool: seq(a: opt("-a"), b: opt("-b").conflicts("a"))`)).toMatchInlineSnapshot(`
       [
-        "[warning] 1:38 Ignoring unsupported method '.conflicts()'",
+        "[warning] 1:37 argtype method '.conflicts()' has no Styx IR representation; ignored",
       ]
     `);
   });
 
-  it("near-miss output-template method suggests the intended one", () => {
+  it("an unknown output-template method warns, because it is genuinely dropped", () => {
     expect(
       snap(`---
 extensions:
@@ -121,7 +127,7 @@ extensions:
 tool: seq(x: path).output(o: \`{x}.nii\`.tilte("T"))`),
     ).toMatchInlineSnapshot(`
       [
-        "[warning] 5:40 Ignoring unsupported output-template method '.tilte()' (did you mean '.title()'?)",
+        "[warning] 5:39 Ignoring unknown output-template method '.tilte()'",
       ]
     `);
   });

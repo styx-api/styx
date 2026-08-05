@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { format } from "../../ir/format.js";
 import { ArgtypeParser } from "./parser-frontend.js";
-import { parseArgtype } from "./parser.js";
+import { parseArgtype } from "@argtype/core";
 
 const parser = new ArgtypeParser();
 
@@ -82,7 +82,11 @@ tool: seq(A)`);
       /// The input image.
       input: path,
     )`);
-    expect(ast.doc?.root.children?.[0]?.description).toBe("The input image.");
+    // The raw AST keeps the block verbatim; splitting it into a title and a
+    // description is `resolveAnnotations()`'s job, which the lowered IR below
+    // exercises.
+    const root = ast.doc?.root;
+    expect(root?.kind === "comb" && root.children[0]?.docComment).toBe("The input image.");
   });
 
   it("supports .title() and .description() methods (set title/description directly)", () => {
@@ -207,7 +211,7 @@ tool: seq(
     expect(dump).toContain("path [output_2]");
   });
 
-  it("parses-and-ignores unsupported extension methods (constraints)", () => {
+  it("preserves an unimplemented extension method, reporting it at lowering", () => {
     const r = parse(`tool: seq(
       a: opt("-a"),
       b: opt("-b").requires("a"),
@@ -215,13 +219,86 @@ tool: seq(
     // No hard error: an unimplemented extension must be ignorable.
     expect(r.errors).toEqual([]);
     expect(
-      r.warnings.some((w) => /Ignoring unsupported method '\.requires\(\)'/.test(w.message)),
+      r.warnings.some((w) => /'\.requires\(\)' has no Styx IR representation/.test(w.message)),
     ).toBe(true);
   });
 
   it("accepts `= default` after a method chain (sugar for `.default()`)", () => {
     const r = parse(`tool: seq(x: int.min(1) = 80)`);
     expect(r.errors).toEqual([]);
+  });
+
+  describe("nothing is dropped without a signal, including where lowering does not look", () => {
+    // Lowering emits only branch 0 of an `any`. The unclaimed-method scan used
+    // to live inside `lowerNode`, so it never saw the other branches - the one
+    // place a method is guaranteed to be dropped was the one place it was not
+    // reported.
+    const anyMessage = /the generated wrapper does not include/;
+
+    it("reports an unimplemented method in a discarded `any` branch", () => {
+      const r = parse(`tool: seq(f: any("-f", opt("-b").requires("a")))`);
+      expect(
+        r.warnings.some((w) => /'\.requires\(\)' has no Styx IR representation/.test(w.message)),
+      ).toBe(true);
+    });
+
+    it("reports an implemented method that lands on a discarded branch", () => {
+      const r = parse('tool: seq(f: any("-a", x: path.output(`{x}.log`)))');
+      expect(r.warnings.some((w) => anyMessage.test(w.message))).toBe(true);
+    });
+
+    it("says nothing about a method on the branch that is emitted", () => {
+      const r = parse('tool: seq(f: any(x: path.output(`{x}.log`), "-a"))');
+      expect(r.warnings.filter((w) => anyMessage.test(w.message))).toEqual([]);
+    });
+
+    it("reports a default on an `any`, which the emitted branch overrides", () => {
+      // Reported upstream: the spec lists terminals plus `opt`/`alt`/`rep`, so
+      // this is a language rule that holds for every consumer rather than a
+      // limitation of this generator.
+      const r = parse(`tool: seq(f: any("-a", "-b") = "-a")`);
+      expect(r.warnings.some((w) => /is not supported on an `any`/.test(w.message))).toBe(true);
+    });
+
+    it("reports a `.join()` an `opt` cannot carry", () => {
+      // Only `sequence` and `repeat` hold a join in the IR. Both an `alt` and a
+      // nested `opt` inner drop it, changing the emitted command line.
+      for (const src of [
+        `tool: seq(f: opt(alt(seq("-a", int), seq("-b", int))).join(","))`,
+        `tool: seq(f: opt(opt("-a", "-b")).join(","))`,
+      ]) {
+        const r = parse(src);
+        expect(
+          r.warnings.some((w) => /`\.join\(\)` on an `opt`/.test(w.message)),
+          src,
+        ).toBe(true);
+        expect(JSON.stringify(r.expr).includes('"join"'), src).toBe(false);
+      }
+    });
+
+    it("still carries a `.join()` an `opt` can hold", () => {
+      const r = parse(`tool: seq(f: opt(seq("-a", "-b")).join(","))`);
+      expect(r.warnings).toEqual([]);
+      expect(JSON.stringify(r.expr)).toContain('"join"');
+    });
+
+    it("reports an alias nobody references, whose annotations leave upstream", () => {
+      // `inlineAliases` deletes the definition, so this cannot be reported here
+      // - `@argtype/core` warns at the only point that still knows it existed.
+      const r = parse(`Unused = path.requires("a")\ntool: seq(x: path)`);
+      expect(r.warnings.some((w) => /'Unused' is never referenced/.test(w.message))).toBe(true);
+    });
+
+    it("keeps the report in source order", () => {
+      // The grouped `annotations` map iterates by first-occurrence-of-each-name,
+      // which shuffles the report once a node carries several of them.
+      const r = parse(`tool: seq(x: path.zebra("z").alpha("a").zebra("z2"))`);
+      const columns = r.warnings
+        .filter((w) => /has no Styx IR representation/.test(w.message))
+        .map((w) => w.location?.column);
+      expect(columns).toEqual([...columns].sort((a, b) => (a ?? 0) - (b ?? 0)));
+      expect(columns).toHaveLength(3);
+    });
   });
 
   it("errors when `.join()` is used on an unsupported node", () => {
