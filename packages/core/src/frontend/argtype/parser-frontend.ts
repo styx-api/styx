@@ -55,10 +55,25 @@ export class ArgtypeParser implements Frontend {
     // with a severity, so this no longer has to be decided per call site.
     const collect = (from: Diagnostic[]): void => {
       for (const d of from) {
-        (d.severity === "warning" ? warnings : errors).push({
-          message: d.message,
-          ...toLocation(d),
-        });
+        const entry = { message: d.message, ...toLocation(d) };
+        switch (d.severity) {
+          case "error":
+            errors.push(entry);
+            break;
+          case "warning":
+            warnings.push(entry);
+            break;
+          default:
+            // A severity this version of Styx does not know about. `severity` is
+            // a closed union today, so this is unreachable - but treating the
+            // fallback as "error" would turn a purely additive upstream level
+            // (an advisory `info`/`hint`) into a hard compile failure, and
+            // errors fail the whole build downstream. Degrade to a warning: an
+            // unrecognized diagnostic is still worth surfacing, and surfacing it
+            // must not be more severe than what it actually reports.
+            warnings.push(entry);
+            break;
+        }
       }
     };
 

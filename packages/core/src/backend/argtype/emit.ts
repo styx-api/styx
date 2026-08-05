@@ -38,7 +38,7 @@ import {
 } from "@argtype/core";
 import type { AppMeta, Output, StreamOutput } from "../../ir/meta.js";
 import type { Documentation } from "../../ir/types.js";
-import type { Expr, Optional, Repeat } from "../../ir/node.js";
+import type { Expr, Optional, Repeat, Sequence } from "../../ir/node.js";
 import type { EmitWarning } from "../backend.js";
 
 // Node and annotation construction comes from `@argtype/core`'s `build`
@@ -442,21 +442,30 @@ class ArgtypeEmitter {
     return out;
   }
 
+  /**
+   * Whether an `opt`/`rep`'s inner sequence should spread into the wrapper's
+   * argument list rather than be emitted as a nested `seq(...)`.
+   *
+   * The frontend's `wrapChildren` returns a lone child unwrapped, so emitting
+   * `opt(seq("-a"))` for a sequence carrying nothing re-parses as `opt("-a")`
+   * and the next emit disagrees with this one. The condition is whether the
+   * sequence carries anything that spreading would lose - and an empty `meta`
+   * object carries nothing, so testing for the object's *presence* got this
+   * wrong (a `{}` blocked the spread and broke idempotence).
+   */
   private buildOptional(expr: Optional): AstNode {
     const inner = expr.attrs.node;
-    const children =
-      inner.kind === "sequence" && !inner.meta && inner.attrs.join === undefined
-        ? inner.attrs.nodes.map((c) => this.buildChild(c))
-        : [this.buildChild(inner)];
+    const children = spreadsIntoWrapper(inner)
+      ? (inner as Sequence).attrs.nodes.map((c) => this.buildChild(c))
+      : [this.buildChild(inner)];
     return build.opt(...children);
   }
 
   private buildRepeat(expr: Repeat): AstNode {
     const inner = expr.attrs.node;
-    const children =
-      inner.kind === "sequence" && !inner.meta && inner.attrs.join === undefined
-        ? inner.attrs.nodes.map((c) => this.buildChild(c))
-        : [this.buildChild(inner)];
+    const children = spreadsIntoWrapper(inner)
+      ? (inner as Sequence).attrs.nodes.map((c) => this.buildChild(c))
+      : [this.buildChild(inner)];
     const out = build.rep(...children);
     if (expr.attrs.join !== undefined) out.annotations.push(joinAnn(expr.attrs.join));
     // `.count(n)` for an exact count; otherwise the composable `.countMin()` /
@@ -633,6 +642,13 @@ class ArgtypeEmitter {
 }
 
 /** `.join()` with an empty separator takes no argument. */
+/** A sequence that carries nothing of its own spreads into its `opt`/`rep`. */
+function spreadsIntoWrapper(inner: Expr): inner is Sequence {
+  if (inner.kind !== "sequence" || inner.attrs.join !== undefined) return false;
+  const meta = inner.meta;
+  return meta === undefined || Object.values(meta).every((v) => v === undefined);
+}
+
 function joinAnn(separator: string): Annotation {
   return separator === "" ? ann("join") : ann("join", str(separator));
 }

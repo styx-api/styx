@@ -146,13 +146,6 @@ function genExpr(depth: number): fc.Arbitrary<Expr> {
       join: fc.option(fc.constantFrom("", ",", ":"), { nil: undefined }),
     })
     .map(({ named, nodes, join }) => {
-      // A single-child `seq` with nothing of its own on it is not a fixed point
-      // of the IR pipeline: `simplify`'s documented `seq(T) -> T` unwrapping
-      // collapses it, so `rep(seq(path))` re-emits as `rep(path)` and
-      // idempotence fails on a shape the *generator* produced, not on anything
-      // the emitter got wrong. Rare enough (~1 sample in 10,000) that it read as
-      // an intermittent CI failure rather than an under-constrained generator.
-      if (nodes.length === 1 && !named && join === undefined) return nodes[0]!;
       const node = seq(...nodes);
       if (join !== undefined) node.attrs.join = join;
       return maybeName<Expr>(named)(node);
@@ -324,5 +317,48 @@ describe("argtype frontend property: parser robustness", () => {
       ),
       { numRuns: 1000 },
     );
+  });
+});
+
+/**
+ * The shape the generator above used to be forbidden from producing.
+ *
+ * A single-child `seq` with an empty (but present) `meta` was emitted as a
+ * nested `opt(seq("-a"))`, which the frontend re-parses as `opt("-a")` because
+ * `wrapChildren` returns a lone child unwrapped - so the second emit disagreed
+ * with the first. It was excluded from the generator as an artifact of
+ * `simplify`, which this file never runs; the real cause was `buildOptional` /
+ * `buildRepeat` testing for the presence of the `meta` object rather than for
+ * any content in it. Pinned deterministically here because the generator only
+ * reached it in roughly one sample in ten thousand.
+ */
+describe("argtype backend: a content-free seq wrapper does not survive a round-trip", () => {
+  for (const [label, wrap] of Object.entries({
+    opt: (inner: Expr) => opt(inner),
+    rep: (inner: Expr) => rep(inner),
+  })) {
+    it(`${label}(seq(lit)) with an empty meta emits flat and stays flat`, () => {
+      const inner = seq(lit("-a"));
+      inner.meta = {};
+      const root = seq(wrap(inner));
+      root.meta = { name: "tool" };
+
+      const first = generateArgtype(root);
+      const parsed = parser.parse(first.source);
+      expect(parsed.errors).toEqual([]);
+      expect(generateArgtype(parsed.expr, parsed.meta).source).toBe(first.source);
+    });
+  }
+
+  it("keeps the wrapper when the seq carries a name", () => {
+    const inner = seq(lit("-a"));
+    inner.meta = { name: "n" };
+    const root = seq(opt(inner));
+    root.meta = { name: "tool" };
+
+    const first = generateArgtype(root);
+    expect(first.source).toContain("n: seq(");
+    const parsed = parser.parse(first.source);
+    expect(generateArgtype(parsed.expr, parsed.meta).source).toBe(first.source);
   });
 });

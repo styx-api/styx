@@ -21,13 +21,7 @@ import { nodeRef } from "../../ir/meta.js";
 import type { AppMeta, NodeMeta, Output, OutputToken, StreamOutput } from "../../ir/meta.js";
 import type { Documentation } from "../../ir/types.js";
 import type { Expr, Sequence } from "../../ir/node.js";
-import {
-  CORE_METHODS,
-  MEDIA_TYPE_METHODS,
-  OUTPUT_METHODS,
-  PATH_METHODS,
-  visitResolved,
-} from "@argtype/core";
+import { visitResolved } from "@argtype/core";
 import type {
   PathContract,
   ResolvedComb,
@@ -52,13 +46,39 @@ export interface LoweringExtensions {
   paths: ReadonlyMap<ResolvedNode, PathContract>;
 }
 
-/** Method names something in this pipeline gives meaning to. An annotation
- * outside this set reached the IR with nowhere to go, and is reported. */
-const IMPLEMENTED_METHODS: ReadonlySet<string> = new Set([
-  ...CORE_METHODS,
-  ...OUTPUT_METHODS,
-  ...MEDIA_TYPE_METHODS,
-  ...PATH_METHODS,
+/**
+ * Method names something in *this* pipeline gives meaning to. An annotation
+ * outside this set reached the IR with nowhere to go, and is reported.
+ *
+ * Spelled out here rather than spread from the upstream vocabularies, even
+ * though it currently matches their union. The question this set answers is
+ * "does Styx read this?", and deriving it from "does some upstream module
+ * declare this?" answers a different one: a method added to `CORE_METHODS` in
+ * any in-range `@argtype/core` release would join the set with no reader behind
+ * it, and silently stop being reported. `implemented-methods.test.ts` fails when
+ * upstream grows a name this list has not accounted for.
+ */
+export const IMPLEMENTED_METHODS: ReadonlySet<string> = new Set([
+  // CORE_METHODS
+  "name",
+  "title",
+  "description",
+  "default",
+  "min",
+  "max",
+  "join",
+  "count",
+  "countMin",
+  "countMax",
+  // OUTPUT_METHODS
+  "output",
+  // MEDIA_TYPE_METHODS
+  "mediaType",
+  // PATH_METHODS
+  "mutable",
+  "resolveParent",
+  // CONSTRAINT_METHODS is deliberately absent: the IR cannot express
+  // inter-argument rules, so a `.requires()` must be reported, not absorbed.
 ]);
 
 /** A lowering diagnostic, optionally located at a source position. The location
@@ -80,6 +100,25 @@ export interface LowerResult {
 /** Spread a span into a diagnostic (no-op when there is none). */
 function at(span: SourceSpan | undefined): { line?: number; column?: number } {
   return span ? { line: span.start.line, column: span.start.column } : {};
+}
+
+/**
+ * Whether an `opt`'s contents are a flag - something that contributes no value,
+ * so the wrapper itself is the boolean the caller toggles.
+ *
+ * A bare literal is the obvious case. A sequence of nothing but literals is the
+ * same thing structurally: `wrapChildren` builds one around a lone child that
+ * carries outputs, and that wrapper must not change what the caller passes.
+ * Testing `kind === "literal"` alone made `.output()` on a flag silently turn a
+ * `boolean` parameter into an empty struct.
+ */
+function isFlagContent(e: Expr): boolean {
+  if (e.kind === "literal") return true;
+  return (
+    e.kind === "sequence" &&
+    e.attrs.nodes.length > 0 &&
+    e.attrs.nodes.every((n) => n.kind === "literal")
+  );
 }
 
 /** Build IR `Documentation` from an AST node's already-split title/description. */
@@ -339,9 +378,11 @@ class Lowerer {
         }
         const e = opt(inner);
         this.applyMeta(e, node);
-        // A bare-literal flag resolves to a bool; give it a false default to
-        // match the other frontends' flag convention.
-        if (inner.kind === "literal") e.meta = { ...e.meta, defaultValue: false };
+        // A flag resolves to a bool; give it a false default to match the other
+        // frontends' flag convention. This has to accept the output-scoping
+        // sequence `wrapChildren` builds around a lone child, not just a bare
+        // literal - see `isFlagContent`.
+        if (isFlagContent(inner)) e.meta = { ...e.meta, defaultValue: false };
         return e;
       }
       case "rep": {
@@ -419,6 +460,18 @@ class Lowerer {
     if (lowered.length === 1 && selfOutputs.length === 0) return lowered[0]!;
     const e = seq(...lowered);
     if (selfOutputs.length > 0) e.meta = { ...e.meta, outputs: selfOutputs };
+    // A wrapper built around a lone child stands in for that child, so it has to
+    // answer to the child's name and docs: those decorations are what the
+    // enclosing `opt`/`rep` is named after, and burying them one level down
+    // renamed an author's `m` to a synthetic `param_2`. The child keeps its own
+    // copy - output templates reference it by name.
+    const only = lowered.length === 1 ? lowered[0]! : undefined;
+    if (only?.meta?.name !== undefined && e.meta?.name === undefined) {
+      e.meta = { ...e.meta, name: only.meta.name };
+    }
+    if (only?.meta?.doc !== undefined && e.meta?.doc === undefined) {
+      e.meta = { ...e.meta, doc: only.meta.doc };
+    }
     return e;
   }
 

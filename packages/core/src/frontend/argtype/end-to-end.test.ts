@@ -108,8 +108,14 @@ describe("argtype end-to-end: bet", () => {
  * The gating that did survive came from output templates that happened to
  * reference a binding inside the wrapper (the ref's own gate carries `present`),
  * so the shape that exposes it is a template referencing an *outer* binding.
- * Each case is asserted against its two-child twin rather than against a literal
- * expectation, because agreeing is the property.
+ *
+ * The wrapper must stay invisible to the *input* surface, which is the property
+ * asserted here: each spelling is compared against the same spelling with the
+ * `.output()` removed. (Its two-child twin is the wrong baseline - a multi-child
+ * flag is synthetically named whether or not outputs are involved, so the two
+ * spellings legitimately disagree.) Scoping the outputs on a sequence originally
+ * cost the flag its `boolean` type, its `false` default and its author-given
+ * name, turning `m?: boolean` into an empty `param_2?: ToolParam2`.
  */
 describe("argtype: a single-child opt/rep still opens an output scope", () => {
   /** The `ToolOutputs` field declaration plus the `tool_outputs` body. */
@@ -122,6 +128,14 @@ describe("argtype: a single-child opt/rep still opens an output scope", () => {
       iface: ts.slice(ifaceStart, ts.indexOf("}", ifaceStart) + 1),
       body: ts.slice(bodyStart, ts.indexOf("\n}", bodyStart)),
     };
+  }
+
+  /** The `Tool` params interface - what the caller actually passes. */
+  function inputSurface(source: string): string {
+    const { ctx } = run(source);
+    const ts = generateTypeScript(ctx);
+    const start = ts.indexOf("export interface Tool ");
+    return ts.slice(start, ts.indexOf("}", start) + 1);
   }
 
   it("gates an output declared on the lone child of an opt", () => {
@@ -140,9 +154,23 @@ describe("argtype: a single-child opt/rep still opens an output scope", () => {
 
     // Nullable in both, and assigned under a guard in both.
     expect(one.iface).toContain("mask: OutputPathType | null");
-    expect(one.iface).toBe(two.iface);
+    expect(two.iface).toContain("mask: OutputPathType | null");
     expect(one.body).toContain("if (");
-    expect(one.body).toBe(two.body);
+    expect(two.body).toContain("if (");
+  });
+
+  it("declaring an output does not disturb the flag it is declared on", () => {
+    // The scoping sequence is an implementation detail of the output plumbing;
+    // it must not reach the caller. Baseline is the same source without the
+    // `.output()`, not the two-child spelling.
+    expect(
+      inputSurface('tool: seq("mytool", in: path, opt(m: "-m".output(mask: `{in}_mask.nii`)))'),
+    ).toBe(inputSurface('tool: seq("mytool", in: path, opt(m: "-m"))'));
+
+    // Spelled out, so a regression names what it broke: a bool, not a struct.
+    expect(
+      inputSurface('tool: seq("mytool", in: path, opt(m: "-m".output(mask: `{in}_mask.nii`)))'),
+    ).toContain("m?: boolean");
   });
 
   it("keeps an output declared on the lone child of a rep per-iteration", () => {
