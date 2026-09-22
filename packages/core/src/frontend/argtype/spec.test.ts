@@ -16,7 +16,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { Expr } from "../../ir/node.js";
-import { parseArgtype } from "./parser.js";
+import { parseArgtype } from "@argtype/core";
 import { ArgtypeParser } from "./parser-frontend.js";
 
 const frontend = new ArgtypeParser();
@@ -924,31 +924,38 @@ tool: seq(x: Word.min(1))`);
     expect(e?.location?.line).toBe(2);
   });
 
-  it("suggests a near-miss method name (did you mean?)", () => {
+  it("reports a misspelled method as an annotation nothing claimed", () => {
+    // `@argtype/core` has no typo detection: after the extension split no layer
+    // knows the full universe of method names, so a misspelled `.min()` is
+    // indistinguishable from a method belonging to an extension Styx does not
+    // implement. Both are preserved and both are reported here.
     const r = parse(`tool: seq(x: int.mim(1))`);
+    expect(r.errors).toEqual([]);
     expect(
-      r.warnings.some((w) =>
-        /Ignoring unsupported method '\.mim\(\)'.*did you mean '\.min\(\)'/.test(w.message),
-      ),
+      r.warnings.some((w) => /'\.mim\(\)' has no Styx IR representation/.test(w.message)),
     ).toBe(true);
   });
 
   it("does not suggest anything for a genuine unknown-extension method", () => {
     // `.conflicts()` (a draft `constraints` method) is not a typo of any known
-    // method, so it stays a plain ignorable warning with no misleading hint.
+    // method, so the parser preserves it silently; the only warning comes from
+    // lowering, where the IR turns out to have nowhere to put it.
     const r = parse(`tool: seq(a: opt("-a"), b: opt("-b").conflicts("a"))`);
     expect(r.errors).toEqual([]);
     const w = r.warnings.find((x) => /\.conflicts\(\)/.test(x.message));
     expect(w).toBeDefined();
-    expect(/did you mean/.test(w!.message)).toBe(false);
+    // The parser preserved it; the only warning comes from lowering, where the
+    // IR turns out to have nowhere to put it.
+    expect(/has no Styx IR representation/.test(w!.message)).toBe(true);
   });
 
-  it("suggests a near-miss output-template method name", () => {
+  it("warns about an unknown output-template method, which is genuinely dropped", () => {
+    // A template chain has no annotation map to park an unclaimed method on, so
+    // unlike a node annotation this one really is discarded - which is why the
+    // `outputs` extension always warns about it.
     const r = parse(`tool: seq(x: path).output(o: \`{x}.nii\`.tilte("T"))`);
     expect(
-      r.warnings.some((w) =>
-        /output-template method '\.tilte\(\)'.*did you mean '\.title\(\)'/.test(w.message),
-      ),
+      r.warnings.some((w) => /unknown output-template method '\.tilte\(\)'/.test(w.message)),
     ).toBe(true);
   });
 
@@ -1106,14 +1113,14 @@ tool: seq(img: path.mediaType("image/png").mutable(), img2: path.mutable()).outp
 // ===========================================================================
 
 describe("argtype spec: constraints extension (ignorable)", () => {
-  it("parses-and-ignores an unimplemented `.requires()` with a warning, not an error", () => {
+  it("preserves an unimplemented `.requires()`, warning at lowering, not erroring", () => {
     const r = parse(`tool: seq(
       a: opt("-a"),
       b: opt("-b").requires("a"),
     )`);
     expect(r.errors).toEqual([]);
     expect(
-      r.warnings.some((w) => /Ignoring unsupported method '\.requires\(\)'/.test(w.message)),
+      r.warnings.some((w) => /'\.requires\(\)' has no Styx IR representation/.test(w.message)),
     ).toBe(true);
   });
 
@@ -1249,9 +1256,9 @@ b: str`);
 
   it("leaves the AST root name undefined for an anonymous root", () => {
     const a = ast(`seq("x")`);
-    expect(a.errors).toEqual([]);
+    expect(a.diagnostics).toEqual([]);
     expect(a.doc?.rootName).toBeUndefined();
-    expect(a.doc?.root.name).toBeUndefined();
+    expect(a.doc?.root.label).toBeUndefined();
   });
 });
 
